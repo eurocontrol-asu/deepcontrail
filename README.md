@@ -1,56 +1,64 @@
 # DeepContrail
 
-Open-source library for the **semantic segmentation of contrails** (vapor trails left by
-aircraft) from satellite imagery.
+Open-source library for **contrail detection, segmentation, tracking, and flight attribution** in satellite imagery.
 
-> **Status:** early development. The package skeleton, tooling, and testing setup are in
-> place; the implementation is being built out incrementally. See the working rules in
-> [`CLAUDE.md`](CLAUDE.md) and the roadmap in the project plan.
+> **Status:** early development — package skeleton, tooling, and test suite are in place; implementation is being built out incrementally.
 
 ## Goal
 
-Provide a clean, well-typed, and reusable library for detecting contrails in satellite
-imagery. The first milestone is a semantic-segmentation model on the GOES-16 dataset,
-measured with the Dice coefficient.
+Provide a clean, well-typed, and reusable library for detecting contrails in satellite imagery. Development follows a phased roadmap:
+
+1. **Semantic segmentation** — detect contrail pixels in GOES-16 imagery (active)
+2. **Instance segmentation** — separate individual contrails (MTG)
+3. **Tracking** — follow contrails across time steps
+4. **Attribution** — assign ADS-B flight trajectories to detected contrails
+5. **Altitude estimation** — infer contrail altitude from imagery
 
 ## Installation
 
-DeepContrail is managed with [`uv`](https://github.com/astral-sh/uv).
+```bash
+# Inference only
+pip install deepcontrail
+
+# Full training stack
+pip install "deepcontrail[train]"
+
+# Development
+pip install "deepcontrail[dev]"
+```
+
+With [`uv`](https://github.com/astral-sh/uv) (recommended):
 
 ```bash
 uv venv
 uv pip install -e ".[dev]"
 ```
 
-`[dev]` pulls the development tooling (pytest, ruff, pyright). The training stack
-(torch, segmentation_models_pytorch, …) is installed as it is needed.
-
 ## Layout
 
 ```
-src/deepcontrail/      # the shipped package (skeleton)
-├── __init__.py        # version + public exports
-├── py.typed           # PEP 561 typing marker
-├── data/              # dataset access (Phase 1: GOES-16)
-├── models/            # model construction (Phase 1: U-Net family)
-└── metrics/           # evaluation (Phase 1: Dice)
+src/deepcontrail/   # shipped library
+├── data/           # dataset loaders (GOES-16, later MTG)
+├── models/         # model construction
+├── losses/         # training losses
+├── metrics/        # evaluation (Dice, …)
+└── training/       # training infrastructure
+scripts/            # training and evaluation scripts (not shipped)
+configs/            # experiment YAMLs
+tests/              # unit and integration tests
 ```
-
-Development happens in the open; implementation code is added milestone by milestone.
 
 ## Development
 
-This project enforces a consistent code style and quality bar. Before opening a pull
-request, make sure:
+```bash
+ruff check .          # lint
+ruff format --check . # format
+pyright               # types
+uv run pytest         # tests
+```
 
-- `ruff check .` is clean — `ruff format` has already been applied;
-- `pyright` passes on `src/`;
-- `pytest` passes.
-
-The full working rules (coding structure, TDD, ML quality, git workflow) live in
-[`CLAUDE.md`](CLAUDE.md).
+All three must be green before opening a pull request.
 
 ## License
 
-This project is licensed under the European Union Public Licence v1.2 (EUPL-1.2).
-See [`LICENSE`](LICENSE).
+Licensed under the [European Union Public Licence v1.2 (EUPL-1.2)](LICENSE).
