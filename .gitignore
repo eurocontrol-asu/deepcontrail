@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Claude / editor / local notes
+.claude/
+CLAUDE.md
+TODO.md
+.vscode/
+.idea/
+*.swp
+
+# MLflow / experiment tracking
+mlruns/
+
+# Models / large artefacts
+*.ckpt
+*.pt
+checkpoints/
+*.onnx
+
+# Data (the raw dataset is large and external — never commit it)
+/data/
+
+# Environment
+.env
+.env.local

@@ -1,0 +1,132 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepcontrail"
+version = "0.1.0"
+description = "DeepContrail — open-source library for semantic segmentation of contrails from satellite imagery."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "EUPL-1.2" }
+authors = [{ name = "EUROCONTROL" }]
+maintainers = [{ name = "EUROCONTROL" }]
+keywords = ["contrails", "segmentation", "remote-sensing", "deep-learning", "satellite", "GOES"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: European Union Public Licence (EUPL)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+    "numpy>=1.24",
+    "pillow>=10.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "scikit-learn>=1.3",
+    "huggingface_hub>=0.19",
+]
+
+[project.urls]
+Homepage = "https://github.com/eurocontrol-asu/deepcontrail"
+Documentation = "https://eurocontrol-asu.github.io/deepcontrail"
+Repository = "https://github.com/eurocontrol-asu/deepcontrail"
+"Bug Tracker" = "https://github.com/eurocontrol-asu/deepcontrail/issues"
+
+[project.optional-dependencies]
+train = [
+    "torch>=2.1",
+    "torchvision>=0.16",
+    "segmentation_models_pytorch>=0.4",
+    "timm>=0.9",
+    "pytorch-lightning>=2.1",
+    "albumentations>=1.4",
+    "pyyaml>=6.0",
+    "mlflow>=2.10",
+]
+inference = [
+    "fastapi>=0.100",
+    "uvicorn>=0.23",
+    "opencv-python>=4.8",
+    "pandas>=2.0",
+]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.1",
+    "pyright>=1.1",
+    "pre-commit>=3.5",
+]
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.22",
+    "pymdown-extensions>=10.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+deepcontrail = ["py.typed"]
+
+# ---------------------------------------------------------------------------
+# Tooling
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# old_references/ is colleague reference code, not ours — keep it out of linting.
+extend-exclude = ["old_references"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+    "ANN",    # flake8-annotations (enforce type hints — project is fully annotated)
+    "D",      # pydocstyle (docstrings — NumPy convention)
+    "PTH",    # flake8-use-pathlib
+    "PT",     # flake8-pytest-style
+    "TC",     # flake8-type-checking
+    "NPY",    # numpy-asyncify / numpy 2.x compatibility
+    "RUF",    # ruff-specific rules
+]
+ignore = [
+    # NumPy-style docstrings: summary on the first line, Args:/Returns: blocks.
+    "D203",  # one blank line before class docstring
+    "D204",  # one blank line before method docstring
+    "D213",  # multi-line summary on the second line (numpy wants the first line -> D212)
+    "D402",  # first line should not be the function's signature
+    "D417",  # missing argument descriptions (numpy documents params in the Args: block)
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501", "ANN001", "ANN201", "D103", "D104"]
+
+[tool.pyright]
+include = ["src"]
+# old_references/ is colleague reference code, not ours — keep it out of type-checking.
+exclude = ["old_references"]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.coverage.run]
+branch = true
+source = ["deepcontrail"]
