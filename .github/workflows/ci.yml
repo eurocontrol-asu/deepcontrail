@@ -15,7 +15,7 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-      - run: uv python select 3.11
+      - run: uv python install 3.11
       - run: uv sync --extra dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -28,7 +28,7 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-      - run: uv python select 3.11
+      - run: uv python install 3.11
       - run: uv sync --extra dev --extra train
       - run: uv run pyright
 
@@ -40,6 +40,6 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
-      - run: uv python select 3.11
+      - run: uv python install 3.11
       - run: uv sync --extra dev --extra train
       - run: uv run pytest
