@@ -16,9 +16,9 @@ jobs:
         with:
           version: "latest"
       - run: uv python install 3.11
-      - run: uv pip install -e ".[dev]" --system
-      - run: ruff check .
-      - run: ruff format --check .
+      - run: uv sync --extra dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
 
   types:
     name: Type check
@@ -29,8 +29,8 @@ jobs:
         with:
           version: "latest"
       - run: uv python install 3.11
-      - run: uv pip install -e ".[dev]" --system
-      - run: pyright
+      - run: uv sync --extra dev --extra train
+      - run: uv run pyright
 
   tests:
     name: Tests
@@ -41,5 +41,5 @@ jobs:
         with:
           version: "latest"
       - run: uv python install 3.11
-      - run: uv pip install -e ".[dev]" --system
-      - run: pytest
+      - run: uv sync --extra dev --extra train
+      - run: uv run pytest

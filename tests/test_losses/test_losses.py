@@ -199,3 +199,199 @@ def test_build_loss_unknown_raises():
 
     with pytest.raises(ValueError, match="Unknown loss name"):
         build_loss(LossConfig(name="unknown"))
+
+
+# ---------------------------------------------------------------------------
+# BCELoss
+# ---------------------------------------------------------------------------
+
+
+def test_bce_loss_output_is_scalar():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("segmentation_models_pytorch")
+    from deepcontrail.losses import BCELoss
+
+    torch.manual_seed(0)
+    logits = torch.randn(2, 1, 4, 4, requires_grad=True)
+    target = torch.randint(0, 2, (2, 4, 4)).float()
+
+    loss = BCELoss()(logits, target)
+
+    assert loss.shape == (), f"expected scalar, got shape {loss.shape}"
+
+
+def test_bce_loss_has_grad_fn():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("segmentation_models_pytorch")
+    from deepcontrail.losses import BCELoss
+
+    torch.manual_seed(0)
+    logits = torch.randn(2, 1, 4, 4, requires_grad=True)
+    target = torch.randint(0, 2, (2, 4, 4)).float()
+
+    loss = BCELoss()(logits, target)
+
+    assert loss.grad_fn is not None, "loss must be differentiable"
+
+
+def test_bce_loss_with_pos_weight():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("segmentation_models_pytorch")
+    from deepcontrail.losses import BCELoss
+
+    # Logits of zero → sigmoid = 0.5, maximises BCE sensitivity to pos_weight
+    logits = torch.zeros(2, 1, 4, 4)
+    target = torch.zeros(2, 4, 4)
+    target[0, 0, 0] = 1.0  # single positive pixel (very imbalanced)
+
+    loss_no_weight = BCELoss()(logits, target)
+    loss_weighted = BCELoss(pos_weight=10.0)(logits, target)
+
+    assert loss_weighted.item() > loss_no_weight.item(), (
+        "pos_weight=10 should increase loss on imbalanced positive examples"
+    )
+
+
+def test_bce_loss_perfect_prediction_near_zero():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("segmentation_models_pytorch")
+    from deepcontrail.losses import BCELoss
+
+    mask = torch.zeros(2, 4, 4)
+    mask[:, :2, :] = 1.0
+    logits = torch.where(mask.unsqueeze(1) == 1, torch.tensor(10.0), torch.tensor(-10.0))
+
+    loss = BCELoss()(logits, mask)
+
+    assert loss.item() < 0.01, "near-perfect prediction should have near-zero BCE loss"
+
+
+# ---------------------------------------------------------------------------
+# FocalLoss
+# ---------------------------------------------------------------------------
+
+
+def test_focal_loss_output_is_scalar():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("segmentation_models_pytorch")
+    from deepcontrail.losses import FocalLoss
+
+    torch.manual_seed(0)
+    logits = torch.randn(2, 1, 4, 4, requires_grad=True)
+    target = torch.randint(0, 2, (2, 4, 4)).float()
+
+    loss = FocalLoss()(logits, target)
+
+    assert loss.shape == (), f"expected scalar, got shape {loss.shape}"
+
+
+def test_focal_loss_has_grad_fn():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("segmentation_models_pytorch")
+    from deepcontrail.losses import FocalLoss
+
+    torch.manual_seed(0)
+    logits = torch.randn(2, 1, 4, 4, requires_grad=True)
+    target = torch.randint(0, 2, (2, 4, 4)).float()
+
+    loss = FocalLoss()(logits, target)
+
+    assert loss.grad_fn is not None, "focal loss must be differentiable"
+
+
+def test_focal_loss_with_gamma():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("segmentation_models_pytorch")
+    from deepcontrail.losses import FocalLoss
+
+    torch.manual_seed(0)
+    logits = torch.randn(2, 1, 4, 4)
+    target = torch.randint(0, 2, (2, 4, 4)).float()
+
+    loss = FocalLoss(gamma=2.0)(logits, target)
+
+    assert loss.shape == (), "FocalLoss(gamma=2.0) should produce a scalar"
+
+
+def test_focal_loss_easy_examples_downweighted():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("segmentation_models_pytorch")
+    from deepcontrail.losses import FocalLoss
+
+    # Confident correct predictions: large positive logit, target=1
+    logits = torch.full((2, 1, 4, 4), 5.0)
+    target = torch.ones(2, 4, 4)
+
+    loss_no_focus = FocalLoss(gamma=0.0)(logits, target)  # gamma=0 ≡ BCE
+    loss_focused = FocalLoss(gamma=2.0)(logits, target)
+
+    assert loss_focused.item() < loss_no_focus.item(), (
+        "focal gamma=2 should down-weight easy (confident) examples vs gamma=0"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CompositeLoss with BCE / build_loss dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_composite_dice_bce_runs():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("segmentation_models_pytorch")
+    from deepcontrail.losses import CompositeLoss, LossConfig
+
+    cfg = LossConfig(
+        name="composite",
+        smooth=1.0,
+        pos_weight=10.0,
+        composite_weights={"dice": 0.5, "bce": 0.5},
+    )
+    loss_fn = CompositeLoss.from_config(cfg)
+
+    torch.manual_seed(0)
+    logits = torch.randn(2, 1, 4, 4, requires_grad=True)
+    target = torch.randint(0, 2, (2, 4, 4)).float()
+
+    loss = loss_fn(logits, target)
+
+    assert loss.shape == (), "composite Dice+BCE should return a scalar"
+    assert loss.grad_fn is not None, "composite Dice+BCE must be differentiable"
+
+
+def test_build_loss_bce():
+    pytest.importorskip("segmentation_models_pytorch")
+    from deepcontrail.losses import BCELoss, LossConfig, build_loss
+
+    loss_fn = build_loss(LossConfig(name="bce"))
+
+    assert isinstance(loss_fn, BCELoss)
+
+
+def test_build_loss_focal():
+    pytest.importorskip("segmentation_models_pytorch")
+    from deepcontrail.losses import FocalLoss, LossConfig, build_loss
+
+    loss_fn = build_loss(LossConfig(name="focal"))
+
+    assert isinstance(loss_fn, FocalLoss)
+
+
+# ---------------------------------------------------------------------------
+# LossConfig — new fields
+# ---------------------------------------------------------------------------
+
+
+def test_loss_config_pos_weight_default_none():
+    from deepcontrail.losses import LossConfig
+
+    cfg = LossConfig()
+
+    assert cfg.pos_weight is None
+
+
+def test_loss_config_focal_gamma_default():
+    from deepcontrail.losses import LossConfig
+
+    cfg = LossConfig()
+
+    assert cfg.focal_gamma == 2.0

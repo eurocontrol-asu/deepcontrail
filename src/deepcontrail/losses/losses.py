@@ -77,6 +77,64 @@ class TverskyLoss(nn.Module):
         return self._loss(y_pred, y_true)  # type: ignore[no-any-return]
 
 
+class BCELoss(nn.Module):
+    """Binary cross-entropy loss wrapping ``smp.losses.SoftBCEWithLogitsLoss``.
+
+    Parameters
+    ----------
+    pos_weight
+        Weight for positive (contrail) class.  Set to ``num_bg / num_fg`` for
+        class-imbalanced datasets (e.g. ``175.0`` for 0.567 % foreground).
+        ``None`` means no weighting.
+    smooth_factor
+        Label smoothing factor.  ``None`` means no smoothing.
+    """
+
+    def __init__(
+        self,
+        pos_weight: float | None = None,
+        smooth_factor: float | None = None,
+    ) -> None:
+        super().__init__()
+        pw = torch.tensor([pos_weight]) if pos_weight is not None else None
+        self._loss = smp.losses.SoftBCEWithLogitsLoss(
+            pos_weight=pw,
+            smooth_factor=smooth_factor,
+        )
+
+    def forward(self, y_pred: Tensor, y_true: Tensor) -> Tensor:
+        """Compute BCE loss, broadcasting target to match prediction rank."""
+        if y_true.dim() == y_pred.dim() - 1:
+            y_true = y_true.unsqueeze(1)
+        return self._loss(y_pred, y_true)  # type: ignore[no-any-return]
+
+
+class FocalLoss(nn.Module):
+    """Binary focal loss wrapping ``smp.losses.FocalLoss``.
+
+    Parameters
+    ----------
+    gamma
+        Focusing parameter.  ``gamma=2.0`` is standard; down-weights easy
+        examples and concentrates training on hard ones.  ``gamma=0`` is
+        equivalent to BCE.
+    alpha
+        Balance factor for positive class.  ``None`` means no balancing.
+    """
+
+    def __init__(self, gamma: float = 2.0, alpha: float | None = None) -> None:
+        super().__init__()
+        self._loss = smp.losses.FocalLoss(
+            mode="binary",
+            gamma=gamma,
+            alpha=alpha,
+        )
+
+    def forward(self, y_pred: Tensor, y_true: Tensor) -> Tensor:
+        """Compute focal loss."""
+        return self._loss(y_pred, y_true)  # type: ignore[no-any-return]
+
+
 class CompositeLoss(nn.Module):
     """Weighted combination of multiple loss functions.
 
@@ -125,10 +183,30 @@ class CompositeLoss(nn.Module):
                 tversky_weight,
             )
 
+        bce_weight = config.composite_weights.get("bce", 0.0)
+        if bce_weight > 0:
+            components["bce"] = (
+                BCELoss(
+                    pos_weight=config.pos_weight,
+                    smooth_factor=config.smooth_factor,
+                ),
+                bce_weight,
+            )
+
+        focal_weight = config.composite_weights.get("focal", 0.0)
+        if focal_weight > 0:
+            components["focal"] = (
+                FocalLoss(
+                    gamma=config.focal_gamma,
+                    alpha=config.focal_alpha,
+                ),
+                focal_weight,
+            )
+
         return cls(components)
 
 
-def build_loss(config: LossConfig) -> DiceLoss | TverskyLoss | CompositeLoss:
+def build_loss(config: LossConfig) -> DiceLoss | TverskyLoss | BCELoss | FocalLoss | CompositeLoss:
     """Construct a loss function from config.
 
     Parameters
@@ -138,7 +216,7 @@ def build_loss(config: LossConfig) -> DiceLoss | TverskyLoss | CompositeLoss:
 
     Returns
     -------
-    DiceLoss | TverskyLoss | CompositeLoss
+    DiceLoss | TverskyLoss | BCELoss | FocalLoss | CompositeLoss
         The constructed loss function.
 
     Raises
@@ -156,7 +234,14 @@ def build_loss(config: LossConfig) -> DiceLoss | TverskyLoss | CompositeLoss:
             smooth=0.0,
             from_logits=config.from_logits,
         )
+    if config.name == "bce":
+        return BCELoss(pos_weight=config.pos_weight, smooth_factor=config.smooth_factor)
+    if config.name == "focal":
+        return FocalLoss(gamma=config.focal_gamma, alpha=config.focal_alpha)
     if config.name == "composite":
         return CompositeLoss.from_config(config)
-    msg = f"Unknown loss name: {config.name!r}. Expected 'dice', 'tversky', or 'composite'."
+    msg = (
+        f"Unknown loss name: {config.name!r}. "
+        "Expected 'dice', 'tversky', 'bce', 'focal', or 'composite'."
+    )
     raise ValueError(msg)
