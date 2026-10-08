@@ -36,6 +36,11 @@ checkpoints/
 # Data (the raw dataset is large and external — never commit it)
 /data/
 
+# Local reports / analysis (not for version control)
+reports/
+old_references/
+presentations/
+
 # Environment
 .env
 .env.local
