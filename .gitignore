@@ -39,6 +39,7 @@ checkpoints/
 # Local reports / analysis (not for version control)
 reports/
 old_references/
+presentations/
 
 # Environment
 .env
