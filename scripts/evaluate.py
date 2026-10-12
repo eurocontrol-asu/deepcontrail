@@ -1,28 +1,32 @@
-"""Standalone evaluation of a saved DeepContrail checkpoint.
+"""Evaluate trained DeepContrail checkpoints (single model or ensemble).
 
-Loads a checkpoint and experiment config, runs evaluation on val and/or test
-with threshold search, and optionally logs results to MLflow.
+Supports two modes:
+
+- **Single-model** (``--checkpoint``): loads one checkpoint and evaluates on
+  val and/or test with threshold search, optionally logging to MLflow.
+- **Ensemble** (``--checkpoints``): loads one or more per-fold checkpoints,
+  averages their sigmoid probabilities pixel-wise, and reports metrics via a
+  threshold search.
 
 Usage
 -----
 ::
 
-    # Re-evaluate a checkpoint on val+test
+    # Single-model evaluation (backward compatible)
     uv run python scripts/evaluate.py \
         --checkpoint path/to/best.ckpt \
         --config configs/experiment.yaml
 
-    # Skip test, use a fixed threshold
+    # Ensemble evaluation (4 folds)
     uv run python scripts/evaluate.py \
-        --checkpoint path/to/best.ckpt \
         --config configs/experiment.yaml \
-        --skip-test --threshold 0.31
+        --checkpoints ckpt_fold0.ckpt ckpt_fold1.ckpt ckpt_fold2.ckpt ckpt_fold3.ckpt
 
-    # Log to an existing MLflow run
+    # Apply a fixed threshold to the test split
     uv run python scripts/evaluate.py \
-        --checkpoint path/to/best.ckpt \
         --config configs/experiment.yaml \
-        --run-id abc123def456
+        --checkpoints ckpt_fold0.ckpt ckpt_fold1.ckpt ckpt_fold2.ckpt ckpt_fold3.ckpt \
+        --split test --threshold 0.42
 """
 
 from __future__ import annotations
@@ -32,7 +36,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import mlflow
 import torch
 from torch.utils.data import DataLoader
 
@@ -40,9 +43,8 @@ from deepcontrail.data import DataConfig, GOESSemanticDataset
 from deepcontrail.losses import build_loss
 from deepcontrail.models import build_model
 from deepcontrail.training import (
-    MLFLOW_EXPERIMENT_NAME,
-    MLFLOW_TRACKING_URI,
     ContrailSegmentationModule,
+    evaluate_ensemble,
     evaluate_global,
     load_configs,
 )
@@ -50,46 +52,46 @@ from deepcontrail.training import (
 logger = logging.getLogger(__name__)
 
 
-def _build_eval_loader(data_cfg: DataConfig) -> DataLoader[Any]:
-    """Build a DataLoader for evaluation (no shuffle, no drop_last)."""
-    ds = GOESSemanticDataset(data_cfg)
+def _build_loader(cfg: DataConfig) -> DataLoader[Any]:
+    """Build a no-augmentation ``DataLoader`` for the given ``DataConfig``."""
+    ds = GOESSemanticDataset(cfg)
     return DataLoader(
-        ds,
-        batch_size=data_cfg.batch_size,
+        ds,  # type: ignore[arg-type]
+        batch_size=cfg.batch_size,
         shuffle=False,
-        num_workers=data_cfg.num_workers,
+        num_workers=cfg.num_workers,
         pin_memory=True,
         drop_last=False,
     )
 
 
-def main(args: argparse.Namespace) -> None:
-    """Load checkpoint, evaluate, print results, optionally log to MLflow."""
+def _eval_config(val_data_cfg: DataConfig, split: str) -> DataConfig:
+    """Build a no-augmentation eval config for the requested split."""
+    no_aug = {**val_data_cfg.model_dump(), "augmentation": None}
+    if split == "val":
+        return DataConfig.from_dict(no_aug)
+    return DataConfig.from_dict({**no_aug, "split": "test", "fold": None})
+
+
+# ---------------------------------------------------------------------------
+# Single-model evaluation (backward compatible path)
+# ---------------------------------------------------------------------------
+
+
+def _run_single(args: argparse.Namespace) -> None:
+    """Evaluate a single checkpoint on val and/or test."""
     config_path = Path(args.config)
     checkpoint_path = Path(args.checkpoint)
 
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-    eval_args = argparse.Namespace(
-        epochs=None,
-        lr=None,
-        batch_size=None,
-        image_size=None,
-        encoder=None,
-        architecture=None,
-        patience=None,
-        warmup_epochs=None,
-        scheduler_interval=None,
-    )
     _, val_data_cfg, test_data_cfg, model_cfg, loss_cfg, training_cfg, _seed = load_configs(
-        config_path, eval_args
+        config_path, args
     )
 
-    device_name = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    device = torch.device(device_name)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Rebuild model + loss, load checkpoint
     model = build_model(model_cfg)
     loss_fn = build_loss(loss_cfg)
     module = ContrailSegmentationModule.load_from_checkpoint(
@@ -100,36 +102,35 @@ def main(args: argparse.Namespace) -> None:
         weight_decay=training_cfg.weight_decay,
         scheduler=training_cfg.scheduler,
         epochs=training_cfg.epochs,
+        warmup_epochs=training_cfg.warmup_epochs,
+        scheduler_interval=training_cfg.scheduler_interval,
     )
     logger.info("Loaded checkpoint: %s", checkpoint_path)
 
-    # Val evaluation
-    val_loader = _build_eval_loader(val_data_cfg)
+    val_eval_cfg = _eval_config(val_data_cfg, "val")
+    val_loader = _build_loader(val_eval_cfg)
     logger.info("Evaluating on val set (%d samples)...", len(val_loader.dataset))  # type: ignore[arg-type]
 
     val_threshold = args.threshold
     val_metrics = evaluate_global(module, val_loader, device, prefix="val", threshold=val_threshold)
-
     optimal_threshold = val_metrics["final/val_threshold"]
-    logger.info("Val threshold: %.4f", optimal_threshold)
 
-    # Test evaluation
     test_metrics: dict[str, float] = {}
     if not args.skip_test:
-        test_loader = _build_eval_loader(test_data_cfg)
+        test_eval_cfg = _eval_config(test_data_cfg, "test")
+        test_loader = _build_loader(test_eval_cfg)
+        test_threshold = args.threshold if args.threshold is not None else optimal_threshold
         logger.info(
             "Evaluating on test set (%d samples, threshold=%.4f)...",
             len(test_loader.dataset),  # type: ignore[arg-type]
-            optimal_threshold,
+            test_threshold,
         )
-        test_threshold = args.threshold if args.threshold is not None else optimal_threshold
         test_metrics = evaluate_global(
             module, test_loader, device, prefix="test", threshold=test_threshold
         )
 
     all_metrics = {**val_metrics, **test_metrics}
 
-    # Print summary
     print("\n" + "=" * 60)
     print("EVALUATION RESULTS")
     print("=" * 60)
@@ -139,62 +140,124 @@ def main(args: argparse.Namespace) -> None:
         print(f"{key:30s} {value:.4f}")
     print("=" * 60)
 
-    # MLflow logging
-    if args.run_id or args.run_name:
-        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-        mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
 
-        eval_metrics = {f"eval/{k}": v for k, v in all_metrics.items()}
+# ---------------------------------------------------------------------------
+# Ensemble evaluation
+# ---------------------------------------------------------------------------
 
-        if args.run_id:
-            with mlflow.start_run(run_id=args.run_id):
-                mlflow.log_metrics(eval_metrics)
-            logger.info("Logged eval metrics to existing run %s", args.run_id)
-        else:
-            with mlflow.start_run(run_name=args.run_name):
-                mlflow.log_metrics(eval_metrics)
-                mlflow.log_param("eval/checkpoint", str(checkpoint_path))
-                mlflow.log_param("eval/config", str(config_path))
-                mlflow.log_artifact(str(config_path))
-            logger.info("Logged eval metrics to new run '%s'", args.run_name)
+
+def _run_ensemble(args: argparse.Namespace) -> None:
+    """Evaluate an ensemble of checkpoints on a single split."""
+    config_path = Path(args.config)
+    _, val_data_cfg, _, model_cfg, loss_cfg, training_cfg, _seed = load_configs(config_path, args)
+
+    eval_cfg = _eval_config(val_data_cfg, args.split)
+    loader = _build_loader(eval_cfg)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    logger.info(
+        "Evaluating ensemble of %d checkpoint(s) on the %s split (%d samples)...",
+        len(args.checkpoints),
+        args.split,
+        len(loader.dataset),  # type: ignore[arg-type]
+    )
+
+    metrics = evaluate_ensemble(
+        checkpoints=args.checkpoints,
+        model_config=model_cfg,
+        loss_config=loss_cfg,
+        training_config=training_cfg,
+        data_loader=loader,
+        device=device,
+        steps_per_epoch=len(loader),
+        prefix=args.split,
+        threshold=args.threshold,
+    )
+
+    print("\n" + "=" * 60)
+    print(f"ENSEMBLE EVALUATION ({args.split})")
+    print("=" * 60)
+    for key, value in metrics.items():
+        print(f"{key:32s} {value:.4f}")
+    print("=" * 60)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def main(args: argparse.Namespace) -> None:
+    """Dispatch to single-model or ensemble evaluation."""
+    if args.checkpoint:
+        _run_single(args)
+    else:
+        _run_ensemble(args)
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Evaluate a saved DeepContrail checkpoint without retraining."
+        description="Evaluate DeepContrail checkpoints (single model or ensemble)."
     )
-    parser.add_argument("--checkpoint", type=str, required=True, help="Path to the .ckpt file.")
     parser.add_argument(
         "--config",
         type=str,
         default="configs/experiment.yaml",
-        help="Path to experiment YAML config.",
+        help="Path to the experiment YAML config (default: configs/experiment.yaml).",
     )
-    parser.add_argument("--skip-test", action="store_true", help="Skip evaluation on the test set.")
+
+    ckpt_group = parser.add_mutually_exclusive_group(required=True)
+    ckpt_group.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Path to a single .ckpt file (single-model evaluation).",
+    )
+    ckpt_group.add_argument(
+        "--checkpoints",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Paths to per-fold checkpoints (ensemble evaluation).",
+    )
+
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="val",
+        choices=["val", "test"],
+        help="Split to evaluate on (default: val). Only used with --checkpoints.",
+    )
     parser.add_argument(
         "--threshold",
         type=float,
         default=None,
-        help="Fixed threshold (skip search on val).",
+        help="Fixed threshold to apply (default: auto-search the optimal threshold).",
     )
     parser.add_argument(
-        "--run-id",
-        type=str,
-        default=None,
-        help="Append eval metrics to an existing MLflow run.",
+        "--skip-test",
+        action="store_true",
+        help="Skip test-set evaluation. Only used with --checkpoint.",
     )
+
+    parser.add_argument("--epochs", type=int, default=None, help="Override number of epochs.")
+    parser.add_argument("--lr", type=float, default=None, help="Override learning rate.")
+    parser.add_argument("--batch-size", type=int, default=None, help="Override batch size.")
+    parser.add_argument("--image-size", type=int, default=None, help="Override image size.")
+    parser.add_argument("--fold", type=int, default=None, help="CV fold override.")
+    parser.add_argument("--num-folds", type=int, default=None, help="Total number of CV folds.")
+    parser.add_argument("--encoder", type=str, default=None, help="Override encoder name.")
     parser.add_argument(
-        "--run-name",
-        type=str,
-        default=None,
-        help="Create a new MLflow run with this name for eval metrics.",
+        "--architecture", type=str, default=None, help="Override model architecture."
     )
+    parser.add_argument("--warmup-epochs", type=int, default=None, help="Number of warmup epochs.")
     parser.add_argument(
-        "--device",
+        "--scheduler-interval",
         type=str,
         default=None,
-        help="Device to use (cuda or cpu). Default: cuda if available.",
+        choices=["epoch", "step"],
+        help="LR scheduler step interval.",
     )
     return parser.parse_args()
 

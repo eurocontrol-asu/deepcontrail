@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class NormalizeConfig(BaseModel):
@@ -53,7 +53,14 @@ class DataConfig(BaseModel):
         Path to the dataset root (contains ``images_semantic/`` and
         ``semantic_masks/`` subdirectories).
     split
-        ``"train"``, ``"val"``, or ``"test"``.
+        ``"train"``, ``"val"``, or ``"test"``.  Both ``"train"`` and ``"val"``
+        read from the ``train/`` directory on disk; the dataset partitions stems
+        deterministically using ``val_fraction``.  ``"test"`` reads from ``test/``.
+    mask_type
+        Which label artifact to load from the dataset root. ``"binary"`` reads
+        ``semantic_masks/`` and returns uint8 masks in ``{0, 1}``;
+        ``"probability"`` reads ``probability_masks/`` and returns float32 masks
+        with continuous values in ``[0, 1]`` for soft-label training.
     pixel_shift
         Sub-pixel translation applied to images at load time to correct a
         labeling misalignment in the GOES-16 dataset. Default 0.0 (no shift).
@@ -69,12 +76,23 @@ class DataConfig(BaseModel):
         Augmentation config for training, or ``None`` for no augmentation.
     normalize
         Channel-wise normalization statistics.
+    val_fraction
+        Fraction of training stems held out for validation when ``split`` is
+        ``"train"`` or ``"val"``.  The split is seeded by ``seed`` for
+        reproducibility.  Default 0.1 (10 %).
+    fold
+        K-fold cross-validation fold to hold out for validation, or ``None``
+        to disable CV. When set, the fold partitioning takes precedence over
+        ``val_fraction``.
+    num_folds
+        Total number of CV folds. Only used when ``fold`` is set.
     """
 
     model_config = ConfigDict(frozen=True)
 
     root: str
     split: Literal["train", "val", "test"] = "train"
+    mask_type: Literal["binary", "probability"] = "binary"
     pixel_shift: Annotated[float, Field(ge=0.0)] = 0.0
     seed: Annotated[int, Field(ge=0)] = 42
     image_size: Annotated[int, Field(gt=0)] = 256
@@ -82,6 +100,17 @@ class DataConfig(BaseModel):
     num_workers: Annotated[int, Field(ge=0)] = 4
     augmentation: AugmentationConfig | None = None
     normalize: NormalizeConfig = NormalizeConfig()
+    val_fraction: Annotated[float, Field(default=0.1, ge=0.0, lt=1.0)] = 0.1
+    fold: int | None = None
+    num_folds: Annotated[int, Field(default=4, ge=2)] = 4
+
+    @model_validator(mode="after")
+    def _validate_fold(self) -> DataConfig:
+        """Ensure ``fold`` is within range whenever CV is enabled."""
+        if self.fold is not None and not (0 <= self.fold < self.num_folds):
+            msg = f"fold {self.fold} out of range [0, {self.num_folds})"
+            raise ValueError(msg)
+        return self
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DataConfig:

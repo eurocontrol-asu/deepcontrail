@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
+
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from deepcontrail.training import (
@@ -10,6 +13,7 @@ from deepcontrail.training import (
     MLFLOW_EXPERIMENT_NAME,
     MLFLOW_TRACKING_URI,
     TrainingConfig,
+    load_configs,
 )
 
 # --- Defaults ---
@@ -55,12 +59,6 @@ def test_training_config_default_gradient_clip_val_is_none() -> None:
     cfg = TrainingConfig()
 
     assert cfg.gradient_clip_val is None
-
-
-def test_training_config_default_early_stopping_patience_is_none() -> None:
-    cfg = TrainingConfig()
-
-    assert cfg.early_stopping_patience is None
 
 
 # --- Frozen ---
@@ -121,3 +119,110 @@ def test_mlflow_tracking_uri_is_set() -> None:
 
 def test_mlflow_experiment_name_is_set() -> None:
     assert len(MLFLOW_EXPERIMENT_NAME) > 0
+
+
+# --- load_configs cross-validation handling ---
+
+
+def _args_namespace(**overrides: object) -> argparse.Namespace:
+    base = {
+        "epochs": None,
+        "lr": None,
+        "batch_size": None,
+        "image_size": None,
+        "encoder": None,
+        "architecture": None,
+        "warmup_epochs": None,
+        "scheduler_interval": None,
+        "fold": None,
+        "num_folds": None,
+    }
+    base.update(overrides)
+    return argparse.Namespace(**base)  # type: ignore[arg-type]
+
+
+def _write_config(tmp_path: object, data: object) -> object:
+    path = tmp_path / "experiment.yaml"  # type: ignore[operator]
+    path.write_text(yaml.dump(data))  # type: ignore[attr-defined]
+    return path
+
+
+def test_load_configs_fold_enables_cv_on_train_and_val(tmp_path):
+    from deepcontrail.training.config import ModelConfig  # noqa: F401
+
+    yaml_data = {
+        "data": {"root": "/data/x", "split": "train", "image_size": 384},
+        "model": {"architecture": "Unet", "encoder_name": "resnet18"},
+        "loss": {"name": "bce"},
+        "training": {"epochs": 2},
+    }
+    config_path = _write_config(tmp_path, yaml_data)
+
+    train, val, test, _model_cfg, _loss_cfg, _train_cfg, _seed = load_configs(
+        config_path,  # type: ignore[arg-type]
+        _args_namespace(fold=2),  # type: ignore[arg-type]
+    )
+
+    assert train.split == "train", "train split keeps its identity under CV"
+    assert train.fold == 2, "train inherits the requested fold"
+    assert val.split == "val", "val keeps its split under CV"
+    assert val.fold == 2, "val inherits fold for CV"
+    assert test.fold is None, "test set is independent and must not be folded"
+
+
+def test_load_configs_num_folds_override(tmp_path):
+    yaml_data = {
+        "data": {"root": "/data/x", "split": "train"},
+        "model": {"architecture": "Unet", "encoder_name": "resnet18"},
+        "loss": {"name": "bce"},
+        "training": {"epochs": 2},
+    }
+    config_path = _write_config(tmp_path, yaml_data)
+
+    train, val, _test, *_ = load_configs(
+        config_path,  # type: ignore[arg-type]
+        _args_namespace(fold=1, num_folds=8),  # type: ignore[arg-type]
+    )
+
+    assert train.num_folds == 8, "train inherits the num_folds override"
+    assert train.fold == 1, "train keeps its fold under the override"
+    assert val.num_folds == 8, "val inherits the num_folds override"
+    assert val.fold == 1, "val keeps its fold under the override"
+
+
+def test_load_configs_fold_disabled_by_default(tmp_path):
+    yaml_data = {
+        "data": {"root": "/data/x", "split": "train"},
+        "model": {"architecture": "Unet", "encoder_name": "resnet18"},
+        "loss": {"name": "bce"},
+        "training": {"epochs": 2},
+    }
+    config_path = _write_config(tmp_path, yaml_data)
+
+    train, val, test, *_ = load_configs(
+        config_path,  # type: ignore[arg-type]
+        _args_namespace(),  # type: ignore[arg-type]
+    )
+
+    assert train.fold is None, "train has no fold by default"
+    assert val.fold is None, "val has no fold by default"
+    assert test.fold is None, "test has no fold by default"
+
+
+def test_load_configs_val_and_test_always_use_binary_masks(tmp_path):
+    yaml_data = {
+        "data": {"root": "/data/x", "split": "train", "mask_type": "probability"},
+        "model": {"architecture": "Unet", "encoder_name": "resnet18"},
+        "loss": {"name": "bce"},
+        "training": {"epochs": 2},
+    }
+    config_path = _write_config(tmp_path, yaml_data)
+
+    train, val, test, *_ = load_configs(
+        config_path,  # type: ignore[arg-type]
+        _args_namespace(),  # type: ignore[arg-type]
+    )
+
+    assert train.mask_type == "probability", "train keeps the requested mask_type"
+    assert val.mask_type == "binary", "val must always use binary masks for comparable metrics"
+    assert test.mask_type == "binary", "test must always use binary masks for comparable metrics"

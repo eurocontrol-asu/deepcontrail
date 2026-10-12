@@ -38,6 +38,7 @@ def test_data_config_defaults():
 
     assert cfg.root == "/tmp/fake"
     assert cfg.split == "train"
+    assert cfg.mask_type == "binary"
     assert cfg.seed == 42
     assert cfg.image_size == 256
     assert cfg.batch_size == 16
@@ -87,6 +88,29 @@ def test_data_config_rejects_invalid_split():
 
     with pytest.raises(ValidationError, match="split"):
         DataConfig(root="/tmp/fake", split="other")
+
+
+def test_data_config_mask_type_defaults_to_binary():
+    from deepcontrail.data.config import DataConfig
+
+    cfg = DataConfig(root="/tmp/fake")
+
+    assert cfg.mask_type == "binary", "mask_type must default to binary"
+
+
+def test_data_config_mask_type_accepts_probability():
+    from deepcontrail.data.config import DataConfig
+
+    cfg = DataConfig(root="/tmp/fake", mask_type="probability")
+
+    assert cfg.mask_type == "probability"
+
+
+def test_data_config_mask_type_rejects_invalid():
+    from deepcontrail.data.config import DataConfig
+
+    with pytest.raises(ValidationError, match="mask_type"):
+        DataConfig(root="/tmp/fake", mask_type="soft")
 
 
 def test_data_config_from_dict():
@@ -174,3 +198,80 @@ def test_data_config_model_dump_roundtrip():
     restored = DataConfig.from_dict(d)
 
     assert restored == original, "model_dump -> from_dict should round-trip"
+
+
+# --- k-fold cross-validation fields ---
+
+
+def test_data_config_fold_defaults_none():
+    from deepcontrail.data.config import DataConfig
+
+    cfg = DataConfig(root="/tmp/fake")
+
+    assert cfg.fold is None, "CV disabled by default"
+    assert cfg.num_folds == 4
+
+
+def test_data_config_fold_within_range_ok():
+    from deepcontrail.data.config import DataConfig
+
+    cfg = DataConfig(root="/tmp/fake", fold=3, num_folds=4)
+
+    assert cfg.fold == 3
+    assert cfg.num_folds == 4
+
+
+def test_data_config_fold_out_of_range_rejected():
+    from pydantic import ValidationError
+
+    from deepcontrail.data.config import DataConfig
+
+    with pytest.raises(ValidationError, match="fold"):
+        DataConfig(root="/tmp/fake", fold=4, num_folds=4)
+
+    with pytest.raises(ValidationError, match="fold"):
+        DataConfig(root="/tmp/fake", fold=-1, num_folds=4)
+
+
+def test_data_config_num_folds_must_be_at_least_two():
+    from pydantic import ValidationError
+
+    from deepcontrail.data.config import DataConfig
+
+    with pytest.raises(ValidationError):
+        DataConfig(root="/tmp/fake", fold=0, num_folds=0)
+
+    with pytest.raises(ValidationError):
+        DataConfig(root="/tmp/fake", fold=0, num_folds=1)
+
+
+# --- val_fraction ---
+
+
+def test_data_config_val_fraction_defaults_to_0_1():
+    from deepcontrail.data.config import DataConfig
+
+    cfg = DataConfig(root="/tmp/fake")
+
+    assert cfg.val_fraction == 0.1, "val_fraction must default to 0.1"
+
+
+def test_data_config_val_fraction_rejects_negative():
+    from pydantic import ValidationError
+
+    from deepcontrail.data.config import DataConfig
+
+    with pytest.raises(ValidationError):
+        DataConfig(root="/tmp/fake", val_fraction=-0.1)
+
+
+def test_data_config_val_fraction_rejects_one_or_above():
+    from pydantic import ValidationError
+
+    from deepcontrail.data.config import DataConfig
+
+    with pytest.raises(ValidationError):
+        DataConfig(root="/tmp/fake", val_fraction=1.0)
+
+    with pytest.raises(ValidationError):
+        DataConfig(root="/tmp/fake", val_fraction=1.5)

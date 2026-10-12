@@ -6,6 +6,7 @@ from typing import Any
 
 import pytorch_lightning as pl
 import torch
+import torch.nn.functional as F
 
 from deepcontrail.metrics import dice_coefficient, iou_score
 
@@ -27,6 +28,10 @@ class ContrailSegmentationModule(pl.LightningModule):
         Scheduler name.
     epochs
         Total training epochs (used for ``CosineAnnealingLR``'s ``T_max``).
+    native_size
+        Native mask resolution (height and width) the model output is resized
+        back to before loss/metric computation. The dataset keeps masks at this
+        size even when images are upscaled to ``image_size``; default 256.
     """
 
     def __init__(
@@ -40,6 +45,7 @@ class ContrailSegmentationModule(pl.LightningModule):
         warmup_epochs: int = 0,
         scheduler_interval: str = "epoch",
         steps_per_epoch: int = 1,
+        native_size: int = 256,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["model", "loss_fn"])
@@ -52,13 +58,24 @@ class ContrailSegmentationModule(pl.LightningModule):
         self.warmup_epochs = warmup_epochs
         self.scheduler_interval = scheduler_interval
         self.steps_per_epoch = steps_per_epoch
+        self.native_size = native_size
 
         self._val_dices: list[float] = []
         self._val_ious: list[float] = []
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass returning raw logits."""
-        return self.model(x)  # type: ignore[no-any-return]
+        """Forward pass, resizing model output back to native mask resolution.
+
+        The model runs at the (possibly upscaled) input resolution. Its output
+        is interpolated back to ``native_size`` so it matches the native-
+        resolution masks used for loss and metric computation.
+        """
+        output = self.model(x)
+        if output.shape[-2] != self.native_size:
+            output = F.interpolate(
+                output, size=self.native_size, mode="bilinear", align_corners=False
+            )
+        return output  # type: ignore[no-any-return]
 
     def training_step(
         self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int

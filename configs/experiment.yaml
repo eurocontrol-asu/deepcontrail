@@ -48,4 +48,3 @@ training:
   weight_decay: 1.0e-4
   precision: bf16-mixed
   gradient_clip_val: 1.0
-  early_stopping_patience: 10
