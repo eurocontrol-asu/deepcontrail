@@ -35,7 +35,7 @@ import mlflow
 import pytorch_lightning as pl
 import segmentation_models_pytorch as smp
 import torch
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import MLFlowLogger
 from torch.utils.data import DataLoader
 
@@ -192,6 +192,12 @@ def main(args: argparse.Namespace) -> None:
     # Data
     logger.info("Building data loaders...")
     train_loader, val_loader = build_dataloaders(train_data_cfg, val_data_cfg)
+
+    # Masks are returned at the dataset's native resolution; the module resizes
+    # its output back to that size so loss/metric computation runs at mask
+    # resolution even when images are upscaled (image_size > native_size).
+    native_size = train_loader.dataset.native_size
+
     logger.info(
         "Train: %d samples, Val: %d samples",
         len(train_loader.dataset),  # type: ignore[arg-type]
@@ -211,6 +217,7 @@ def main(args: argparse.Namespace) -> None:
         warmup_epochs=training_cfg.warmup_epochs,
         scheduler_interval=training_cfg.scheduler_interval,
         steps_per_epoch=len(train_loader),
+        native_size=native_size,
     )
 
     # Run name
@@ -237,15 +244,6 @@ def main(args: argparse.Namespace) -> None:
 
     # Callbacks
     callbacks: list[pl.Callback] = [checkpoint_cb]
-    if training_cfg.early_stopping_patience is not None:
-        callbacks.append(
-            EarlyStopping(
-                monitor="val_dice",
-                mode="max",
-                patience=training_cfg.early_stopping_patience,
-                verbose=True,
-            )
-        )
 
     # Trainer
     trainer = pl.Trainer(
@@ -309,6 +307,7 @@ def main(args: argparse.Namespace) -> None:
                 warmup_epochs=training_cfg.warmup_epochs,
                 scheduler_interval=training_cfg.scheduler_interval,
                 steps_per_epoch=len(train_loader),
+                native_size=native_size,
             )
         else:
             best_module = module
@@ -389,6 +388,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=None, help="Override learning rate.")
     parser.add_argument("--batch-size", type=int, default=None, help="Override batch size.")
     parser.add_argument("--image-size", type=int, default=None, help="Override image size.")
+    parser.add_argument(
+        "--fold",
+        type=int,
+        default=None,
+        help="K-fold CV: hold out this fold for validation (enables cross-validation).",
+    )
+    parser.add_argument(
+        "--num-folds",
+        type=int,
+        default=None,
+        help="Total number of CV folds (only used with --fold).",
+    )
     parser.add_argument("--encoder", type=str, default=None, help="Override encoder name.")
     parser.add_argument(
         "--architecture", type=str, default=None, help="Override model architecture."
@@ -396,9 +407,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-name", type=str, default=None, help="MLflow run name override.")
     parser.add_argument(
         "--skip-test", action="store_true", help="Skip evaluation on the holdout test set."
-    )
-    parser.add_argument(
-        "--patience", type=int, default=None, help="Early stopping patience (epochs)."
     )
     parser.add_argument("--warmup-epochs", type=int, default=None, help="Number of warmup epochs.")
     parser.add_argument(
