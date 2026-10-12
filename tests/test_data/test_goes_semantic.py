@@ -24,20 +24,33 @@ def test_init_discovers_paired_samples(synthetic_root: Path):
     from deepcontrail.data.config import DataConfig
     from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
 
-    cfg = DataConfig(root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE)
+    cfg = DataConfig(
+        root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE, val_fraction=0.0
+    )
     ds = GOESDataset(cfg)
 
-    assert len(ds) == 3, "should discover 3 train pairs"
+    assert len(ds) == 5, "should discover all 5 train pairs when val_fraction=0"
 
 
-def test_init_discovers_val_samples(synthetic_root: Path):
+def test_init_splits_train_val_on_the_fly(synthetic_root: Path):
     from deepcontrail.data.config import DataConfig
     from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
 
-    cfg = DataConfig(root=str(synthetic_root), split="val", image_size=_SYNTH_SIZE)
-    ds = GOESDataset(cfg)
+    train_ds = GOESDataset(
+        DataConfig(
+            root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE, val_fraction=0.2
+        )
+    )
+    val_ds = GOESDataset(
+        DataConfig(root=str(synthetic_root), split="val", image_size=_SYNTH_SIZE, val_fraction=0.2)
+    )
 
-    assert len(ds) == 2, "should discover 2 val pairs"
+    assert len(train_ds) == 4, "80% of 5 → 4 train"
+    assert len(val_ds) == 1, "20% of 5 → 1 val"
+    assert set(train_ds.stems).isdisjoint(val_ds.stems), "train and val must not overlap"
+    assert set(train_ds.stems) | set(val_ds.stems) == {f"train_{i:06d}" for i in range(1, 6)}, (
+        "train + val must cover all stems"
+    )
 
 
 def test_init_raises_on_missing_mask(synthetic_root_missing_mask: Path):
@@ -77,6 +90,56 @@ def test_stems_are_sorted(synthetic_root: Path):
     ds = GOESDataset(cfg)
 
     assert ds.stems == sorted(ds.stems), "stems must be deterministically sorted"
+
+
+# ---------------------------------------------------------------------------
+# val_fraction splitting
+# ---------------------------------------------------------------------------
+
+
+def test_val_fraction_zero_gives_all_to_train(synthetic_root: Path):
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    ds = GOESDataset(DataConfig(root=str(synthetic_root), split="train", val_fraction=0.0))
+
+    assert len(ds) == 5, "val_fraction=0 means no holdout"
+
+
+def test_val_split_reads_from_train_directory(synthetic_root: Path):
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    val_ds = GOESDataset(DataConfig(root=str(synthetic_root), split="val", val_fraction=0.4))
+
+    assert len(val_ds) == 2, "40% of 5 → 2 val stems"
+    assert val_ds._image_dir == synthetic_root / "images_semantic" / "train"
+
+
+def test_val_split_is_seeded_and_reproducible(synthetic_root: Path):
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    ds1 = GOESDataset(DataConfig(root=str(synthetic_root), split="val", val_fraction=0.2, seed=42))
+    ds2 = GOESDataset(DataConfig(root=str(synthetic_root), split="val", val_fraction=0.2, seed=42))
+
+    assert ds1.stems == ds2.stems, "same seed must produce identical val split"
+    assert len(ds1.stems) == 1, "20% of 5 → 1 val stem"
+
+
+def test_train_val_no_overlap_and_full_coverage(synthetic_root: Path):
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    for frac in [0.1, 0.2, 0.4, 0.5]:
+        train_ds = GOESDataset(
+            DataConfig(root=str(synthetic_root), split="train", val_fraction=frac)
+        )
+        val_ds = GOESDataset(DataConfig(root=str(synthetic_root), split="val", val_fraction=frac))
+
+        all_stems = set(train_ds.stems) | set(val_ds.stems)
+        assert len(all_stems) == 5, f"frac={frac}: must cover all 5 stems"
+        assert set(train_ds.stems).isdisjoint(val_ds.stems), f"frac={frac}: overlap"
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +207,12 @@ def test_getitem_allzero_mask_is_valid(synthetic_root_allzero_mask: Path):
     from deepcontrail.data.config import DataConfig
     from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
 
-    cfg = DataConfig(root=str(synthetic_root_allzero_mask), split="train", image_size=_SYNTH_SIZE)
+    cfg = DataConfig(
+        root=str(synthetic_root_allzero_mask),
+        split="train",
+        image_size=_SYNTH_SIZE,
+        val_fraction=0.0,
+    )
     ds = GOESDataset(cfg)
 
     image, mask = ds[0]
@@ -270,19 +338,31 @@ def test_build_transform_raises_without_albumentations(synthetic_root: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_getitem_resizes_when_image_size_differs(synthetic_root: Path):
+def test_getitem_resizes_image_only_stays_mask_native(synthetic_root: Path):
     pytest.importorskip("torch")
     pytest.importorskip("albumentations")
     from deepcontrail.data.config import DataConfig
     from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
 
-    cfg = DataConfig(root=str(synthetic_root), split="val", image_size=8)
+    cfg = DataConfig(root=str(synthetic_root), split="train", image_size=8)
     ds = GOESDataset(cfg)
 
     image, mask = ds[0]
 
     assert image.shape == (3, 8, 8), f"expected (3, 8, 8), got {image.shape}"
-    assert mask.shape == (8, 8), f"expected (8, 8), got {mask.shape}"
+    assert mask.shape == (16, 16), f"mask stays native, expected (16, 16), got {mask.shape}"
+    assert mask.shape != image.shape[1:], "image and mask must have different spatial sizes"
+
+
+def test_dataset_reports_native_resolution(synthetic_root: Path):
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg = DataConfig(root=str(synthetic_root), split="train")
+    ds = GOESDataset(cfg)
+
+    assert ds.native_size == _SYNTH_SIZE
+    assert ds.native_resolution == _SYNTH_SIZE
 
 
 def test_getitem_no_resize_when_image_size_matches_native(synthetic_root: Path):
@@ -290,7 +370,7 @@ def test_getitem_no_resize_when_image_size_matches_native(synthetic_root: Path):
     from deepcontrail.data.config import DataConfig
     from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
 
-    cfg = DataConfig(root=str(synthetic_root), split="val", image_size=_SYNTH_SIZE)
+    cfg = DataConfig(root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE)
     ds = GOESDataset(cfg)
 
     image, mask = ds[0]
@@ -348,3 +428,216 @@ def test_dataset_applies_pixel_shift(synthetic_root: Path):
     assert not torch.equal(img_no, img_yes), (
         "pixel_shift=0.5 must produce different image values than pixel_shift=0.0"
     )
+
+
+# ---------------------------------------------------------------------------
+# k-fold cross-validation
+# ---------------------------------------------------------------------------
+
+
+def test_fold_defaults_to_none():
+    from deepcontrail.data.config import DataConfig
+
+    cfg = DataConfig(root="/tmp/fake")
+
+    assert cfg.fold is None, "CV must be disabled by default"
+    assert cfg.num_folds == 4
+
+
+def test_fold_partitions_train_stems(synthetic_root: Path):
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    all_ds = GOESDataset(DataConfig(root=str(synthetic_root), split="train", val_fraction=0.0))
+    all_stems = set(all_ds.stems)
+
+    cv_train = GOESDataset(DataConfig(root=str(synthetic_root), split="train", fold=0, num_folds=5))
+    cv_val = GOESDataset(DataConfig(root=str(synthetic_root), split="val", fold=0, num_folds=5))
+
+    union = set(cv_train.stems) | set(cv_val.stems)
+    assert union == all_stems, "CV fold must cover all train stems"
+    assert set(cv_train.stems).isdisjoint(cv_val.stems), "train and val folds must not overlap"
+
+
+def test_fold_getitem_loads_from_correct_directory(synthetic_root: Path):
+    pytest.importorskip("torch")
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cv_ds = GOESDataset(
+        DataConfig(
+            root=str(synthetic_root), split="train", fold=0, num_folds=5, image_size=_SYNTH_SIZE
+        )
+    )
+
+    for i in range(len(cv_ds)):
+        image, mask = cv_ds[i]
+        assert image.shape == (3, _SYNTH_SIZE, _SYNTH_SIZE), f"sample {i}: bad image shape"
+        assert mask.shape == (_SYNTH_SIZE, _SYNTH_SIZE), f"sample {i}: bad mask shape"
+
+
+def test_fold_test_is_not_folded(synthetic_root: Path):
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    test_ds = GOESDataset(DataConfig(root=str(synthetic_root), split="test", fold=1, num_folds=4))
+
+    assert len(test_ds) == 2
+    assert set(test_ds.stems) == {"test_000001", "test_000002"}
+
+
+# ---------------------------------------------------------------------------
+# mask_type: probability masks
+# ---------------------------------------------------------------------------
+
+
+def test_binary_mask_is_long_tensor(synthetic_root: Path):
+    torch = pytest.importorskip("torch")
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        mask_type="binary",
+        image_size=_SYNTH_SIZE,
+    )
+    ds = GOESDataset(cfg)
+
+    _, mask = ds[0]
+
+    assert mask.dtype == torch.long, "binary mask_type must return a long tensor"
+
+
+def test_probability_mask_returns_float32_tensor(synthetic_root: Path):
+    torch = pytest.importorskip("torch")
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        mask_type="probability",
+        image_size=_SYNTH_SIZE,
+    )
+    ds = GOESDataset(cfg)
+
+    _, mask = ds[0]
+
+    assert mask.dtype == torch.float32, "probability mask_type must return a float32 tensor"
+
+
+def test_probability_mask_values_in_range_zero_to_one(synthetic_root: Path):
+    pytest.importorskip("torch")
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        mask_type="probability",
+        image_size=_SYNTH_SIZE,
+    )
+    ds = GOESDataset(cfg)
+
+    _, mask = ds[0]
+
+    assert mask.min() >= 0.0, f"probability mask min {mask.min()} is below 0"
+    assert mask.max() <= 1.0, f"probability mask max {mask.max()} is above 1"
+
+
+def test_probability_mask_shape_is_hw(synthetic_root: Path):
+    pytest.importorskip("torch")
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        mask_type="probability",
+        image_size=_SYNTH_SIZE,
+    )
+    ds = GOESDataset(cfg)
+
+    _, mask = ds[0]
+
+    assert mask.shape == (_SYNTH_SIZE, _SYNTH_SIZE), (
+        "probability mask should be a 2-D (H, W) array with no channel dimension"
+    )
+
+
+def test_probability_mask_not_validated_as_binary(synthetic_root: Path):
+    pytest.importorskip("torch")
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        mask_type="probability",
+        image_size=_SYNTH_SIZE,
+    )
+    ds = GOESDataset(cfg)
+
+    for i in range(len(ds)):
+        _, mask = ds[i]
+        assert mask.ndim == 2, f"mask[{i}] should be 2-D"
+
+
+def test_stems_discovered_with_probability_mask_type(synthetic_root: Path):
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    binary_ds = GOESDataset(DataConfig(root=str(synthetic_root), split="train", mask_type="binary"))
+    prob_ds = GOESDataset(
+        DataConfig(root=str(synthetic_root), split="train", mask_type="probability")
+    )
+
+    assert prob_ds.stems == binary_ds.stems, "probability mask_type must discover the same stems"
+
+
+def test_probability_mask_with_augmentation_stays_float(synthetic_root: Path):
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("albumentations")
+    from deepcontrail.data.config import AugmentationConfig, DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        mask_type="probability",
+        augmentation=AugmentationConfig(),
+        seed=7,
+        image_size=_SYNTH_SIZE,
+    )
+    ds = GOESDataset(cfg)
+
+    _, mask = ds[0]
+
+    assert mask.dtype == torch.float32, "augmented probability mask must stay float32"
+    assert mask.shape == (_SYNTH_SIZE, _SYNTH_SIZE)
+
+
+def test_probability_mask_augmentation_is_reproducible(synthetic_root: Path):
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("albumentations")
+    from deepcontrail.data.config import AugmentationConfig, DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        mask_type="probability",
+        augmentation=AugmentationConfig(),
+        seed=7,
+        image_size=_SYNTH_SIZE,
+    )
+
+    ds1 = GOESDataset(cfg)
+    img1, mask1 = ds1[0]
+
+    ds2 = GOESDataset(cfg)
+    img2, mask2 = ds2[0]
+
+    assert torch.equal(img1, img2), "same seed must produce identical image"
+    assert torch.equal(mask1, mask2), "same seed must produce identical probability mask"

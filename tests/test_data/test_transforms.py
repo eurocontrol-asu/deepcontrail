@@ -89,46 +89,30 @@ def test_build_augmentation_seeded_is_reproducible():
     )
 
 
-def test_build_augmentation_with_resize():
+def test_build_augmentation_does_not_resize():
     from deepcontrail.data.config import AugmentationConfig
     from deepcontrail.data.transforms import build_augmentation
 
     cfg = AugmentationConfig(horizontal_flip=0.0, vertical_flip=0.0, random_rotate_90=0.0)
-    transform = build_augmentation(cfg, seed=42, image_size=8)
+    transform = build_augmentation(cfg, seed=42)
 
     image = np.zeros((16, 16, 3), dtype=np.uint8)
     mask = np.zeros((16, 16), dtype=np.uint8)
 
     result = transform(image=image, mask=mask)
 
-    assert result["image"].shape == (8, 8, 3), "should resize image to 8x8"
-    assert result["mask"].shape == (8, 8), "should resize mask to 8x8"
+    assert result["image"].shape == (16, 16, 3), "augmentation must not resize"
+    assert result["mask"].shape == (16, 16), "augmentation must not resize the mask"
 
 
-def test_build_augmentation_no_resize_when_none():
-    from deepcontrail.data.config import AugmentationConfig
-    from deepcontrail.data.transforms import build_augmentation
+def test_build_image_resize_only_resizes_image():
+    from deepcontrail.data.transforms import build_image_resize
 
-    cfg = AugmentationConfig(horizontal_flip=0.0, vertical_flip=0.0, random_rotate_90=0.0)
-    transform = build_augmentation(cfg, seed=42, image_size=None)
+    transform = build_image_resize(8)
 
     image = np.zeros((16, 16, 3), dtype=np.uint8)
-    mask = np.zeros((16, 16), dtype=np.uint8)
 
-    result = transform(image=image, mask=mask)
+    result = transform(image=image)
 
-    assert result["image"].shape == (16, 16, 3), "no resize when image_size is None"
-
-
-def test_build_resize():
-    from deepcontrail.data.transforms import build_resize
-
-    transform = build_resize(8)
-
-    image = np.zeros((16, 16, 3), dtype=np.uint8)
-    mask = np.zeros((16, 16), dtype=np.uint8)
-
-    result = transform(image=image, mask=mask)
-
-    assert result["image"].shape == (8, 8, 3)
-    assert result["mask"].shape == (8, 8)
+    assert result["image"].shape == (8, 8, 3), "resize should target the image only"
+    assert "mask" not in result, "resize must not touch the mask"

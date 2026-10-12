@@ -171,6 +171,43 @@ def to_tensors(
     return image_t, mask_t
 
 
+def to_tensors_soft(
+    image: np.ndarray,
+    mask: np.ndarray,
+    normalize: NormalizeConfig,
+) -> tuple[Any, Any]:
+    """Convert image and soft mask to torch tensors.
+
+    Like ``to_tensors`` but returns the mask as ``float32`` rather than ``long``,
+    preserving the continuous probability values used for soft-label training.
+
+    Parameters
+    ----------
+    image
+        uint8 HWC image array.
+    mask
+        float32 HW soft-mask array with values in ``[0, 1]``.
+    normalize
+        Channel-wise mean/std for normalization.
+
+    Returns
+    -------
+    tuple[Tensor, Tensor]
+        ``(image, mask)`` where image is float32 CHW (normalized) and
+        mask is float32 HW.
+    """
+    import torch
+
+    image_f = image.astype(np.float32) / 255.0
+    image_t = torch.from_numpy(image_f).permute(2, 0, 1)
+
+    mean, std = _norm_tensors(normalize.mean, normalize.std)
+    image_t = (image_t - mean) / std
+
+    mask_t = torch.from_numpy(mask.astype(np.float32))
+    return image_t, mask_t
+
+
 def to_numpy(image: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Convert image to float32 [0,1] without normalization (exploration fallback).
 
