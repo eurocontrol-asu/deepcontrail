@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from PIL import Image
 
 from deepcontrail.data._loading import (
@@ -19,11 +20,12 @@ from deepcontrail.data._loading import (
     shift_image,
     to_numpy,
     to_tensors,
+    to_tensors_soft,
     validate_binary_mask,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    import albumentations as A
 
     from deepcontrail.data.config import DataConfig
 
@@ -50,43 +52,117 @@ class GOESSemanticDataset:
         self.config = config
         self._root = Path(config.root)
 
-        self._image_dir = self._root / "images_semantic" / config.split
-        self._mask_dir = self._root / "semantic_masks" / config.split
+        # Both "train" and "val" splits read from the train/ directory on disk;
+        # the split is computed on-the-fly by _discover_stems.  Only "test"
+        # reads from a separate directory.
+        mask_subdir = "probability_masks" if config.mask_type == "probability" else "semantic_masks"
+        disk_split = "test" if config.split == "test" else "train"
+        self._dir_pairs = [
+            (self._root / "images_semantic" / disk_split, self._root / mask_subdir / disk_split),
+        ]
+        self._image_dir, self._mask_dir = self._dir_pairs[0]
 
+        self._stem_dirs: dict[str, tuple[Path, Path]] = {}
         self.stems = self._discover_stems()
-        self._transform = self._build_transform()
+        self.native_size = self._native_size()
+        self._aug_transform, self._resize_transform = self._build_transform()
+
+    @property
+    def native_resolution(self) -> int:
+        """Native square resolution of the images (256 for GOES-16)."""
+        return self.native_size
 
     def _discover_stems(self) -> list[str]:
-        """Scan image directory, verify each has a matching mask, return sorted stems."""
-        image_paths = sorted(self._image_dir.glob("*.jpg"))
+        """Scan the image directory and partition stems for the requested split.
+
+        ``"test"`` returns every stem in ``test/``.  ``"train"`` and ``"val"``
+        both read from ``train/`` and split deterministically:
+
+        * When ``fold`` is set, k-fold CV partitioning (modular arithmetic)
+          takes precedence.
+        * Otherwise ``val_fraction`` determines the split — stems are
+          shuffled with ``seed`` and the first ``val_fraction * N`` go to
+          validation, the rest to training.
+        """
+        img_dir, mask_dir = self._dir_pairs[0]
+        stems = self._scan_stems(img_dir, mask_dir)
+        for stem in stems:
+            self._stem_dirs[stem] = (img_dir, mask_dir)
+
+        if self.config.split == "test":
+            return stems
+
+        fold = self.config.fold
+        if fold is not None:
+            num_folds = self.config.num_folds
+            if self.config.split == "val":
+                return [s for i, s in enumerate(stems) if i % num_folds == fold]
+            return [s for i, s in enumerate(stems) if i % num_folds != fold]
+
+        vf = self.config.val_fraction
+        if vf <= 0:
+            return stems
+
+        rng = np.random.RandomState(self.config.seed)
+        indices = rng.permutation(len(stems))
+        n_val = max(1, round(len(stems) * vf))
+        val_idx = set(indices[:n_val].tolist())
+        if self.config.split == "val":
+            return [s for i, s in enumerate(stems) if i in val_idx]
+        return [s for i, s in enumerate(stems) if i not in val_idx]
+
+    def _scan_stems(self, image_dir: Path, mask_dir: Path) -> list[str]:
+        """Scan ``image_dir`` for paired images/masks, return sorted stems."""
+        image_paths = sorted(image_dir.glob("*.jpg"))
         stems: list[str] = []
         for img_path in image_paths:
             stem = img_path.stem
-            mask_path = self._mask_dir / f"{stem}.png"
+            mask_ext = ".npy" if self.config.mask_type == "probability" else ".png"
+            mask_path = mask_dir / f"{stem}{mask_ext}"
             if not mask_path.exists():
                 msg = f"No mask found for image {stem!r} (expected {mask_path})"
                 raise FileNotFoundError(msg)
             stems.append(stem)
         return stems
 
+    def _native_size(self) -> int:
+        """Native square resolution of the images (256 for GOES-16)."""
+        if not self.stems:
+            return self.config.image_size
+        with Image.open(self._image_dir / f"{self.stems[0]}.jpg") as img:
+            width, _height = img.size
+        return width
+
     def _needs_resize(self) -> bool:
-        """Check if loaded images need resizing to match config.image_size."""
+        """Whether images must be resized to match ``image_size``.
+
+        Compares the native resolution against ``image_size``; the mask is
+        always returned at native resolution regardless.
+        """
         if not self.stems:
             return False
-        with Image.open(self._image_dir / f"{self.stems[0]}.jpg") as img:
-            w, h = img.size
-        return w != self.config.image_size or h != self.config.image_size
+        return self.native_size != self.config.image_size
 
-    def _build_transform(self) -> Callable[..., dict[str, Any]] | None:
-        """Build albumentations pipeline from config, or None."""
+    def _build_transform(
+        self,
+    ) -> tuple[A.Compose | None, A.Resize | None]:
+        """Build the augmentation and (optional) image-only resize transforms.
+
+        Returns
+        -------
+        tuple[A.Compose | None, A.Resize | None]
+            ``(augmentation, image_resize)``. ``augmentation`` co-transforms
+            the image and mask at native resolution; ``image_resize`` resizes
+            only the image, when ``image_size`` differs from native.
+        """
         has_augmentation = self.config.augmentation is not None
         needs_resize = self._needs_resize()
 
         if not has_augmentation and not needs_resize:
-            return None
+            return None, None
 
         try:
-            from deepcontrail.data.transforms import build_augmentation, build_resize
+            from deepcontrail.data.transforms import build_augmentation, build_image_resize
         except ImportError:
             msg = (
                 "albumentations is required for augmentation and resizing. "
@@ -94,13 +170,13 @@ class GOESSemanticDataset:
             )
             raise ImportError(msg) from None
 
-        if has_augmentation:
-            return build_augmentation(
-                self.config.augmentation,  # type: ignore[arg-type]
-                seed=self.config.seed,
-                image_size=self.config.image_size if needs_resize else None,
-            )
-        return build_resize(self.config.image_size)
+        augmentation = (
+            build_augmentation(self.config.augmentation, seed=self.config.seed)  # type: ignore[arg-type]
+            if has_augmentation
+            else None
+        )
+        image_resize = build_image_resize(self.config.image_size) if needs_resize else None
+        return augmentation, image_resize
 
     def __len__(self) -> int:
         """Return the number of image/mask pairs in this split."""
@@ -119,25 +195,38 @@ class GOESSemanticDataset:
         """
         stem = self.stems[index]
 
-        image = load_image(self._image_dir / f"{stem}.jpg")
+        img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
+        image = load_image(img_dir / f"{stem}.jpg")
         if self.config.pixel_shift != 0.0:
             image = shift_image(image, self.config.pixel_shift)
-        mask = load_mask(self._mask_dir / f"{stem}.png")
+        if self.config.mask_type == "probability":
+            mask = np.load(mask_dir / f"{stem}.npy")
+        else:
+            mask = load_mask(mask_dir / f"{stem}.png")
+            mask = binarize_mask(mask)
 
-        mask = binarize_mask(mask)
         assert image.shape[:2] == mask.shape, (
-            f"spatial mismatch: image {image.shape[:2]} vs mask {mask.shape}"
+            f"spatial mismatch at native resolution: image {image.shape[:2]} vs mask {mask.shape}"
         )
 
-        if self._transform is not None:
-            transformed = self._transform(image=image, mask=mask)
+        # Augmentation runs at native resolution on BOTH image and mask so they
+        # stay aligned and the mask is never upscaled by interpolation.
+        if self._aug_transform is not None:
+            transformed = self._aug_transform(image=image, mask=mask)
             image = transformed["image"]
             mask = transformed["mask"]
 
-        validate_binary_mask(mask)
+        # The image alone is resized to image_size; the mask stays native.
+        if self._resize_transform is not None:
+            image = self._resize_transform(image=image)["image"]
+
+        if self.config.mask_type != "probability":
+            validate_binary_mask(mask)
 
         try:
             import torch as _  # noqa: F401
         except ImportError:
             return to_numpy(image, mask)
+        if self.config.mask_type == "probability":
+            return to_tensors_soft(image, mask, self.config.normalize)
         return to_tensors(image, mask, self.config.normalize)

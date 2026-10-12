@@ -39,9 +39,6 @@ class TrainingConfig(BaseModel):
         Mixed-precision mode for Lightning (e.g. ``"16-mixed"``).
     gradient_clip_val
         Gradient clipping value, or ``None`` to disable.
-    early_stopping_patience
-        Stop training if ``val_dice`` does not improve for this many epochs.
-        ``None`` disables early stopping.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -55,7 +52,6 @@ class TrainingConfig(BaseModel):
     weight_decay: float = Field(default=1e-4, ge=0)
     precision: str = "16-mixed"
     gradient_clip_val: float | None = None
-    early_stopping_patience: int | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TrainingConfig:
@@ -97,12 +93,14 @@ def load_configs(
         data_raw["batch_size"] = args.batch_size
     if args.image_size is not None:
         data_raw["image_size"] = args.image_size
+    if args.fold is not None:
+        data_raw["fold"] = args.fold
+    if args.num_folds is not None:
+        data_raw["num_folds"] = args.num_folds
     if args.encoder is not None:
         model_raw["encoder_name"] = args.encoder
     if args.architecture is not None:
         model_raw["architecture"] = args.architecture
-    if args.patience is not None:
-        training_raw["early_stopping_patience"] = args.patience
     if args.warmup_epochs is not None:
         training_raw["warmup_epochs"] = args.warmup_epochs
     if args.scheduler_interval is not None:
@@ -110,8 +108,12 @@ def load_configs(
 
     train_data_cfg = DataConfig.from_dict(data_raw)
     no_aug = {**train_data_cfg.model_dump(), "augmentation": None}
-    val_data_cfg = DataConfig.from_dict({**no_aug, "split": "val"})
-    test_data_cfg = DataConfig.from_dict({**no_aug, "split": "test"})
+    # Validation and test always evaluate against binary masks so metrics
+    # stay comparable across experiments regardless of training mask_type.
+    val_data_cfg = DataConfig.from_dict({**no_aug, "split": "val", "mask_type": "binary"})
+    test_data_cfg = DataConfig.from_dict(
+        {**no_aug, "split": "test", "fold": None, "mask_type": "binary"}
+    )
     model_cfg = ModelConfig.from_dict(model_raw)
     loss_cfg = LossConfig.from_dict(loss_raw)
     training_cfg = TrainingConfig.from_dict(training_raw)
