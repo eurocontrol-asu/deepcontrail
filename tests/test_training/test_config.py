@@ -209,7 +209,7 @@ def test_load_configs_fold_disabled_by_default(tmp_path):
     assert test.fold is None, "test has no fold by default"
 
 
-def test_load_configs_val_and_test_always_use_binary_masks(tmp_path):
+def test_load_configs_eval_always_uses_binary_masks(tmp_path):
     yaml_data = {
         "data": {"root": "/data/x", "split": "train", "mask_type": "probability"},
         "model": {"architecture": "Unet", "encoder_name": "resnet18"},
@@ -223,6 +223,6 @@ def test_load_configs_val_and_test_always_use_binary_masks(tmp_path):
         _args_namespace(),  # type: ignore[arg-type]
     )
 
-    assert train.mask_type == "probability", "train keeps the requested mask_type"
-    assert val.mask_type == "binary", "val must always use binary masks for comparable metrics"
-    assert test.mask_type == "binary", "test must always use binary masks for comparable metrics"
+    assert train.mask_type == "probability", "train keeps soft labels"
+    assert val.mask_type == "binary", "val always uses ground truth"
+    assert test.mask_type == "binary", "test always uses ground truth"

@@ -24,12 +24,10 @@ def test_init_discovers_paired_samples(synthetic_root: Path):
     from deepcontrail.data.config import DataConfig
     from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
 
-    cfg = DataConfig(
-        root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE, val_fraction=0.0
-    )
+    cfg = DataConfig(root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE)
     ds = GOESDataset(cfg)
 
-    assert len(ds) == 5, "should discover all 5 train pairs when val_fraction=0"
+    assert len(ds) == 4, "5 stems with val_fraction=0.1 → 4 train"
 
 
 def test_init_splits_train_val_on_the_fly(synthetic_root: Path):
@@ -59,7 +57,7 @@ def test_init_raises_on_missing_mask(synthetic_root_missing_mask: Path):
 
     cfg = DataConfig(root=str(synthetic_root_missing_mask), split="train", image_size=_SYNTH_SIZE)
 
-    with pytest.raises(FileNotFoundError, match="train_000002"):
+    with pytest.raises(ValueError, match="train_000002"):
         GOESDataset(cfg)
 
 
@@ -95,15 +93,6 @@ def test_stems_are_sorted(synthetic_root: Path):
 # ---------------------------------------------------------------------------
 # val_fraction splitting
 # ---------------------------------------------------------------------------
-
-
-def test_val_fraction_zero_gives_all_to_train(synthetic_root: Path):
-    from deepcontrail.data.config import DataConfig
-    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
-
-    ds = GOESDataset(DataConfig(root=str(synthetic_root), split="train", val_fraction=0.0))
-
-    assert len(ds) == 5, "val_fraction=0 means no holdout"
 
 
 def test_val_split_reads_from_train_directory(synthetic_root: Path):
@@ -209,9 +198,8 @@ def test_getitem_allzero_mask_is_valid(synthetic_root_allzero_mask: Path):
 
     cfg = DataConfig(
         root=str(synthetic_root_allzero_mask),
-        split="train",
+        split="val",
         image_size=_SYNTH_SIZE,
-        val_fraction=0.0,
     )
     ds = GOESDataset(cfg)
 
@@ -448,14 +436,11 @@ def test_fold_partitions_train_stems(synthetic_root: Path):
     from deepcontrail.data.config import DataConfig
     from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
 
-    all_ds = GOESDataset(DataConfig(root=str(synthetic_root), split="train", val_fraction=0.0))
-    all_stems = set(all_ds.stems)
-
     cv_train = GOESDataset(DataConfig(root=str(synthetic_root), split="train", fold=0, num_folds=5))
     cv_val = GOESDataset(DataConfig(root=str(synthetic_root), split="val", fold=0, num_folds=5))
 
     union = set(cv_train.stems) | set(cv_val.stems)
-    assert union == all_stems, "CV fold must cover all train stems"
+    assert len(union) == 5, "CV fold must cover all 5 train stems"
     assert set(cv_train.stems).isdisjoint(cv_val.stems), "train and val folds must not overlap"
 
 
@@ -466,7 +451,11 @@ def test_fold_getitem_loads_from_correct_directory(synthetic_root: Path):
 
     cv_ds = GOESDataset(
         DataConfig(
-            root=str(synthetic_root), split="train", fold=0, num_folds=5, image_size=_SYNTH_SIZE
+            root=str(synthetic_root),
+            split="train",
+            fold=0,
+            num_folds=5,
+            image_size=_SYNTH_SIZE,
         )
     )
 
@@ -641,3 +630,109 @@ def test_probability_mask_augmentation_is_reproducible(synthetic_root: Path):
 
     assert torch.equal(img1, img2), "same seed must produce identical image"
     assert torch.equal(mask1, mask2), "same seed must produce identical probability mask"
+
+
+# ---------------------------------------------------------------------------
+# image_source: spectral
+# ---------------------------------------------------------------------------
+
+
+def test_getitem_spectral_source_returns_correct_shapes(synthetic_root: Path):
+    pytest.importorskip("torch")
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        image_size=_SYNTH_SIZE,
+        image_source="spectral",
+    )
+    ds = GOESDataset(cfg)
+
+    image, mask = ds[0]
+
+    assert image.shape == (3, _SYNTH_SIZE, _SYNTH_SIZE), "spectral image should be CHW"
+    assert mask.shape == (_SYNTH_SIZE, _SYNTH_SIZE)
+
+
+def test_getitem_spectral_source_differs_from_jpeg(synthetic_root: Path):
+    torch = pytest.importorskip("torch")
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg_jpeg = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        image_size=_SYNTH_SIZE,
+        image_source="jpeg",
+    )
+    cfg_spectral = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        image_size=_SYNTH_SIZE,
+        image_source="spectral",
+    )
+
+    ds_jpeg = GOESDataset(cfg_jpeg)
+    ds_spectral = GOESDataset(cfg_spectral)
+
+    img_jpeg, _ = ds_jpeg[0]
+    img_spectral, _ = ds_spectral[0]
+
+    assert not torch.equal(img_jpeg, img_spectral), (
+        "spectral source should produce different values than JPEG source"
+    )
+
+
+def test_getitem_spectral_source_with_pixel_shift(synthetic_root: Path):
+    torch = pytest.importorskip("torch")
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg_no = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        image_size=_SYNTH_SIZE,
+        image_source="spectral",
+        pixel_shift=0.0,
+    )
+    cfg_yes = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        image_size=_SYNTH_SIZE,
+        image_source="spectral",
+        pixel_shift=0.5,
+    )
+
+    ds_no = GOESDataset(cfg_no)
+    ds_yes = GOESDataset(cfg_yes)
+
+    img_no, _ = ds_no[0]
+    img_yes, _ = ds_yes[0]
+
+    assert not torch.equal(img_no, img_yes), (
+        "pixel_shift should change spectral-sourced image values"
+    )
+
+
+def test_getitem_spectral_source_numpy_fallback(synthetic_root: Path):
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg = DataConfig(
+        root=str(synthetic_root),
+        split="train",
+        image_size=_SYNTH_SIZE,
+        image_source="spectral",
+    )
+    ds = GOESDataset(cfg)
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, _mask = ds[0]
+
+    assert isinstance(image, np.ndarray)
+    assert image.dtype == np.float32
+    assert image.shape == (_SYNTH_SIZE, _SYNTH_SIZE, 3)
+    assert image.min() >= 0.0
+    assert image.max() <= 1.0

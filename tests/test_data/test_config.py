@@ -245,6 +245,24 @@ def test_data_config_num_folds_must_be_at_least_two():
         DataConfig(root="/tmp/fake", fold=0, num_folds=1)
 
 
+def test_data_config_val_fraction_zero_without_fold_rejected():
+    from pydantic import ValidationError
+
+    from deepcontrail.data.config import DataConfig
+
+    with pytest.raises(ValidationError, match="val_fraction must be > 0"):
+        DataConfig(root="/tmp/fake", val_fraction=0.0)
+
+
+def test_data_config_val_fraction_with_fold_allowed():
+    from deepcontrail.data.config import DataConfig
+
+    cfg = DataConfig(root="/tmp/fake", val_fraction=0.2, fold=0)
+
+    assert cfg.fold == 0
+    assert cfg.val_fraction == 0.2
+
+
 # --- val_fraction ---
 
 
@@ -275,3 +293,29 @@ def test_data_config_val_fraction_rejects_one_or_above():
 
     with pytest.raises(ValidationError):
         DataConfig(root="/tmp/fake", val_fraction=1.5)
+
+
+# --- image_source ---
+
+
+def test_image_source_defaults_to_jpeg():
+    from deepcontrail.data.config import DataConfig
+
+    cfg = DataConfig(root="/tmp/fake")
+
+    assert cfg.image_source == "jpeg"
+
+
+def test_image_source_accepts_spectral():
+    from deepcontrail.data.config import DataConfig
+
+    cfg = DataConfig(root="/tmp/fake", image_source="spectral")
+
+    assert cfg.image_source == "spectral"
+
+
+def test_image_source_rejects_invalid():
+    from deepcontrail.data.config import DataConfig
+
+    with pytest.raises(ValidationError, match="image_source"):
+        DataConfig(root="/tmp/fake", image_source="raw")

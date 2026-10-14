@@ -321,8 +321,17 @@ def main(args: argparse.Namespace) -> None:
         val_threshold = val_metrics["final/val_threshold"]
         logger.info("Optimal val threshold: %.2f", val_threshold)
 
+        # Val with D4 TTA
+        logger.info("Evaluating on val set with D4 TTA...")
+        val_tta_metrics = evaluate_global(
+            best_module, val_loader, device, prefix="val_tta", tta=True
+        )
+        mlflow.log_metrics(val_tta_metrics)
+        val_tta_threshold = val_tta_metrics["final/val_tta_threshold"]
+
         # Global evaluation on test (apply val threshold — no search)
         test_metrics: dict[str, float] = {}
+        test_tta_metrics: dict[str, float] = {}
         if not args.skip_test:
             logger.info("Evaluating on test set (threshold=%.2f from val)...", val_threshold)
             test_ds = test_ds_for_count or GOESSemanticDataset(test_data_cfg)
@@ -339,6 +348,17 @@ def main(args: argparse.Namespace) -> None:
             )
             mlflow.log_metrics(test_metrics)
 
+            logger.info("Evaluating on test set with D4 TTA...")
+            test_tta_metrics = evaluate_global(
+                best_module,
+                test_loader,
+                device,
+                prefix="test_tta",
+                threshold=val_tta_threshold,
+                tta=True,
+            )
+            mlflow.log_metrics(test_tta_metrics)
+
         if checkpoint_cb.best_model_score is not None:
             mlflow.log_metric("best_epoch_val_dice", float(checkpoint_cb.best_model_score))
 
@@ -351,7 +371,7 @@ def main(args: argparse.Namespace) -> None:
             mlflow.log_artifact(best_ckpt_path)
 
     # Summary
-    all_metrics = {**val_metrics, **test_metrics}
+    all_metrics = {**val_metrics, **val_tta_metrics, **test_metrics, **test_tta_metrics}
     print("\n" + "=" * 60)
     print("TRAINING COMPLETE")
     print("=" * 60)

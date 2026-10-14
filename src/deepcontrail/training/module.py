@@ -60,8 +60,8 @@ class ContrailSegmentationModule(pl.LightningModule):
         self.steps_per_epoch = steps_per_epoch
         self.native_size = native_size
 
-        self._val_dices: list[float] = []
-        self._val_ious: list[float] = []
+        self._val_preds: list[torch.Tensor] = []
+        self._val_targets: list[torch.Tensor] = []
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass, resizing model output back to native mask resolution.
@@ -89,27 +89,30 @@ class ContrailSegmentationModule(pl.LightningModule):
         return loss
 
     def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
-        """Compute validation loss and metrics for one batch."""
+        """Accumulate predictions and targets for global Dice at epoch end."""
         images, masks = batch
         logits = self(images)
         loss = self.loss_fn(logits, masks.float())
 
         preds_binary = (torch.sigmoid(logits).squeeze(1) > 0.5).long()
-
-        batch_dice = dice_coefficient(preds_binary, masks)
-        batch_iou = iou_score(preds_binary, masks)
-
-        self._val_dices.append(batch_dice)
-        self._val_ious.append(batch_iou)
+        self._val_preds.append(preds_binary.cpu())
+        self._val_targets.append(masks.cpu())
 
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val_dice", batch_dice, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val_iou", batch_iou, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
-        """Clear per-batch metric accumulators."""
-        self._val_dices.clear()
-        self._val_ious.clear()
+        """Compute global Dice and IoU across the full validation set."""
+        all_preds = torch.cat(self._val_preds)
+        all_targets = torch.cat(self._val_targets)
+
+        global_dice = dice_coefficient(all_preds, all_targets)
+        global_iou = iou_score(all_preds, all_targets)
+
+        self.log("val_dice", global_dice, prog_bar=True)
+        self.log("val_iou", global_iou, prog_bar=True)
+
+        self._val_preds.clear()
+        self._val_targets.clear()
 
     def configure_optimizers(self) -> dict[str, Any]:
         """Build optimizer and learning rate scheduler."""

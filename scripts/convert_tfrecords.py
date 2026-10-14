@@ -1,0 +1,442 @@
+#!/usr/bin/env python
+"""Convert raw OpenContrails TFRecords into the DeepContrail filesystem layout.
+
+The raw OpenContrails export stores each sample as one TFRecord holding a set of
+serialized string fields (thermal bands, per-annotator instance masks, the
+consensus pixel mask, ...). This script decodes those shards into the layout the
+rest of the pipeline expects::
+
+    <output-dir>/
+        images_semantic/{train,val,test}/{stem}.jpg        # (unchanged)
+        semantic_masks/{train,val,test}/{stem}.png         # (already present)
+        probability_masks/{train,val,test}/{stem}.npy      # float32 (H, W)
+        annotator_masks/{train,val,test}/{stem}.npy        # uint8   (H, W, 4)
+        instance_masks/{train,val,test}/{stem}.npy         # int8    (N, H, W, 4)
+        spectral_bands/{train,val,test}/{stem}.npy         # float32 (H, W, 10)
+        metadata/{train,val,test}_record_ids.json          # {stem: record_id}
+
+The record→stem mapping is positional and driven by the dataset's own split
+files (kept in ``output_dir``), so the original sample numbers are preserved
+exactly:
+
+* Raw ``train`` shards, processed in sorted order, number records by their
+  global position ``p`` (1..20,088) as ``train_{p:06d}``. A record whose stem
+  is listed in ``splits_val.txt`` is held out as a ``val`` sample; every other
+  record is a ``train`` sample.  The held-out samples keep the ``train_`` prefix
+  even though they live under ``semantic_masks/val/``.
+* Raw ``validation`` shards number records ``q`` (1..1,879) as ``val_{q:06d}``
+  and become the ``test`` split.
+
+Because the stems come from the existing dataset, each converted sample can be
+verified against ``semantic_masks/{split}/{stem}.png`` pixel-for-pixel.
+
+Only ``tensorflow`` (already installed in the project venv) is imported, and it
+is imported lazily so this script can be linted/run in environments where the
+shipped library must stay torch-free. This module lives under ``scripts/`` — it
+is tooling, not part of ``src/``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import json
+import os
+from pathlib import Path
+
+import numpy as np
+from PIL import Image
+
+# Silence TensorFlow's CUDA/GPU chatter; this is a CPU-bound conversion.
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+from typing import TYPE_CHECKING
+
+import tensorflow as tf
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+SPECTRAL_BAND_KEYS = (
+    "data_10um",
+    "data_11um",
+    "data_12um",
+    "brightness_temperature_difference",
+    "cloud_top",
+    "co2",
+    "low_vapor",
+    "mid_vapor",
+    "upper_vapor",
+    "ozone",
+)
+
+# The thermal band and mask fields are serialized strings (``tf.string``), not
+# dense scalars: ``parse_single_example`` rejects a ``double`` dense feature, and
+# ``parse_tensor`` expects a string. ``record_id``/``label`` are dense scalars.
+FEATURE_DESC: dict[str, tf.io.FixedLenFeature] = {
+    "record_id": tf.io.FixedLenFeature([], tf.int64),
+    "label": tf.io.FixedLenFeature([], tf.float32),
+    "human_pixel_masks": tf.io.FixedLenFeature([], tf.string),
+    "human_individual_masks": tf.io.FixedLenFeature([], tf.string),
+    "human_individual_instance_masks": tf.io.FixedLenFeature([], tf.string),
+    **{key: tf.io.FixedLenFeature([], tf.string) for key in SPECTRAL_BAND_KEYS},
+}
+
+
+# ---------------------------------------------------------------------------
+# TFRecord decoding
+# ---------------------------------------------------------------------------
+
+
+def _iter_parsed_records(path: Path) -> Iterator[dict[str, tf.Tensor]]:
+    """Yield one decoded feature dict per record in ``path``, streaming."""
+    for raw in tf.data.TFRecordDataset(str(path)):
+        yield tf.io.parse_single_example(raw, FEATURE_DESC)
+
+
+def _int_field(record: dict[str, tf.Tensor], key: str) -> np.ndarray:
+    """Decode a serialized int32 field (instance/pixel masks) to numpy."""
+    return tf.io.parse_tensor(record[key], out_type=tf.int32).numpy()
+
+
+def _band_field(record: dict[str, tf.Tensor], key: str) -> np.ndarray:
+    """Decode one serialized float band and drop its trailing ``()`` dim."""
+    band = tf.io.parse_tensor(record[key], out_type=tf.float64).numpy()
+    return band.reshape(band.shape[0], band.shape[1])
+
+
+def _probability_mask(individual: np.ndarray) -> np.ndarray:
+    """Consensus probability mask = mean of the four annotators' binary masks.
+
+    ``individual`` has shape ``(H, W, 1, 4)``; the result is ``(H, W)`` float32
+    with values in ``{0, 0.25, 0.5, 0.75, 1.0}``.
+    """
+    return (
+        individual.reshape(individual.shape[0], individual.shape[1], -1)
+        .mean(axis=-1)
+        .astype(np.float32)
+    )
+
+
+def _annotator_masks(individual: np.ndarray) -> np.ndarray:
+    """Return the four per-annotator binary masks as ``(H, W, 4)`` uint8."""
+    return individual.reshape(individual.shape[0], individual.shape[1], -1).astype(np.uint8)
+
+
+def _instance_masks(instance: np.ndarray) -> np.ndarray:
+    """Return instance masks as ``(N, H, W, K)`` int8.
+
+    Source shape is ``(N, H, W, 1, K)``; the trailing ``(1, K)`` collapses to a
+    single ``K`` dim whose width varies per sample (4-7 annotators here). Records
+    with no annotated instances have ``N == 0`` and are emitted as an empty
+    ``(0, H, W, K)`` array.
+    """
+    lead = list(instance.shape[:3])
+    trailing = 1
+    for dim in instance.shape[3:]:
+        trailing *= dim
+    return instance.reshape(*tuple(lead), trailing).astype(np.int8)
+
+
+def _spectral_bands(record: dict[str, tf.Tensor]) -> np.ndarray:
+    """Stack all 10 thermal bands in fixed order, ``(H, W, 10)`` float32."""
+    return np.stack([_band_field(record, key) for key in SPECTRAL_BAND_KEYS], axis=-1).astype(
+        np.float32
+    )
+
+
+def _consensus_mask_png(pixel_mask: np.ndarray) -> np.ndarray:
+    """Binary consensus mask as a ``(H, W)`` uint8 array with values {0, 255}."""
+    mask = pixel_mask.reshape(pixel_mask.shape[0], pixel_mask.shape[1])
+    return (mask * 255).astype(np.uint8)
+
+
+def _false_color_image(record: dict[str, tf.Tensor]) -> np.ndarray:
+    """GOES-16 ash false-color composite as ``(H, W, 3)`` uint8 RGB.
+
+    Standard recipe used by Google Research, the OpenContrails paper, and all
+    top Kaggle competition teams::
+
+        R = clip(normalize(band15 - band14, (-4, 2)), 0, 1)
+        G = clip(normalize(band14 - band11, (-4, 5)), 0, 1)
+        B = clip(normalize(band14, (243, 303)), 0, 1)
+
+    GOES-16 ABI band mapping: band11=8.5µm (data_10um), band14=11µm
+    (data_11um), band15=12µm (data_12um).
+    """
+    b10 = _band_field(record, "data_10um")
+    b11 = _band_field(record, "data_11um")
+    b12 = _band_field(record, "data_12um")
+    r = np.clip((b12 - b11 - (-4)) / (2 - (-4)), 0, 1)
+    g = np.clip((b11 - b10 - (-4)) / (5 - (-4)), 0, 1)
+    b = np.clip((b11 - 243) / (303 - 243), 0, 1)
+    return np.stack([r, g, b], axis=-1).astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
+# Safety check
+# ---------------------------------------------------------------------------
+
+
+def _verify_consensus(png_path: Path, pixel_mask: np.ndarray, stem: str) -> None:
+    """Assert the record's consensus mask matches the existing PNG exactly.
+
+    The PNG is binarized (``> 0`` → 1) to match the record's ``{0, 1}``
+    convention. A mismatch means the record→stem mapping is wrong, so we fail
+    loudly rather than silently corrupt the dataset.
+    """
+    with Image.open(png_path) as img:
+        png = np.array(img.convert("L"), dtype=np.uint8)
+    binary = (png > 0).astype(np.uint8)
+    consensus = pixel_mask.reshape(pixel_mask.shape[0], pixel_mask.shape[1])
+
+    if binary.shape != consensus.shape:
+        msg = f"{stem}: shape mismatch png {binary.shape} vs consensus {consensus.shape}"
+        raise ValueError(msg)
+
+    diffs = int(np.sum(binary != consensus))
+    if diffs:
+        msg = f"{stem}: verification failed — {diffs} differing pixels"
+        raise ValueError(msg)
+
+
+# ---------------------------------------------------------------------------
+# Shard processing
+# ---------------------------------------------------------------------------
+
+
+def _list_shards(tf_dir: Path, prefix: str, file_glob: str | None) -> list[Path]:
+    """Sorted shard paths in ``tf_dir`` matching ``prefix`` and optional glob."""
+    candidates = sorted(p for p in tf_dir.glob(f"{prefix}-*") if p.is_file())
+    if file_glob is None:
+        return candidates
+    return [p for p in candidates if fnmatch.fnmatch(p.name, file_glob)]
+
+
+def _load_stems(path: Path) -> list[str]:
+    """Read a ``splits_*.txt`` file into a list of stem names (skipping blanks)."""
+    return [line.strip() for line in path.read_text().splitlines() if line.strip()]
+
+
+def _process_shard(
+    shard_path: Path,
+    output_dir: Path,
+    *,
+    start_pos: int,
+    is_validation: bool,
+    val_stems: set[str] | None,
+    metadata: dict[str, dict[str, int]],
+    skip_existing: bool,
+    verify: bool,
+) -> tuple[int, int]:
+    """Decode one shard; return ``(processed, skipped)`` counts.
+
+    ``start_pos`` is the 0-based global position of the shard's first record; it
+    advances past skipped records so stems stay aligned across shards.
+    """
+    processed = 0
+    skipped = 0
+    pos = start_pos
+    for record in _iter_parsed_records(shard_path):
+        record_id = int(record["record_id"].numpy())
+        if is_validation:
+            stem = f"val_{pos + 1:06d}"
+            split = "test"
+        else:
+            stem = f"train_{pos + 1:06d}"
+            split = "val" if (val_stems is not None and stem in val_stems) else "train"
+        pos += 1
+
+        prob_path = output_dir / "probability_masks" / split / f"{stem}.npy"
+        fc_path = output_dir / "false_color" / split / f"{stem}.npy"
+        if skip_existing and prob_path.exists() and fc_path.exists():
+            metadata[split].setdefault(stem, record_id)
+            skipped += 1
+            continue
+
+        individual = _int_field(record, "human_individual_masks")
+        pixel_mask = _int_field(record, "human_pixel_masks")
+        prob = _probability_mask(individual)
+
+        if verify:
+            existing_png = output_dir / "semantic_masks" / split / f"{stem}.png"
+            if existing_png.exists():
+                _verify_consensus(existing_png, pixel_mask, stem)
+
+        np.save(prob_path, prob)
+        np.save(
+            output_dir / "annotator_masks" / split / f"{stem}.npy",
+            _annotator_masks(individual),
+        )
+        np.save(
+            output_dir / "instance_masks" / split / f"{stem}.npy",
+            _instance_masks(_int_field(record, "human_individual_instance_masks")),
+        )
+        np.save(
+            output_dir / "spectral_bands" / split / f"{stem}.npy",
+            _spectral_bands(record),
+        )
+
+        mask_png = _consensus_mask_png(pixel_mask)
+        Image.fromarray(mask_png, mode="L").save(
+            output_dir / "semantic_masks" / split / f"{stem}.png"
+        )
+
+        false_color = _false_color_image(record)
+        np.save(
+            output_dir / "false_color" / split / f"{stem}.npy",
+            false_color,
+        )
+        Image.fromarray((false_color * 255).astype(np.uint8), mode="RGB").save(
+            output_dir / "images_semantic" / split / f"{stem}.jpg"
+        )
+
+        metadata[split][stem] = record_id
+        processed += 1
+
+    return processed, skipped
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--tfrecord-dir",
+        type=Path,
+        required=True,
+        help="Directory holding ``train.tfrecords-*`` and ``validation.tfrecords-*`` shards.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Dataset root; ``semantic_masks/`` must already live here (used by --verify).",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        dest="skip_existing",
+        action="store_true",
+        default=True,
+        help="Resumable: skip a sample when its probability mask already exists (default).",
+    )
+    parser.add_argument(
+        "--no-verify",
+        dest="verify",
+        action="store_false",
+        default=True,
+        help="Skip the pixel-identical consensus check against existing PNG masks.",
+    )
+    parser.add_argument(
+        "--file-glob",
+        default=None,
+        help="Only process shards whose basename matches this fnmatch glob "
+        '(e.g. "*.tfrecords-00000-of-00100") — handy for a smoke test on one shard.',
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Convert the TFRecord shards to the filesystem layout and return 0."""
+    args = _parse_args(argv)
+
+    output_dir = Path(args.output_dir)
+    tf_dir = Path(args.tfrecord_dir)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "metadata").mkdir(exist_ok=True)
+    for sub in (
+        "images_semantic",
+        "semantic_masks",
+        "probability_masks",
+        "annotator_masks",
+        "instance_masks",
+        "spectral_bands",
+        "false_color",
+    ):
+        for split in ("train", "val", "test"):
+            (output_dir / sub / split).mkdir(parents=True, exist_ok=True)
+
+    # Resume: keep record_ids from a prior interrupted run so skipped stems are
+    # retained in the metadata output.
+    metadata: dict[str, dict[str, int]] = {"train": {}, "val": {}, "test": {}}
+    for split in metadata:
+        meta_path = output_dir / "metadata" / f"{split}_record_ids.json"
+        if meta_path.exists():
+            metadata[split] = json.loads(meta_path.read_text())
+
+    # The held-out (val) stems live under ``semantic_masks/val/`` but reuse the
+    # ``train_`` prefix, so classify raw-train records by membership here.
+    val_stems_path = output_dir / "splits_val.txt"
+    val_stems: set[str] | None = (
+        set(_load_stems(val_stems_path)) if val_stems_path.exists() else None
+    )
+
+    train_files = _list_shards(tf_dir, "train.tfrecords", args.file_glob)
+    val_files = _list_shards(tf_dir, "validation.tfrecords", args.file_glob)
+    total = len(train_files) + len(val_files)
+    print(f"Processing {len(train_files)} train + {len(val_files)} validation shard(s)")
+
+    shard_index = 0
+    train_start = 0
+    for shard in train_files:
+        shard_index += 1
+        proc, skipped = _process_shard(
+            shard,
+            output_dir,
+            start_pos=train_start,
+            is_validation=False,
+            val_stems=val_stems,
+            metadata=metadata,
+            skip_existing=args.skip_existing,
+            verify=args.verify,
+        )
+        train_start += proc + skipped
+        print(f"[shard {shard_index}/{total}] processed {proc} samples ({skipped} skipped)")
+
+    val_start = 0
+    for shard in val_files:
+        shard_index += 1
+        proc, skipped = _process_shard(
+            shard,
+            output_dir,
+            start_pos=val_start,
+            is_validation=True,
+            val_stems=None,
+            metadata=metadata,
+            skip_existing=args.skip_existing,
+            verify=args.verify,
+        )
+        val_start += proc + skipped
+        print(f"[shard {shard_index}/{total}] processed {proc} samples ({skipped} skipped)")
+
+    print(
+        f"Converted {len(metadata['train'])} train + {len(metadata['val'])} val + "
+        f"{len(metadata['test'])} test samples"
+    )
+
+    for split in metadata:
+        if metadata[split]:
+            meta_path = output_dir / "metadata" / f"{split}_record_ids.json"
+            with meta_path.open("w") as f:
+                json.dump(
+                    {stem: metadata[split][stem] for stem in sorted(metadata[split])},
+                    f,
+                    indent=2,
+                )
+
+    for split in metadata:
+        if metadata[split]:
+            splits_path = output_dir / f"splits_{split}.txt"
+            with splits_path.open("w") as f:
+                for stem in sorted(metadata[split]):
+                    f.write(f"{stem}\n")
+
+    print("Done.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
