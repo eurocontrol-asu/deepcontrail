@@ -39,9 +39,11 @@ def synthetic_root(tmp_path: Path) -> Path:
         img_dir = tmp_path / "images_semantic" / split
         binary_mask_dir = tmp_path / "semantic_masks" / split
         prob_mask_dir = tmp_path / "probability_masks" / split
+        fc_dir = tmp_path / "false_color" / split
         img_dir.mkdir(parents=True)
         binary_mask_dir.mkdir(parents=True)
         prob_mask_dir.mkdir(parents=True)
+        fc_dir.mkdir(parents=True)
 
         for i in range(1, count + 1):
             stem = f"{prefix}_{i:06d}"
@@ -56,6 +58,9 @@ def synthetic_root(tmp_path: Path) -> Path:
             if stem in intermediate_stems:
                 prob_mask[prob_mask > 0] = 0.75
             np.save(prob_mask_dir / f"{stem}.npy", prob_mask)
+
+            fc = rng.uniform(0, 1, (*size, 3)).astype(np.float32)
+            np.save(fc_dir / f"{stem}.npy", fc)
 
     return tmp_path
 

@@ -57,10 +57,10 @@ class DataConfig(BaseModel):
         read from the ``train/`` directory on disk; the dataset partitions stems
         deterministically using ``val_fraction``.  ``"test"`` reads from ``test/``.
     mask_type
-        Which label artifact to load from the dataset root. ``"binary"`` reads
-        ``semantic_masks/`` and returns uint8 masks in ``{0, 1}``;
-        ``"probability"`` reads ``probability_masks/`` and returns float32 masks
-        with continuous values in ``[0, 1]`` for soft-label training.
+        Which label artifact to load. ``"binary"`` reads ``semantic_masks/``
+        PNGs (strict consensus ground truth). ``"probability"`` reads
+        ``probability_masks/`` and returns float32 in ``[0, 1]`` for
+        soft-label training.
     pixel_shift
         Sub-pixel translation applied to images at load time to correct a
         labeling misalignment in the GOES-16 dataset. Default 0.0 (no shift).
@@ -77,13 +77,11 @@ class DataConfig(BaseModel):
     normalize
         Channel-wise normalization statistics.
     val_fraction
-        Fraction of training stems held out for validation when ``split`` is
-        ``"train"`` or ``"val"``.  The split is seeded by ``seed`` for
-        reproducibility.  Default 0.1 (10 %).
+        Fraction of training stems held out for validation (seeded by ``seed``).
+        Must be > 0 when ``fold`` is not set.  Ignored when ``fold`` is set
+        (fold partitioning takes over).
     fold
-        K-fold cross-validation fold to hold out for validation, or ``None``
-        to disable CV. When set, the fold partitioning takes precedence over
-        ``val_fraction``.
+        K-fold cross-validation fold index, or ``None`` to disable CV.
     num_folds
         Total number of CV folds. Only used when ``fold`` is set.
     """
@@ -93,6 +91,7 @@ class DataConfig(BaseModel):
     root: str
     split: Literal["train", "val", "test"] = "train"
     mask_type: Literal["binary", "probability"] = "binary"
+    image_source: Literal["jpeg", "spectral"] = "jpeg"
     pixel_shift: Annotated[float, Field(ge=0.0)] = 0.0
     seed: Annotated[int, Field(ge=0)] = 42
     image_size: Annotated[int, Field(gt=0)] = 256
@@ -105,10 +104,17 @@ class DataConfig(BaseModel):
     num_folds: Annotated[int, Field(default=4, ge=2)] = 4
 
     @model_validator(mode="after")
-    def _validate_fold(self) -> DataConfig:
-        """Ensure ``fold`` is within range whenever CV is enabled."""
+    def _validate_split_strategy(self) -> DataConfig:
+        """Validate the split configuration.
+
+        - ``fold`` must be in ``[0, num_folds)`` when set.
+        - ``val_fraction`` must be > 0 when ``fold`` is not set.
+        """
         if self.fold is not None and not (0 <= self.fold < self.num_folds):
             msg = f"fold {self.fold} out of range [0, {self.num_folds})"
+            raise ValueError(msg)
+        if self.val_fraction <= 0 and self.fold is None:
+            msg = "val_fraction must be > 0 (use fold for CV instead)"
             raise ValueError(msg)
         return self
 

@@ -13,6 +13,7 @@ from deepcontrail.training.evaluation import (
     find_optimal_threshold,
 )
 from deepcontrail.training.module import ContrailSegmentationModule
+from deepcontrail.training.tta import tta_predict
 
 __all__ = [
     "CHECKPOINT_ROOT",
@@ -24,4 +25,5 @@ __all__ = [
     "evaluate_global",
     "find_optimal_threshold",
     "load_configs",
+    "tta_predict",
 ]

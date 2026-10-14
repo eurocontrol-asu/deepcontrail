@@ -15,6 +15,7 @@ from PIL import Image
 
 from deepcontrail.data._loading import (
     binarize_mask,
+    load_false_color,
     load_image,
     load_mask,
     shift_image,
@@ -52,13 +53,11 @@ class GOESSemanticDataset:
         self.config = config
         self._root = Path(config.root)
 
-        # Both "train" and "val" splits read from the train/ directory on disk;
-        # the split is computed on-the-fly by _discover_stems.  Only "test"
-        # reads from a separate directory.
+        img_subdir = "false_color" if config.image_source == "spectral" else "images_semantic"
         mask_subdir = "probability_masks" if config.mask_type == "probability" else "semantic_masks"
-        disk_split = "test" if config.split == "test" else "train"
+        ds = "test" if config.split == "test" else "train"
         self._dir_pairs = [
-            (self._root / "images_semantic" / disk_split, self._root / mask_subdir / disk_split),
+            (self._root / img_subdir / ds, self._root / mask_subdir / ds),
         ]
         self._image_dir, self._mask_dir = self._dir_pairs[0]
 
@@ -84,10 +83,13 @@ class GOESSemanticDataset:
           shuffled with ``seed`` and the first ``val_fraction * N`` go to
           validation, the rest to training.
         """
-        img_dir, mask_dir = self._dir_pairs[0]
-        stems = self._scan_stems(img_dir, mask_dir)
-        for stem in stems:
-            self._stem_dirs[stem] = (img_dir, mask_dir)
+        all_stems: list[str] = []
+        for img_dir, mask_dir in self._dir_pairs:
+            scanned = self._scan_stems(img_dir, mask_dir)
+            for stem in scanned:
+                self._stem_dirs[stem] = (img_dir, mask_dir)
+            all_stems.extend(scanned)
+        stems = sorted(all_stems)
 
         if self.config.split == "test":
             return stems
@@ -100,9 +102,6 @@ class GOESSemanticDataset:
             return [s for i, s in enumerate(stems) if i % num_folds != fold]
 
         vf = self.config.val_fraction
-        if vf <= 0:
-            return stems
-
         rng = np.random.RandomState(self.config.seed)
         indices = rng.permutation(len(stems))
         n_val = max(1, round(len(stems) * vf))
@@ -112,23 +111,40 @@ class GOESSemanticDataset:
         return [s for i, s in enumerate(stems) if i not in val_idx]
 
     def _scan_stems(self, image_dir: Path, mask_dir: Path) -> list[str]:
-        """Scan ``image_dir`` for paired images/masks, return sorted stems."""
-        image_paths = sorted(image_dir.glob("*.jpg"))
+        """Scan ``image_dir`` for paired images/masks, return sorted stems.
+
+        Checks that each image has a matching mask file.  For deeper
+        validation (corruption, size mismatches), run the standalone
+        ``scripts/validate_dataset.py`` on the dataset root.
+        """
+        mask_ext = ".npy" if self.config.mask_type == "probability" else ".png"
+        img_ext = ".npy" if self.config.image_source == "spectral" else ".jpg"
+        image_paths = sorted(image_dir.glob(f"*{img_ext}"))
         stems: list[str] = []
+        missing: list[str] = []
+
         for img_path in image_paths:
             stem = img_path.stem
-            mask_ext = ".npy" if self.config.mask_type == "probability" else ".png"
             mask_path = mask_dir / f"{stem}{mask_ext}"
             if not mask_path.exists():
-                msg = f"No mask found for image {stem!r} (expected {mask_path})"
-                raise FileNotFoundError(msg)
+                missing.append(f"{stem}: no mask (expected {mask_path})")
+                continue
             stems.append(stem)
+
+        if missing:
+            msg = f"Dataset validation found {len(missing)} missing mask(s):\n"
+            msg += "\n".join(f"  - {e}" for e in missing)
+            raise ValueError(msg)
+
         return stems
 
     def _native_size(self) -> int:
         """Native square resolution of the images (256 for GOES-16)."""
         if not self.stems:
             return self.config.image_size
+        if self.config.image_source == "spectral":
+            arr = np.load(self._image_dir / f"{self.stems[0]}.npy")
+            return arr.shape[0]
         with Image.open(self._image_dir / f"{self.stems[0]}.jpg") as img:
             width, _height = img.size
         return width
@@ -196,7 +212,10 @@ class GOESSemanticDataset:
         stem = self.stems[index]
 
         img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
-        image = load_image(img_dir / f"{stem}.jpg")
+        if self.config.image_source == "spectral":
+            image = load_false_color(img_dir / f"{stem}.npy")
+        else:
+            image = load_image(img_dir / f"{stem}.jpg")
         if self.config.pixel_shift != 0.0:
             image = shift_image(image, self.config.pixel_shift)
         if self.config.mask_type == "probability":

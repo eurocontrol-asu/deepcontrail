@@ -115,7 +115,13 @@ def _run_single(args: argparse.Namespace) -> None:
     val_metrics = evaluate_global(module, val_loader, device, prefix="val", threshold=val_threshold)
     optimal_threshold = val_metrics["final/val_threshold"]
 
+    val_tta_metrics: dict[str, float] = {}
+    if args.tta:
+        logger.info("Evaluating on val set with D4 TTA...")
+        val_tta_metrics = evaluate_global(module, val_loader, device, prefix="val_tta", tta=True)
+
     test_metrics: dict[str, float] = {}
+    test_tta_metrics: dict[str, float] = {}
     if not args.skip_test:
         test_eval_cfg = _eval_config(test_data_cfg, "test")
         test_loader = _build_loader(test_eval_cfg)
@@ -128,8 +134,19 @@ def _run_single(args: argparse.Namespace) -> None:
         test_metrics = evaluate_global(
             module, test_loader, device, prefix="test", threshold=test_threshold
         )
+        if args.tta:
+            tta_threshold = val_tta_metrics.get("final/val_tta_threshold", test_threshold)
+            logger.info("Evaluating on test set with D4 TTA...")
+            test_tta_metrics = evaluate_global(
+                module,
+                test_loader,
+                device,
+                prefix="test_tta",
+                threshold=tta_threshold,
+                tta=True,
+            )
 
-    all_metrics = {**val_metrics, **test_metrics}
+    all_metrics = {**val_metrics, **val_tta_metrics, **test_metrics, **test_tta_metrics}
 
     print("\n" + "=" * 60)
     print("EVALUATION RESULTS")
@@ -174,10 +191,28 @@ def _run_ensemble(args: argparse.Namespace) -> None:
         threshold=args.threshold,
     )
 
+    tta_metrics: dict[str, float] = {}
+    if args.tta:
+        logger.info("Evaluating ensemble with D4 TTA...")
+        tta_metrics = evaluate_ensemble(
+            checkpoints=args.checkpoints,
+            model_config=model_cfg,
+            loss_config=loss_cfg,
+            training_config=training_cfg,
+            data_loader=loader,
+            device=device,
+            steps_per_epoch=len(loader),
+            prefix=f"{args.split}_tta",
+            threshold=args.threshold,
+            tta=True,
+        )
+
+    all_metrics = {**metrics, **tta_metrics}
+
     print("\n" + "=" * 60)
     print(f"ENSEMBLE EVALUATION ({args.split})")
     print("=" * 60)
-    for key, value in metrics.items():
+    for key, value in all_metrics.items():
         print(f"{key:32s} {value:.4f}")
     print("=" * 60)
 
@@ -239,6 +274,11 @@ def parse_args() -> argparse.Namespace:
         "--skip-test",
         action="store_true",
         help="Skip test-set evaluation. Only used with --checkpoint.",
+    )
+    parser.add_argument(
+        "--tta",
+        action="store_true",
+        help="Apply D4 test-time augmentation (8 geometric transforms, ~8x slower).",
     )
 
     parser.add_argument("--epochs", type=int, default=None, help="Override number of epochs.")
