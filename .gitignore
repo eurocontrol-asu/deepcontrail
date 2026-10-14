@@ -45,5 +45,10 @@ presentations/
 .env
 .env.local
 
+# Experiment configs (local paths, not for version control)
+# Only configs/experiment.yaml (the default) is tracked.
+configs/experiment_*.yaml
+configs/ablation_*.yaml
+
 # Process output
 nohup.out

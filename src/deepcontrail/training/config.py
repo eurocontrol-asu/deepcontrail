@@ -108,8 +108,7 @@ def load_configs(
 
     train_data_cfg = DataConfig.from_dict(data_raw)
     no_aug = {**train_data_cfg.model_dump(), "augmentation": None}
-    # Validation and test always evaluate against binary masks so metrics
-    # stay comparable across experiments regardless of training mask_type.
+    # Evaluation always uses the strict consensus ground truth ("binary").
     val_data_cfg = DataConfig.from_dict({**no_aug, "split": "val", "mask_type": "binary"})
     test_data_cfg = DataConfig.from_dict(
         {**no_aug, "split": "test", "fold": None, "mask_type": "binary"}

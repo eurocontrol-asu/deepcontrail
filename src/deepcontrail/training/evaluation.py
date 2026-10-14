@@ -11,6 +11,7 @@ from deepcontrail.losses import LossConfig, build_loss
 from deepcontrail.metrics import dice_coefficient, iou_score
 from deepcontrail.models import ModelConfig, build_model
 from deepcontrail.training.module import ContrailSegmentationModule
+from deepcontrail.training.tta import tta_predict
 
 if TYPE_CHECKING:
     from torch.utils.data import DataLoader
@@ -93,6 +94,7 @@ def evaluate_global(
     device: torch.device,
     prefix: str = "val",
     threshold: float | None = None,
+    tta: bool = False,
 ) -> dict[str, float]:
     """Run a full evaluation pass with optional threshold search.
 
@@ -112,6 +114,9 @@ def evaluate_global(
         Metric name prefix (e.g. ``"val"`` or ``"test"``).
     threshold
         Fixed threshold to apply. ``None`` triggers a threshold search.
+    tta
+        When ``True``, apply D4 test-time augmentation (8 geometric
+        transforms, averaged sigmoid probabilities).
 
     Returns
     -------
@@ -127,8 +132,11 @@ def evaluate_global(
 
     for images, masks in data_loader:
         images = images.to(device)
-        logits = module(images)
-        probs = torch.sigmoid(logits).squeeze(1).cpu().numpy().astype(np.float32)
+        if tta:
+            probs = tta_predict(module, images).cpu().numpy().astype(np.float32)
+        else:
+            logits = module(images)
+            probs = torch.sigmoid(logits).squeeze(1).cpu().numpy().astype(np.float32)
         all_probs.append(probs.ravel())
         all_targets.append(masks.numpy().astype(np.uint8).ravel())
 
@@ -149,6 +157,7 @@ def evaluate_ensemble(
     steps_per_epoch: int,
     prefix: str = "val",
     threshold: float | None = None,
+    tta: bool = False,
 ) -> dict[str, float]:
     """Ensemble predictions from several checkpoints for a single metric pass.
 
@@ -210,8 +219,10 @@ def evaluate_ensemble(
     for images, masks in data_loader:
         images = images.to(device)
 
-        # Average sigmoid probabilities pixel-wise across all models.
-        stack = [torch.sigmoid(module(images)).squeeze(1) for module in modules]
+        if tta:
+            stack = [tta_predict(module, images) for module in modules]
+        else:
+            stack = [torch.sigmoid(module(images)).squeeze(1) for module in modules]
         avg_probs = torch.stack(stack).mean(dim=0)
 
         all_probs.append(avg_probs.cpu().numpy().astype(np.float32).ravel())

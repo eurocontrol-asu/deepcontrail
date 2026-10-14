@@ -22,16 +22,16 @@ if TYPE_CHECKING:
 
 
 def shift_image(image: np.ndarray, pixel_shift: float) -> np.ndarray:
-    """Apply a sub-pixel translation (right and down) to an HWC uint8 image.
+    """Apply a sub-pixel translation (right and down) to an HWC image.
 
     Corrects a known labeling misalignment in the GOES-16 dataset by shifting
     the image content by ``pixel_shift`` pixels to the right and down using
-    bilinear interpolation.
+    bilinear interpolation.  Accepts both uint8 and float32 images.
 
     Parameters
     ----------
     image
-        Input array with shape ``(H, W, 3)`` and dtype ``uint8``.
+        Input array with shape ``(H, W, 3)``, dtype ``uint8`` or ``float32``.
     pixel_shift
         Translation amount in pixels (e.g. 0.5).
 
@@ -43,12 +43,73 @@ def shift_image(image: np.ndarray, pixel_shift: float) -> np.ndarray:
     if pixel_shift == 0.0:
         return image
     h, w = image.shape[:2]
-    pil_img = Image.fromarray(image)
+    is_float = np.issubdtype(image.dtype, np.floating)
     coeffs = (1, 0, -pixel_shift, 0, 1, -pixel_shift)
+    if is_float:
+        channels = []
+        for c in range(image.shape[2]):
+            ch = Image.fromarray(image[:, :, c], mode="F")
+            shifted_ch = ch.transform(
+                (w, h), Image.Transform.AFFINE, coeffs, resample=Image.Resampling.BILINEAR
+            )
+            channels.append(np.array(shifted_ch, dtype=np.float32))
+        return np.stack(channels, axis=-1)
+    pil_img = Image.fromarray(image)
     shifted = pil_img.transform(
         (w, h), Image.Transform.AFFINE, coeffs, resample=Image.Resampling.BILINEAR
     )
     return np.array(shifted, dtype=np.uint8)
+
+
+_TDIFF_BOUNDS = (-4.0, 2.0)
+_CLOUD_TOP_TDIFF_BOUNDS = (-4.0, 5.0)
+_T11_BOUNDS = (243.0, 303.0)
+
+
+def ash_false_color(
+    b10: np.ndarray,
+    b11: np.ndarray,
+    b12: np.ndarray,
+) -> np.ndarray:
+    """GOES-16 ash false-color composite from three thermal bands.
+
+    Parameters
+    ----------
+    b10
+        Band 11 / 8.5 µm brightness temperatures (``data_10um``).
+    b11
+        Band 14 / 11 µm brightness temperatures (``data_11um``).
+    b12
+        Band 15 / 12 µm brightness temperatures (``data_12um``).
+
+    Returns
+    -------
+    np.ndarray
+        Float32 ``(H, W, 3)`` array with values in ``[0, 1]``.
+    """
+    r = (b12 - b11 - _TDIFF_BOUNDS[0]) / (_TDIFF_BOUNDS[1] - _TDIFF_BOUNDS[0])
+    g = (b11 - b10 - _CLOUD_TOP_TDIFF_BOUNDS[0]) / (
+        _CLOUD_TOP_TDIFF_BOUNDS[1] - _CLOUD_TOP_TDIFF_BOUNDS[0]
+    )
+    b = (b11 - _T11_BOUNDS[0]) / (_T11_BOUNDS[1] - _T11_BOUNDS[0])
+    return np.clip(np.stack([r, g, b], axis=-1), 0, 1).astype(np.float32)
+
+
+def load_false_color(path: str | Path) -> np.ndarray:
+    """Load a pre-computed ash false-color composite.
+
+    Parameters
+    ----------
+    path
+        Path to a ``false_color/*.npy`` file with shape ``(H, W, 3)``,
+        float32 values in ``[0, 1]``.
+
+    Returns
+    -------
+    np.ndarray
+        Float32 ``(H, W, 3)`` array.
+    """
+    return np.load(path).astype(np.float32)
 
 
 def load_image(path: str | Path) -> np.ndarray:
@@ -161,7 +222,10 @@ def to_tensors(
     """
     import torch
 
-    image_f = image.astype(np.float32) / 255.0
+    if np.issubdtype(image.dtype, np.floating):
+        image_f = image.astype(np.float32)
+    else:
+        image_f = image.astype(np.float32) / 255.0
     image_t = torch.from_numpy(image_f).permute(2, 0, 1)
 
     mean, std = _norm_tensors(normalize.mean, normalize.std)
@@ -198,7 +262,10 @@ def to_tensors_soft(
     """
     import torch
 
-    image_f = image.astype(np.float32) / 255.0
+    if np.issubdtype(image.dtype, np.floating):
+        image_f = image.astype(np.float32)
+    else:
+        image_f = image.astype(np.float32) / 255.0
     image_t = torch.from_numpy(image_f).permute(2, 0, 1)
 
     mean, std = _norm_tensors(normalize.mean, normalize.std)
@@ -224,4 +291,6 @@ def to_numpy(image: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarra
         ``(image, mask)`` where image is float32 HWC in [0, 1] and
         mask is uint8 HW in {0, 1}.
     """
+    if np.issubdtype(image.dtype, np.floating):
+        return image.astype(np.float32), mask
     return image.astype(np.float32) / 255.0, mask

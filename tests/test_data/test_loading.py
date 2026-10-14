@@ -278,3 +278,161 @@ def test_shift_image_preserves_shape_and_dtype():
 
     assert result.shape == image.shape, "shape must be preserved"
     assert result.dtype == image.dtype, "dtype must be preserved"
+
+
+def test_shift_image_float32_preserves_dtype():
+    from deepcontrail.data._loading import shift_image
+
+    image = np.random.RandomState(42).uniform(0, 1, (8, 8, 3)).astype(np.float32)
+
+    result = shift_image(image, 0.5)
+
+    assert result.dtype == np.float32, "float32 input must return float32"
+    assert result.shape == image.shape
+
+
+def test_shift_image_float32_zero_is_identity():
+    from deepcontrail.data._loading import shift_image
+
+    image = np.random.RandomState(42).uniform(0, 1, (8, 8, 3)).astype(np.float32)
+
+    result = shift_image(image, 0.0)
+
+    np.testing.assert_array_equal(result, image, err_msg="zero shift must be identity for float32")
+
+
+# ---------------------------------------------------------------------------
+# ash_false_color
+# ---------------------------------------------------------------------------
+
+
+def test_ash_false_color_shape_and_dtype():
+    from deepcontrail.data._loading import ash_false_color
+
+    b10 = np.full((8, 8), 270.0, dtype=np.float32)
+    b11 = np.full((8, 8), 273.0, dtype=np.float32)
+    b12 = np.full((8, 8), 271.0, dtype=np.float32)
+
+    result = ash_false_color(b10, b11, b12)
+
+    assert result.shape == (8, 8, 3), f"expected (8, 8, 3), got {result.shape}"
+    assert result.dtype == np.float32
+
+
+def test_ash_false_color_values_in_unit_range():
+    from deepcontrail.data._loading import ash_false_color
+
+    rng = np.random.RandomState(42)
+    b10 = rng.uniform(220, 320, (16, 16)).astype(np.float32)
+    b11 = rng.uniform(220, 320, (16, 16)).astype(np.float32)
+    b12 = rng.uniform(220, 320, (16, 16)).astype(np.float32)
+
+    result = ash_false_color(b10, b11, b12)
+
+    assert result.min() >= 0.0, f"min {result.min()} is below 0"
+    assert result.max() <= 1.0, f"max {result.max()} is above 1"
+
+
+def test_ash_false_color_known_values():
+    from deepcontrail.data._loading import ash_false_color
+
+    b10 = np.array([[270.0]], dtype=np.float32)
+    b11 = np.array([[273.0]], dtype=np.float32)
+    b12 = np.array([[271.0]], dtype=np.float32)
+
+    result = ash_false_color(b10, b11, b12)
+
+    # R = clip((b12 - b11 + 4) / 6, 0, 1) = (271 - 273 + 4) / 6 = 1/3
+    # G = clip((b11 - b10 + 4) / 9, 0, 1) = (273 - 270 + 4) / 9 = 7/9
+    # B = clip((b11 - 243) / 60, 0, 1)    = (273 - 243) / 60    = 0.5
+    np.testing.assert_allclose(result[0, 0, 0], 1.0 / 3.0, atol=1e-6, err_msg="R channel")
+    np.testing.assert_allclose(result[0, 0, 1], 7.0 / 9.0, atol=1e-6, err_msg="G channel")
+    np.testing.assert_allclose(result[0, 0, 2], 0.5, atol=1e-6, err_msg="B channel")
+
+
+def test_ash_false_color_clips_extremes():
+    from deepcontrail.data._loading import ash_false_color
+
+    b10 = np.array([[200.0]], dtype=np.float32)
+    b11 = np.array([[200.0]], dtype=np.float32)
+    b12 = np.array([[300.0]], dtype=np.float32)
+
+    result = ash_false_color(b10, b11, b12)
+
+    assert result[0, 0, 0] == 1.0, "R should be clipped to 1.0 for extreme difference"
+
+
+# ---------------------------------------------------------------------------
+# load_false_color
+# ---------------------------------------------------------------------------
+
+
+def test_load_false_color_returns_float32_hwc(tmp_path: Path):
+    from deepcontrail.data._loading import load_false_color
+
+    rng = np.random.RandomState(0)
+    fc = rng.uniform(0, 1, (8, 8, 3)).astype(np.float32)
+    np.save(tmp_path / "fc.npy", fc)
+
+    result = load_false_color(tmp_path / "fc.npy")
+
+    assert result.dtype == np.float32
+    assert result.shape == (8, 8, 3)
+    np.testing.assert_array_equal(result, fc)
+
+
+def test_load_false_color_preserves_values(tmp_path: Path):
+    from deepcontrail.data._loading import load_false_color
+
+    fc = np.array([[[0.1, 0.5, 0.9]]], dtype=np.float32)
+    np.save(tmp_path / "fc.npy", fc)
+
+    result = load_false_color(tmp_path / "fc.npy")
+
+    np.testing.assert_array_equal(result, fc, err_msg="must return pre-computed values as-is")
+
+
+# ---------------------------------------------------------------------------
+# to_tensors / to_numpy with float32 input
+# ---------------------------------------------------------------------------
+
+
+def test_to_tensors_accepts_float32_image():
+    torch = pytest.importorskip("torch")
+    from deepcontrail.data._loading import to_tensors
+    from deepcontrail.data.config import NormalizeConfig
+
+    image = np.random.RandomState(0).uniform(0, 1, (8, 8, 3)).astype(np.float32)
+    mask = np.array([[0, 1], [1, 0]] * 16, dtype=np.uint8).reshape(8, 8)
+
+    img_t, _mask_t = to_tensors(image, mask, NormalizeConfig())
+
+    assert img_t.shape == (3, 8, 8)
+    assert img_t.dtype == torch.float32
+    assert img_t.abs().max() > 0.1, "float32 input must not be divided by 255"
+
+
+def test_to_tensors_soft_accepts_float32_image():
+    torch = pytest.importorskip("torch")
+    from deepcontrail.data._loading import to_tensors_soft
+    from deepcontrail.data.config import NormalizeConfig
+
+    image = np.random.RandomState(0).uniform(0, 1, (8, 8, 3)).astype(np.float32)
+    mask = np.random.RandomState(1).uniform(0, 1, (8, 8)).astype(np.float32)
+
+    img_t, _mask_t = to_tensors_soft(image, mask, NormalizeConfig())
+
+    assert img_t.shape == (3, 8, 8)
+    assert img_t.dtype == torch.float32
+    assert img_t.abs().max() > 0.1, "float32 input must not be divided by 255"
+
+
+def test_to_numpy_accepts_float32_image():
+    from deepcontrail.data._loading import to_numpy
+
+    image = np.full((4, 4, 3), 0.5, dtype=np.float32)
+    mask = np.zeros((4, 4), dtype=np.uint8)
+
+    img_f, _ = to_numpy(image, mask)
+
+    np.testing.assert_allclose(img_f, 0.5, err_msg="float32 input should not be divided by 255")
