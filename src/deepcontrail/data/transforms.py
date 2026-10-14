@@ -24,16 +24,21 @@ from deepcontrail.data.config import AugmentationConfig  # noqa: TC001
 
 
 def build_augmentation(config: AugmentationConfig, seed: int) -> A.Compose:
-    """Build an albumentations spatial-augmentation pipeline from config.
+    """Build an albumentations augmentation pipeline from config.
 
-    This pipeline flips and rotates **both** the image and the mask so they
-    stay aligned. It intentionally does **not** resize — resizing is a
+    The base flips/rotate run on **both** the image and the mask so they stay
+    aligned. Optionally, photometric transforms (``gaussian_blur``,
+    ``brightness_contrast``) are appended — they affect the image only and
+    albumentations leaves the mask untouched. Spatial transforms
+    (``shift_scale_rotate``) co-transform the mask like the flips.
+    Transforms are skipped when their probability is ``0.0`` so disabled
+    options add nothing. It intentionally does **not** resize — resizing is a
     separate, image-only stage (see :func:`build_image_resize`).
 
     Parameters
     ----------
     config
-        Probabilities for each spatial transform.
+        Probabilities (and transform parameters) for each augmentation.
     seed
         RNG seed passed to ``A.Compose`` for reproducible augmentation.
 
@@ -48,6 +53,19 @@ def build_augmentation(config: AugmentationConfig, seed: int) -> A.Compose:
         A.VerticalFlip(p=config.vertical_flip),
         A.RandomRotate90(p=config.random_rotate_90),
     ]
+    if config.shift_scale_rotate > 0:
+        transforms.append(
+            A.ShiftScaleRotate(
+                shift_limit=config.shift_limit,
+                scale_limit=config.scale_limit,
+                rotate_limit=config.rotate_limit,
+                p=config.shift_scale_rotate,
+            )
+        )
+    if config.gaussian_blur > 0:
+        transforms.append(A.GaussianBlur(blur_limit=config.blur_limit, p=config.gaussian_blur))
+    if config.brightness_contrast > 0:
+        transforms.append(A.RandomBrightnessContrast(p=config.brightness_contrast))
     return A.Compose(transforms, seed=seed)  # type: ignore[arg-type]
 
 
