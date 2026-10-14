@@ -31,13 +31,29 @@ class NormalizeConfig(BaseModel):
 
 
 class AugmentationConfig(BaseModel):
-    """Spatial augmentation probabilities for the training pipeline."""
+    """Spatial and photometric augmentation probabilities.
+
+    Each probability defaults to ``0.0`` (disabled) except the three spatial
+    flips/rotates, so existing YAML configs without the new fields keep their
+    previous behaviour. Photometric transforms (``gaussian_blur``,
+    ``brightness_contrast``) apply to the image only — albumentations
+    co-transforms the mask for the spatial ones.
+    """
 
     model_config = ConfigDict(frozen=True)
 
+    # Spatial — applied to both image and mask.
     horizontal_flip: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
     vertical_flip: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
     random_rotate_90: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
+    shift_scale_rotate: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
+    shift_limit: float = 0.0625
+    scale_limit: float = 0.1
+    rotate_limit: int = 45
+    # Photometric / pixel-level — image only.
+    gaussian_blur: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
+    blur_limit: tuple[int, int] = (3, 7)
+    brightness_contrast: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
 
 
 class DataConfig(BaseModel):
