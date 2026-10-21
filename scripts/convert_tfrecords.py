@@ -15,6 +15,23 @@ rest of the pipeline expects::
         spectral_bands/{train,val,test}/{stem}.npy         # float32 (H, W, 10)
         metadata/{train,val,test}_record_ids.json          # {stem: record_id}
 
+Two export flavours are handled transparently:
+
+* **20250305 (single-frame):** each band is ``(H, W, 1)``; instance masks are
+  present. The trailing dimension is squeezed away.
+* **20230419 (temporal clips):** each band is ``(H, W, 8)`` — an 8-frame clip
+  with ``n_times_before`` frames before the labelled frame, 1 labelled, and
+  ``n_times_after`` after. All 8 frames are extracted.  Only the labelled frame
+  (at index ``n_times_before``) carries masks; context frames are imagery only.
+  Instance masks are absent in this export.
+
+Context frames use distance-based suffixes relative to the labelled frame:
+``{stem}_b4`` … ``{stem}_b1`` (before) and ``{stem}_a1`` … ``{stem}_a3``
+(after).  The labelled frame keeps the plain stem so the existing dataset loader
+finds it without modification.
+
+The format is auto-detected by probing the first record.
+
 The record→stem mapping is positional and driven by the dataset's own split
 files (kept in ``output_dir``), so the original sample numbers are preserved
 exactly:
@@ -39,6 +56,7 @@ is tooling, not part of ``src/``.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import fnmatch
 import json
 import os
@@ -49,12 +67,8 @@ from PIL import Image
 
 # Silence TensorFlow's CUDA/GPU chatter; this is a CPU-bound conversion.
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
-from typing import TYPE_CHECKING
 
 import tensorflow as tf
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 SPECTRAL_BAND_KEYS = (
     "data_10um",
@@ -69,39 +83,107 @@ SPECTRAL_BAND_KEYS = (
     "ozone",
 )
 
-# The thermal band and mask fields are serialized strings (``tf.string``), not
-# dense scalars: ``parse_single_example`` rejects a ``double`` dense feature, and
-# ``parse_tensor`` expects a string. ``record_id``/``label`` are dense scalars.
-FEATURE_DESC: dict[str, tf.io.FixedLenFeature] = {
-    "record_id": tf.io.FixedLenFeature([], tf.int64),
-    "label": tf.io.FixedLenFeature([], tf.float32),
-    "human_pixel_masks": tf.io.FixedLenFeature([], tf.string),
-    "human_individual_masks": tf.io.FixedLenFeature([], tf.string),
-    "human_individual_instance_masks": tf.io.FixedLenFeature([], tf.string),
-    **{key: tf.io.FixedLenFeature([], tf.string) for key in SPECTRAL_BAND_KEYS},
-}
+
+@dataclasses.dataclass(frozen=True)
+class FormatInfo:
+    """Auto-detected TFRecord format metadata."""
+
+    is_temporal: bool
+    has_instance_masks: bool
 
 
 # ---------------------------------------------------------------------------
-# TFRecord decoding
+# Protobuf field extraction
 # ---------------------------------------------------------------------------
 
 
-def _iter_parsed_records(path: Path) -> Iterator[dict[str, tf.Tensor]]:
-    """Yield one decoded feature dict per record in ``path``, streaming."""
-    for raw in tf.data.TFRecordDataset(str(path)):
-        yield tf.io.parse_single_example(raw, FEATURE_DESC)
+def _feature_bytes(example: tf.train.Example, key: str) -> bytes | None:
+    """Return the first serialized ``bytes_list`` value for ``key``, or ``None``."""
+    fv = example.features.feature.get(key, None)
+    if fv is None or fv.WhichOneof("kind") != "bytes_list":
+        return None
+    values = list(fv.bytes_list.value)
+    return values[0] if values else None
 
 
-def _int_field(record: dict[str, tf.Tensor], key: str) -> np.ndarray:
-    """Decode a serialized int32 field (instance/pixel masks) to numpy."""
-    return tf.io.parse_tensor(record[key], out_type=tf.int32).numpy()
+def _scalar_int(example: tf.train.Example, key: str) -> int | None:
+    """Return the first ``int64_list`` scalar for ``key``, or ``None``."""
+    fv = example.features.feature.get(key, None)
+    if fv is None or fv.WhichOneof("kind") != "int64_list":
+        return None
+    values = list(fv.int64_list.value)
+    return int(values[0]) if values else None
 
 
-def _band_field(record: dict[str, tf.Tensor], key: str) -> np.ndarray:
-    """Decode one serialized float band and drop its trailing ``()`` dim."""
-    band = tf.io.parse_tensor(record[key], out_type=tf.float64).numpy()
-    return band.reshape(band.shape[0], band.shape[1])
+def _decode_mask(example: tf.train.Example, key: str) -> np.ndarray | None:
+    """Decode a serialized int32 mask tensor, or ``None`` if the field is absent."""
+    raw = _feature_bytes(example, key)
+    if raw is None:
+        return None
+    return tf.io.parse_tensor(raw, out_type=tf.int32).numpy()
+
+
+def _decode_bands(example: tf.train.Example) -> dict[str, np.ndarray]:
+    """Decode all spectral band tensors into ``(H, W, T)`` float64 arrays."""
+    decoded: dict[str, np.ndarray] = {}
+    for key in SPECTRAL_BAND_KEYS:
+        raw = _feature_bytes(example, key)
+        if raw is not None:
+            decoded[key] = tf.io.parse_tensor(raw, out_type=tf.float64).numpy()
+    return decoded
+
+
+# ---------------------------------------------------------------------------
+# Per-frame extraction
+# ---------------------------------------------------------------------------
+
+
+def _band_frame(bands: dict[str, np.ndarray], key: str, t: int) -> np.ndarray:
+    """Return band ``key`` at frame ``t`` as a 2-D ``(H, W)`` float64 array."""
+    return bands[key][:, :, t]
+
+
+def _false_color_frame(bands: dict[str, np.ndarray], t: int) -> np.ndarray:
+    """GOES-16 ash false-color composite for frame ``t`` as ``(H, W, 3)`` float32.
+
+    Standard recipe used by Google Research, the OpenContrails paper, and all
+    top Kaggle competition teams::
+
+        R = clip(normalize(band15 - band14, (-4, 2)), 0, 1)
+        G = clip(normalize(band14 - band11, (-4, 5)), 0, 1)
+        B = clip(normalize(band14, (243, 303)), 0, 1)
+
+    GOES-16 ABI band mapping: band11=8.5µm (data_10um), band14=11µm
+    (data_11um), band15=12µm (data_12um).
+    """
+    b10 = _band_frame(bands, "data_10um", t)
+    b11 = _band_frame(bands, "data_11um", t)
+    b12 = _band_frame(bands, "data_12um", t)
+    r = np.clip((b12 - b11 - (-4)) / (2 - (-4)), 0, 1)
+    g = np.clip((b11 - b10 - (-4)) / (5 - (-4)), 0, 1)
+    b = np.clip((b11 - 243) / (303 - 243), 0, 1)
+    return np.stack([r, g, b], axis=-1).astype(np.float32)
+
+
+def _spectral_bands_frame(bands: dict[str, np.ndarray], t: int) -> np.ndarray:
+    """Stack all 10 thermal bands at frame ``t`` into ``(H, W, 10)`` float32."""
+    return np.stack([_band_frame(bands, key, t) for key in SPECTRAL_BAND_KEYS], axis=-1).astype(
+        np.float32
+    )
+
+
+def _frame_stem(base_stem: str, t: int, label_idx: int, n_frames: int) -> str:
+    """Compute the output filename stem for frame ``t`` within a clip."""
+    if n_frames == 1 or t == label_idx:
+        return base_stem
+    if t < label_idx:
+        return f"{base_stem}_b{label_idx - t}"
+    return f"{base_stem}_a{t - label_idx}"
+
+
+# ---------------------------------------------------------------------------
+# Mask processing (unchanged between formats)
+# ---------------------------------------------------------------------------
 
 
 def _probability_mask(individual: np.ndarray) -> np.ndarray:
@@ -137,39 +219,10 @@ def _instance_masks(instance: np.ndarray) -> np.ndarray:
     return instance.reshape(*tuple(lead), trailing).astype(np.int8)
 
 
-def _spectral_bands(record: dict[str, tf.Tensor]) -> np.ndarray:
-    """Stack all 10 thermal bands in fixed order, ``(H, W, 10)`` float32."""
-    return np.stack([_band_field(record, key) for key in SPECTRAL_BAND_KEYS], axis=-1).astype(
-        np.float32
-    )
-
-
 def _consensus_mask_png(pixel_mask: np.ndarray) -> np.ndarray:
     """Binary consensus mask as a ``(H, W)`` uint8 array with values {0, 255}."""
     mask = pixel_mask.reshape(pixel_mask.shape[0], pixel_mask.shape[1])
     return (mask * 255).astype(np.uint8)
-
-
-def _false_color_image(record: dict[str, tf.Tensor]) -> np.ndarray:
-    """GOES-16 ash false-color composite as ``(H, W, 3)`` uint8 RGB.
-
-    Standard recipe used by Google Research, the OpenContrails paper, and all
-    top Kaggle competition teams::
-
-        R = clip(normalize(band15 - band14, (-4, 2)), 0, 1)
-        G = clip(normalize(band14 - band11, (-4, 5)), 0, 1)
-        B = clip(normalize(band14, (243, 303)), 0, 1)
-
-    GOES-16 ABI band mapping: band11=8.5µm (data_10um), band14=11µm
-    (data_11um), band15=12µm (data_12um).
-    """
-    b10 = _band_field(record, "data_10um")
-    b11 = _band_field(record, "data_11um")
-    b12 = _band_field(record, "data_12um")
-    r = np.clip((b12 - b11 - (-4)) / (2 - (-4)), 0, 1)
-    g = np.clip((b11 - b10 - (-4)) / (5 - (-4)), 0, 1)
-    b = np.clip((b11 - 243) / (303 - 243), 0, 1)
-    return np.stack([r, g, b], axis=-1).astype(np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +253,29 @@ def _verify_consensus(png_path: Path, pixel_mask: np.ndarray, stem: str) -> None
 
 
 # ---------------------------------------------------------------------------
+# Format detection
+# ---------------------------------------------------------------------------
+
+
+def _probe_format(shards: list[Path]) -> FormatInfo:
+    """Auto-detect the TFRecord format by examining the first available record."""
+    for shard in shards:
+        for raw in tf.data.TFRecordDataset(str(shard)):
+            example = tf.train.Example()
+            example.ParseFromString(raw.numpy())
+            band_raw = _feature_bytes(example, "data_11um")
+            if band_raw is not None:
+                band = tf.io.parse_tensor(band_raw, out_type=tf.float64).numpy()
+                is_temporal = band.shape[2] > 1
+            else:
+                is_temporal = False
+            has_instance = _feature_bytes(example, "human_individual_instance_masks") is not None
+            return FormatInfo(is_temporal=is_temporal, has_instance_masks=has_instance)
+    msg = "No records found in any shard"
+    raise FileNotFoundError(msg)
+
+
+# ---------------------------------------------------------------------------
 # Shard processing
 # ---------------------------------------------------------------------------
 
@@ -221,6 +297,7 @@ def _process_shard(
     shard_path: Path,
     output_dir: Path,
     *,
+    fmt: FormatInfo,
     start_pos: int,
     is_validation: bool,
     val_stems: set[str] | None,
@@ -228,7 +305,7 @@ def _process_shard(
     skip_existing: bool,
     verify: bool,
 ) -> tuple[int, int]:
-    """Decode one shard; return ``(processed, skipped)`` counts.
+    """Decode one shard; return ``(processed, skipped)`` record counts.
 
     ``start_pos`` is the 0-based global position of the shard's first record; it
     advances past skipped records so stems stay aligned across shards.
@@ -236,8 +313,11 @@ def _process_shard(
     processed = 0
     skipped = 0
     pos = start_pos
-    for record in _iter_parsed_records(shard_path):
-        record_id = int(record["record_id"].numpy())
+    for raw in tf.data.TFRecordDataset(str(shard_path)):
+        example = tf.train.Example()
+        example.ParseFromString(raw.numpy())
+
+        record_id = _scalar_int(example, "record_id") or pos
         if is_validation:
             stem = f"val_{pos + 1:06d}"
             split = "test"
@@ -246,49 +326,74 @@ def _process_shard(
             split = "val" if (val_stems is not None and stem in val_stems) else "train"
         pos += 1
 
-        prob_path = output_dir / "probability_masks" / split / f"{stem}.npy"
+        if fmt.is_temporal:
+            nb_raw = _scalar_int(example, "n_times_before")
+            nt_raw = _scalar_int(example, "n_times")
+            na_raw = _scalar_int(example, "n_times_after")
+            nb = nb_raw if nb_raw is not None else 4
+            nt = nt_raw if nt_raw is not None else 1
+            na = na_raw if na_raw is not None else 3
+            n_frames = nb + nt + na
+            label_frame = nb
+        else:
+            n_frames = 1
+            label_frame = 0
+
+        mask_path = output_dir / "semantic_masks" / split / f"{stem}.png"
         fc_path = output_dir / "false_color" / split / f"{stem}.npy"
-        if skip_existing and prob_path.exists() and fc_path.exists():
+        if skip_existing and fc_path.exists() and mask_path.exists():
             metadata[split].setdefault(stem, record_id)
             skipped += 1
             continue
 
-        individual = _int_field(record, "human_individual_masks")
-        pixel_mask = _int_field(record, "human_pixel_masks")
-        prob = _probability_mask(individual)
+        bands = _decode_bands(example)
 
-        if verify:
-            existing_png = output_dir / "semantic_masks" / split / f"{stem}.png"
-            if existing_png.exists():
-                _verify_consensus(existing_png, pixel_mask, stem)
+        pixel_mask = _decode_mask(example, "human_pixel_masks")
+        individual = _decode_mask(example, "human_individual_masks")
 
-        np.save(prob_path, prob)
-        np.save(
-            output_dir / "annotator_masks" / split / f"{stem}.npy",
-            _annotator_masks(individual),
-        )
-        np.save(
-            output_dir / "instance_masks" / split / f"{stem}.npy",
-            _instance_masks(_int_field(record, "human_individual_instance_masks")),
-        )
-        np.save(
-            output_dir / "spectral_bands" / split / f"{stem}.npy",
-            _spectral_bands(record),
-        )
+        if pixel_mask is not None:
+            if verify:
+                existing_png = output_dir / "semantic_masks" / split / f"{stem}.png"
+                if existing_png.exists():
+                    _verify_consensus(existing_png, pixel_mask, stem)
 
-        mask_png = _consensus_mask_png(pixel_mask)
-        Image.fromarray(mask_png, mode="L").save(
-            output_dir / "semantic_masks" / split / f"{stem}.png"
-        )
+            Image.fromarray(_consensus_mask_png(pixel_mask), mode="L").save(
+                output_dir / "semantic_masks" / split / f"{stem}.png"
+            )
 
-        false_color = _false_color_image(record)
-        np.save(
-            output_dir / "false_color" / split / f"{stem}.npy",
-            false_color,
-        )
-        Image.fromarray((false_color * 255).astype(np.uint8), mode="RGB").save(
-            output_dir / "images_semantic" / split / f"{stem}.jpg"
-        )
+        if individual is not None:
+            np.save(
+                output_dir / "probability_masks" / split / f"{stem}.npy",
+                _probability_mask(individual),
+            )
+            np.save(
+                output_dir / "annotator_masks" / split / f"{stem}.npy",
+                _annotator_masks(individual),
+            )
+
+        if fmt.has_instance_masks:
+            instance = _decode_mask(example, "human_individual_instance_masks")
+            if instance is not None:
+                np.save(
+                    output_dir / "instance_masks" / split / f"{stem}.npy",
+                    _instance_masks(instance),
+                )
+
+        for t in range(n_frames):
+            fstem = _frame_stem(stem, t, label_frame, n_frames)
+
+            false_color = _false_color_frame(bands, t)
+            np.save(
+                output_dir / "false_color" / split / f"{fstem}.npy",
+                false_color,
+            )
+            Image.fromarray((false_color * 255).astype(np.uint8), mode="RGB").save(
+                output_dir / "images_semantic" / split / f"{fstem}.jpg"
+            )
+            np.save(
+                output_dir / "spectral_bands" / split / f"{fstem}.npy",
+                _spectral_bands_frame(bands, t),
+            )
 
         metadata[split][stem] = record_id
         processed += 1
@@ -377,6 +482,14 @@ def main(argv: list[str] | None = None) -> int:
     train_files = _list_shards(tf_dir, "train.tfrecords", args.file_glob)
     val_files = _list_shards(tf_dir, "validation.tfrecords", args.file_glob)
     total = len(train_files) + len(val_files)
+    all_shards = train_files + val_files
+    if not all_shards:
+        print("No shards found.")
+        return 0
+
+    fmt = _probe_format(all_shards)
+    label = "temporal (multi-frame)" if fmt.is_temporal else "single-frame"
+    print(f"Detected format: {label}, instance_masks={'yes' if fmt.has_instance_masks else 'no'}")
     print(f"Processing {len(train_files)} train + {len(val_files)} validation shard(s)")
 
     shard_index = 0
@@ -386,6 +499,7 @@ def main(argv: list[str] | None = None) -> int:
         proc, skipped = _process_shard(
             shard,
             output_dir,
+            fmt=fmt,
             start_pos=train_start,
             is_validation=False,
             val_stems=val_stems,
@@ -394,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
             verify=args.verify,
         )
         train_start += proc + skipped
-        print(f"[shard {shard_index}/{total}] processed {proc} samples ({skipped} skipped)")
+        print(f"[shard {shard_index}/{total}] processed {proc} records ({skipped} skipped)")
 
     val_start = 0
     for shard in val_files:
@@ -402,6 +516,7 @@ def main(argv: list[str] | None = None) -> int:
         proc, skipped = _process_shard(
             shard,
             output_dir,
+            fmt=fmt,
             start_pos=val_start,
             is_validation=True,
             val_stems=None,
@@ -410,11 +525,11 @@ def main(argv: list[str] | None = None) -> int:
             verify=args.verify,
         )
         val_start += proc + skipped
-        print(f"[shard {shard_index}/{total}] processed {proc} samples ({skipped} skipped)")
+        print(f"[shard {shard_index}/{total}] processed {proc} records ({skipped} skipped)")
 
     print(
         f"Converted {len(metadata['train'])} train + {len(metadata['val'])} val + "
-        f"{len(metadata['test'])} test samples"
+        f"{len(metadata['test'])} test records"
     )
 
     for split in metadata:

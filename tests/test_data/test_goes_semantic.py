@@ -61,6 +61,43 @@ def test_init_raises_on_missing_mask(synthetic_root_missing_mask: Path):
         GOESDataset(cfg)
 
 
+def test_init_skips_sequence_files_without_masks(tmp_path: Path):
+    from PIL import Image
+
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    img_dir = tmp_path / "images_semantic" / "train"
+    mask_dir = tmp_path / "semantic_masks" / "train"
+    img_dir.mkdir(parents=True)
+    mask_dir.mkdir(parents=True)
+
+    rng = np.random.RandomState(99)
+    size = (_SYNTH_SIZE, _SYNTH_SIZE)
+
+    # Base image with mask
+    for stem in ["train_000001"]:
+        img_arr = rng.randint(0, 256, (*size, 3), dtype=np.uint8)
+        Image.fromarray(img_arr, mode="RGB").save(img_dir / f"{stem}.jpg")
+        mask_arr = rng.choice([0, 255], size=size).astype(np.uint8)
+        Image.fromarray(mask_arr, mode="L").save(mask_dir / f"{stem}.png")
+
+    # Sequence images without masks (should be silently skipped)
+    for stem in ["train_000001_a1", "train_000001_a2", "train_000001_b1"]:
+        img_arr = rng.randint(0, 256, (*size, 3), dtype=np.uint8)
+        Image.fromarray(img_arr, mode="RGB").save(img_dir / f"{stem}.jpg")
+
+    cfg = DataConfig(
+        root=str(tmp_path),
+        split="val",
+        image_size=_SYNTH_SIZE,
+        val_fraction=0.9,
+    )
+    ds = GOESDataset(cfg)
+
+    assert ds.stems == ["train_000001"], f"only base stem expected, got {ds.stems}"
+
+
 def test_init_discovers_test_samples(synthetic_root: Path):
     from deepcontrail.data.config import DataConfig
     from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset

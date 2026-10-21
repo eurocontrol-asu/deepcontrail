@@ -7,6 +7,7 @@ imported lazily inside ``__getitem__`` and is optional.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +30,13 @@ if TYPE_CHECKING:
     import albumentations as A
 
     from deepcontrail.data.config import DataConfig
+
+_SEQUENCE_SUFFIX = re.compile(r"_[ab]\d+$")
+
+
+def _is_sequence_stem(stem: str) -> bool:
+    """Return True if the stem has a temporal sequence suffix (e.g. ``_a1``, ``_b3``)."""
+    return _SEQUENCE_SUFFIX.search(stem) is not None
 
 
 class GOESSemanticDataset:
@@ -126,10 +134,10 @@ class GOESSemanticDataset:
         for img_path in image_paths:
             stem = img_path.stem
             mask_path = mask_dir / f"{stem}{mask_ext}"
-            if not mask_path.exists():
+            if mask_path.exists():
+                stems.append(stem)
+            elif not _is_sequence_stem(stem):
                 missing.append(f"{stem}: no mask (expected {mask_path})")
-                continue
-            stems.append(stem)
 
         if missing:
             msg = f"Dataset validation found {len(missing)} missing mask(s):\n"
