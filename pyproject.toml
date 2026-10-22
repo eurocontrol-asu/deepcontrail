@@ -47,7 +47,15 @@ train = [
     "pytorch-lightning>=2.1",
     "albumentations>=1.4",
     "pyyaml>=6.0",
-    "mlflow>=2.10",
+    # Pinned to the versions training runs on: newer lightning-utilities/torchmetrics
+    # broke Lightning's progress bar and changed metric behaviour.
+    "mlflow==3.17.0",
+    "lightning-utilities==0.11.8",
+    "torchmetrics==1.0.3",
+]
+convert = [
+    # scripts/convert_tfrecords.py only; kept out of `train` so CI never installs it.
+    "tensorflow==2.21.0",
 ]
 inference = [
     "fastapi>=0.100",
