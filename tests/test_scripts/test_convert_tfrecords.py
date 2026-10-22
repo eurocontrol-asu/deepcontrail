@@ -45,21 +45,35 @@ def test_spectral_bands_frame_reads_requested_frame():
     assert np.all(frame[..., 4] == 999.0), "frame t must come from time index t"
 
 
-def test_preview_rgb_is_default_false_color_as_uint8():
-    from deepcontrail.data._loading import false_color_from_spectral
-    from deepcontrail.data.config import FalseColorConfig
+def _spectral_frame(**values: float) -> np.ndarray:
+    from deepcontrail.data.config import SPECTRAL_BAND_KEYS
+
+    base = dict.fromkeys(SPECTRAL_BAND_KEYS, 260.0) | values
+    return np.stack([np.full((2, 2), base[k], dtype=np.float32) for k in SPECTRAL_BAND_KEYS], -1)
+
+
+def test_preview_rgb_uses_standard_ash_recipe():
     from scripts.convert_tfrecords import _preview_rgb
 
-    rng = np.random.RandomState(0)
-    spectral = rng.uniform(230, 300, (4, 4, 10)).astype(np.float32)
+    spectral = _spectral_frame(data_12um=269.0, data_11um=270.0, cloud_top=268.0, data_10um=275.0)
 
     preview = _preview_rgb(spectral)
 
-    expected = (false_color_from_spectral(spectral, FalseColorConfig()) * 255).astype(np.uint8)
     assert preview.dtype == np.uint8
-    np.testing.assert_array_equal(
-        preview, expected, err_msg="preview JPEGs use the default (band13 legacy) composite"
-    )
+    expected = [(269 - 270 + 4) / 6, (270 - 268 + 4) / 9, (270 - 243) / 60]
+    for c, value in enumerate(expected):
+        assert np.all(preview[..., c] == np.uint8(np.float32(value) * 255)), (
+            f"channel {c}: preview must be the standard ash RGB (G = band14 - band11 = cloud_top)"
+        )
+
+
+def test_preview_rgb_when_data_10um_changes_preview_is_unchanged():
+    from scripts.convert_tfrecords import _preview_rgb
+
+    low = _preview_rgb(_spectral_frame(data_10um=250.0))
+    high = _preview_rgb(_spectral_frame(data_10um=290.0))
+
+    assert np.array_equal(low, high), "data_10um (band 13) is not part of the standard ash recipe"
 
 
 def test_convert_tfrecords_import_does_not_load_tensorflow():
