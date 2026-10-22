@@ -13,6 +13,7 @@ rest of the pipeline expects::
         annotator_masks/{train,val,test}/{stem}.npy        # uint8   (H, W, 4)
         instance_masks/{train,val,test}/{stem}.npy         # int8    (N, H, W, 4)
         spectral_bands/{train,val,test}/{stem}.npy         # float32 (H, W, 10)
+        spectral_bands/bands.json                          # channel -> key, ABI band, wavelength
         metadata/{train,val,test}_record_ids.json          # {stem: record_id}
 
 ``spectral_bands`` channels follow ``deepcontrail.data.SPECTRAL_BAND_KEYS``. No
@@ -65,13 +66,18 @@ import fnmatch
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from PIL import Image
 
 from deepcontrail.data._loading import false_color_from_spectral
-from deepcontrail.data.config import SPECTRAL_BAND_KEYS, FalseColorChannel, FalseColorConfig
+from deepcontrail.data.config import (
+    SPECTRAL_BAND_INFO,
+    SPECTRAL_BAND_KEYS,
+    FalseColorChannel,
+    FalseColorConfig,
+)
 
 if TYPE_CHECKING:
     import tensorflow as tf
@@ -438,6 +444,50 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+_OUTPUT_SUBDIRS = (
+    "images_semantic",
+    "semantic_masks",
+    "probability_masks",
+    "annotator_masks",
+    "instance_masks",
+    "spectral_bands",
+)
+
+
+def _band_manifest() -> dict[str, Any]:
+    """Describe the channels of ``spectral_bands/*.npy`` for readers without this code."""
+    channels = []
+    for index, key in enumerate(SPECTRAL_BAND_KEYS):
+        info = SPECTRAL_BAND_INFO[key]
+        channels.append(
+            {
+                "index": index,
+                "key": key,
+                "abi_band": info.abi_band,
+                "wavelength_um": info.wavelength_um,
+                "name": info.name,
+                "derived_from": list(info.derived_from) if info.derived_from else None,
+            }
+        )
+    return {
+        "description": "Channel layout of spectral_bands/{split}/{stem}.npy (GOES-16 ABI)",
+        "shape": ["H", "W", len(SPECTRAL_BAND_KEYS)],
+        "dtype": "float32",
+        "units": "K",
+        "channels": channels,
+    }
+
+
+def _prepare_output_dir(output_dir: Path) -> None:
+    """Create the output layout and write ``spectral_bands/bands.json``."""
+    (output_dir / "metadata").mkdir(parents=True, exist_ok=True)
+    for sub in _OUTPUT_SUBDIRS:
+        for split in ("train", "val", "test"):
+            (output_dir / sub / split).mkdir(parents=True, exist_ok=True)
+    manifest = output_dir / "spectral_bands" / "bands.json"
+    manifest.write_text(json.dumps(_band_manifest(), indent=2) + "\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Convert the TFRecord shards to the filesystem layout and return 0."""
     args = _parse_args(argv)
@@ -445,18 +495,7 @@ def main(argv: list[str] | None = None) -> int:
     output_dir = Path(args.output_dir)
     tf_dir = Path(args.tfrecord_dir)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "metadata").mkdir(exist_ok=True)
-    for sub in (
-        "images_semantic",
-        "semantic_masks",
-        "probability_masks",
-        "annotator_masks",
-        "instance_masks",
-        "spectral_bands",
-    ):
-        for split in ("train", "val", "test"):
-            (output_dir / sub / split).mkdir(parents=True, exist_ok=True)
+    _prepare_output_dir(output_dir)
 
     # Resume: keep record_ids from a prior interrupted run so skipped stems are
     # retained in the metadata output.
