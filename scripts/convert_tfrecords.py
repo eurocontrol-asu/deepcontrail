@@ -7,7 +7,7 @@ consensus pixel mask, ...). This script decodes those shards into the layout the
 rest of the pipeline expects::
 
     <output-dir>/
-        images_semantic/{train,val,test}/{stem}.jpg        # uint8 preview, default composite
+        images_semantic/{train,val,test}/{stem}.jpg        # uint8 preview, standard ash RGB
         semantic_masks/{train,val,test}/{stem}.png         # (already present)
         probability_masks/{train,val,test}/{stem}.npy      # float32 (H, W)
         annotator_masks/{train,val,test}/{stem}.npy        # uint8   (H, W, 4)
@@ -71,7 +71,7 @@ import numpy as np
 from PIL import Image
 
 from deepcontrail.data._loading import false_color_from_spectral
-from deepcontrail.data.config import SPECTRAL_BAND_KEYS, FalseColorConfig
+from deepcontrail.data.config import SPECTRAL_BAND_KEYS, FalseColorChannel, FalseColorConfig
 
 if TYPE_CHECKING:
     import tensorflow as tf
@@ -143,14 +143,24 @@ def _band_frame(bands: dict[str, np.ndarray], key: str, t: int) -> np.ndarray:
     return bands[key][:, :, t]
 
 
-def _preview_rgb(spectral: np.ndarray) -> np.ndarray:
-    """Render a ``(H, W, 10)`` spectral frame as a uint8 preview for ``images_semantic/``.
+# Standard ash RGB (OpenContrails paper): G = band14 - band11, i.e. data_11um - cloud_top.
+_PREVIEW_FALSE_COLOR = FalseColorConfig(
+    channels=(
+        FalseColorChannel(bands=("data_12um", "data_11um"), bounds=(-4.0, 2.0)),
+        FalseColorChannel(bands=("data_11um", "cloud_top"), bounds=(-4.0, 5.0)),
+        FalseColorChannel(bands=("data_11um",), bounds=(243.0, 303.0)),
+    )
+)
 
-    Uses the default ``FalseColorConfig`` (band13 legacy recipe), so the JPEG
-    pipeline keeps the inputs it was trained on. Spectral training builds its
-    composite at load time from ``spectral_bands/`` instead.
+
+def _preview_rgb(spectral: np.ndarray) -> np.ndarray:
+    """Render a ``(H, W, 10)`` spectral frame as a uint8 standard ash RGB preview.
+
+    Written to ``images_semantic/``. Spectral training does not use these; it
+    builds its composite at load time from ``spectral_bands/`` with the bands
+    set in ``DataConfig.false_color``.
     """
-    return (false_color_from_spectral(spectral, FalseColorConfig()) * 255).astype(np.uint8)
+    return (false_color_from_spectral(spectral, _PREVIEW_FALSE_COLOR) * 255).astype(np.uint8)
 
 
 def _spectral_bands_frame(bands: dict[str, np.ndarray], t: int) -> np.ndarray:
