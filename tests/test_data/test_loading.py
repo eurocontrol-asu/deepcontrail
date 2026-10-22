@@ -11,6 +11,8 @@ from PIL import Image
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from deepcontrail.data.config import FalseColorConfig
+
 
 # ---------------------------------------------------------------------------
 # load_image
@@ -302,64 +304,92 @@ def test_shift_image_float32_zero_is_identity():
 
 
 # ---------------------------------------------------------------------------
-# ash_false_color
+# false_color_from_spectral
 # ---------------------------------------------------------------------------
 
 
-def test_ash_false_color_shape_and_dtype():
-    from deepcontrail.data._loading import ash_false_color
-
-    b10 = np.full((8, 8), 270.0, dtype=np.float32)
-    b11 = np.full((8, 8), 273.0, dtype=np.float32)
-    b12 = np.full((8, 8), 271.0, dtype=np.float32)
-
-    result = ash_false_color(b10, b11, b12)
-
-    assert result.shape == (8, 8, 3), f"expected (8, 8, 3), got {result.shape}"
-    assert result.dtype == np.float32
-
-
-def test_ash_false_color_values_in_unit_range():
-    from deepcontrail.data._loading import ash_false_color
-
-    rng = np.random.RandomState(42)
-    b10 = rng.uniform(220, 320, (16, 16)).astype(np.float32)
-    b11 = rng.uniform(220, 320, (16, 16)).astype(np.float32)
-    b12 = rng.uniform(220, 320, (16, 16)).astype(np.float32)
-
-    result = ash_false_color(b10, b11, b12)
-
-    assert result.min() >= 0.0, f"min {result.min()} is below 0"
-    assert result.max() <= 1.0, f"max {result.max()} is above 1"
+_KEYS = (
+    "data_10um",
+    "data_11um",
+    "data_12um",
+    "brightness_temperature_difference",
+    "cloud_top",
+    "co2",
+    "low_vapor",
+    "mid_vapor",
+    "upper_vapor",
+    "ozone",
+)
 
 
-def test_ash_false_color_known_values():
-    from deepcontrail.data._loading import ash_false_color
-
-    b10 = np.array([[270.0]], dtype=np.float32)
-    b11 = np.array([[273.0]], dtype=np.float32)
-    b12 = np.array([[271.0]], dtype=np.float32)
-
-    result = ash_false_color(b10, b11, b12)
-
-    # R = clip((b12 - b11 + 4) / 6, 0, 1) = (271 - 273 + 4) / 6 = 1/3
-    # G = clip((b11 - b10 + 4) / 9, 0, 1) = (273 - 270 + 4) / 9 = 7/9
-    # B = clip((b11 - 243) / 60, 0, 1)    = (273 - 243) / 60    = 0.5
-    np.testing.assert_allclose(result[0, 0, 0], 1.0 / 3.0, atol=1e-6, err_msg="R channel")
-    np.testing.assert_allclose(result[0, 0, 1], 7.0 / 9.0, atol=1e-6, err_msg="G channel")
-    np.testing.assert_allclose(result[0, 0, 2], 0.5, atol=1e-6, err_msg="B channel")
+def _spectral(**values: float) -> np.ndarray:
+    base = dict.fromkeys(_KEYS, 260.0) | values
+    return np.stack([np.full((2, 2), base[k], dtype=np.float32) for k in _KEYS], axis=-1)
 
 
-def test_ash_false_color_clips_extremes():
-    from deepcontrail.data._loading import ash_false_color
+def _config_with_green(*bands: str) -> FalseColorConfig:
+    from deepcontrail.data.config import FalseColorConfig
 
-    b10 = np.array([[200.0]], dtype=np.float32)
-    b11 = np.array([[200.0]], dtype=np.float32)
-    b12 = np.array([[300.0]], dtype=np.float32)
+    default = FalseColorConfig()
+    green = default.channels[1].model_copy(update={"bands": bands})
+    return FalseColorConfig(channels=(default.channels[0], green, default.channels[2]))
 
-    result = ash_false_color(b10, b11, b12)
 
-    assert result[0, 0, 0] == 1.0, "R should be clipped to 1.0 for extreme difference"
+def test_false_color_from_spectral_default_is_band13_legacy_recipe():
+    from deepcontrail.data._loading import false_color_from_spectral
+    from deepcontrail.data.config import FalseColorConfig
+
+    bands = _spectral(data_12um=269.0, data_11um=270.0, data_10um=268.0, cloud_top=271.0)
+
+    fc = false_color_from_spectral(bands, FalseColorConfig())
+
+    np.testing.assert_allclose(
+        fc[..., 0], (269 - 270 + 4) / 6, err_msg="R = (12um - 11um) / (-4, 2)"
+    )
+    np.testing.assert_allclose(fc[..., 1], (270 - 268 + 4) / 9, err_msg="G = 11um - data_10um")
+    np.testing.assert_allclose(fc[..., 2], (270 - 243) / 60, err_msg="B = 11um over (243, 303)")
+
+
+def test_false_color_from_spectral_uses_configured_green_bands():
+    from deepcontrail.data._loading import false_color_from_spectral
+
+    bands = _spectral(data_11um=270.0, data_10um=268.0, cloud_top=271.0)
+
+    fc = false_color_from_spectral(bands, _config_with_green("data_11um", "cloud_top"))
+
+    np.testing.assert_allclose(
+        fc[..., 1], (270 - 271 + 4) / 9, err_msg="G must follow the configured bands (cloud_top)"
+    )
+
+
+def test_false_color_from_spectral_shape_and_dtype():
+    from deepcontrail.data._loading import false_color_from_spectral
+    from deepcontrail.data.config import FalseColorConfig
+
+    fc = false_color_from_spectral(_spectral(), FalseColorConfig())
+
+    assert fc.shape == (2, 2, 3)
+    assert fc.dtype == np.float32
+
+
+def test_false_color_from_spectral_clips_to_unit_range():
+    from deepcontrail.data._loading import false_color_from_spectral
+    from deepcontrail.data.config import FalseColorConfig
+
+    bands = _spectral(data_12um=400.0, data_11um=100.0, data_10um=0.0)
+
+    fc = false_color_from_spectral(bands, FalseColorConfig())
+
+    assert fc.min() >= 0.0
+    assert fc.max() <= 1.0
+
+
+def test_false_color_from_spectral_rejects_wrong_channel_count():
+    from deepcontrail.data._loading import false_color_from_spectral
+    from deepcontrail.data.config import FalseColorConfig
+
+    with pytest.raises(ValueError, match="10"):
+        false_color_from_spectral(np.zeros((2, 2, 3), dtype=np.float32), FalseColorConfig())
 
 
 # ---------------------------------------------------------------------------

@@ -15,10 +15,12 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from PIL import Image
 
+from deepcontrail.data.config import SPECTRAL_BAND_KEYS
+
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from deepcontrail.data.config import NormalizeConfig
+    from deepcontrail.data.config import FalseColorConfig, NormalizeConfig
 
 
 def shift_image(image: np.ndarray, pixel_shift: float) -> np.ndarray:
@@ -61,39 +63,48 @@ def shift_image(image: np.ndarray, pixel_shift: float) -> np.ndarray:
     return np.array(shifted, dtype=np.uint8)
 
 
-_TDIFF_BOUNDS = (-4.0, 2.0)
-_CLOUD_TOP_TDIFF_BOUNDS = (-4.0, 5.0)
-_T11_BOUNDS = (243.0, 303.0)
+_BAND_INDEX = {key: i for i, key in enumerate(SPECTRAL_BAND_KEYS)}
 
 
-def ash_false_color(
-    band11: np.ndarray,
-    band14: np.ndarray,
-    band15: np.ndarray,
-) -> np.ndarray:
-    """GOES-16 ash false-color composite from three thermal bands.
+def false_color_from_spectral(bands: np.ndarray, config: FalseColorConfig) -> np.ndarray:
+    """Build the 3-channel composite from a 10-channel spectral array.
 
     Parameters
     ----------
-    band11
-        ABI band 11 / 8.4 µm brightness temperatures (OpenContrails ``cloud_top``;
-        not ``data_10um``, which is band 13).
-    band14
-        ABI band 14 / 11.2 µm brightness temperatures (``data_11um``).
-    band15
-        ABI band 15 / 12.3 µm brightness temperatures (``data_12um``).
+    bands
+        Brightness temperatures with shape ``(H, W, 10)``, channels in
+        ``SPECTRAL_BAND_KEYS`` order (the ``spectral_bands/*.npy`` layout).
+    config
+        Bands and bounds of each output channel.
 
     Returns
     -------
     np.ndarray
         Float32 ``(H, W, 3)`` array with values in ``[0, 1]``.
+
+    Raises
+    ------
+    ValueError
+        If ``bands`` is not ``(H, W, 10)``.
     """
-    r = (band15 - band14 - _TDIFF_BOUNDS[0]) / (_TDIFF_BOUNDS[1] - _TDIFF_BOUNDS[0])
-    g = (band14 - band11 - _CLOUD_TOP_TDIFF_BOUNDS[0]) / (
-        _CLOUD_TOP_TDIFF_BOUNDS[1] - _CLOUD_TOP_TDIFF_BOUNDS[0]
-    )
-    b = (band14 - _T11_BOUNDS[0]) / (_T11_BOUNDS[1] - _T11_BOUNDS[0])
-    return np.clip(np.stack([r, g, b], axis=-1), 0, 1).astype(np.float32)
+    if bands.ndim != 3 or bands.shape[-1] != len(SPECTRAL_BAND_KEYS):
+        n = len(SPECTRAL_BAND_KEYS)
+        msg = f"expected spectral bands of shape (H, W, {n}), got {bands.shape}"
+        raise ValueError(msg)
+
+    channels = []
+    for channel in config.channels:
+        value = bands[..., _BAND_INDEX[channel.bands[0]]]
+        if len(channel.bands) == 2:
+            value = value - bands[..., _BAND_INDEX[channel.bands[1]]]
+        lo, hi = channel.bounds
+        channels.append((value - lo) / (hi - lo))
+    return np.clip(np.stack(channels, axis=-1), 0, 1).astype(np.float32)
+
+
+def load_spectral_false_color(path: str | Path, config: FalseColorConfig) -> np.ndarray:
+    """Load a ``spectral_bands/*.npy`` file and build its composite with ``config``."""
+    return false_color_from_spectral(np.load(path), config)
 
 
 def load_false_color(path: str | Path) -> np.ndarray:
