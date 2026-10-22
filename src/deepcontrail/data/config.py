@@ -7,7 +7,7 @@ Uses only pydantic + pyyaml so that ``import deepcontrail.data`` stays torch-fre
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -28,6 +28,65 @@ class NormalizeConfig(BaseModel):
 
     mean: tuple[float, ...] = (0.485, 0.456, 0.406)
     std: tuple[float, ...] = (0.229, 0.224, 0.225)
+
+
+SpectralBand = Literal[
+    "data_10um",
+    "data_11um",
+    "data_12um",
+    "brightness_temperature_difference",
+    "cloud_top",
+    "co2",
+    "low_vapor",
+    "mid_vapor",
+    "upper_vapor",
+    "ozone",
+]
+"""OpenContrails band key.
+
+``data_10um`` is ABI band 13 (10.3 µm); ``cloud_top`` is ABI band 11 (8.4 µm).
+"""
+
+SPECTRAL_BAND_KEYS: tuple[str, ...] = get_args(SpectralBand)
+"""Channel order of every ``spectral_bands/{split}/{stem}.npy`` file, shape ``(H, W, 10)``."""
+
+
+class FalseColorChannel(BaseModel):
+    """One composite channel: a band, or the difference of two bands, scaled by ``bounds``.
+
+    ``bands=(a,)`` gives ``a``; ``bands=(a, b)`` gives ``a - b``. The value is
+    mapped linearly from ``bounds = (lo, hi)`` to ``[0, 1]`` and clipped.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    bands: tuple[SpectralBand] | tuple[SpectralBand, SpectralBand]
+    bounds: tuple[float, float]
+
+    @model_validator(mode="after")
+    def _validate_bounds(self) -> FalseColorChannel:
+        lo, hi = self.bounds
+        if not lo < hi:
+            msg = f"bounds must be increasing (lo < hi), got {self.bounds}"
+            raise ValueError(msg)
+        return self
+
+
+class FalseColorConfig(BaseModel):
+    """Bands and bounds of the 3-channel composite built from ``spectral_bands/``.
+
+    The default is the recipe every model before this option was trained on:
+    the ash RGB layout but with ``data_10um`` (ABI band 13) in green. The
+    standard ash RGB uses ``cloud_top`` (ABI band 11) there instead.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    channels: tuple[FalseColorChannel, FalseColorChannel, FalseColorChannel] = (
+        FalseColorChannel(bands=("data_12um", "data_11um"), bounds=(-4.0, 2.0)),
+        FalseColorChannel(bands=("data_11um", "data_10um"), bounds=(-4.0, 5.0)),
+        FalseColorChannel(bands=("data_11um",), bounds=(243.0, 303.0)),
+    )
 
 
 class AugmentationConfig(BaseModel):
@@ -77,6 +136,12 @@ class DataConfig(BaseModel):
         PNGs (strict consensus ground truth). ``"probability"`` reads
         ``probability_masks/`` and returns float32 in ``[0, 1]`` for
         soft-label training.
+    image_source
+        ``"jpeg"`` reads pre-rendered ``images_semantic/`` JPEGs. ``"spectral"``
+        reads ``spectral_bands/`` and builds the composite with ``false_color``.
+    false_color
+        Bands and bounds of the composite when ``image_source="spectral"``.
+        Defaults to the band13 legacy recipe.
     pixel_shift
         Sub-pixel translation applied to images at load time to correct a
         labeling misalignment in the GOES-16 dataset. Default 0.0 (no shift).
@@ -108,6 +173,7 @@ class DataConfig(BaseModel):
     split: Literal["train", "val", "test"] = "train"
     mask_type: Literal["binary", "probability"] = "binary"
     image_source: Literal["jpeg", "spectral"] = "jpeg"
+    false_color: FalseColorConfig = FalseColorConfig()
     pixel_shift: Annotated[float, Field(ge=0.0)] = 0.0
     seed: Annotated[int, Field(ge=0)] = 42
     image_size: Annotated[int, Field(gt=0)] = 256

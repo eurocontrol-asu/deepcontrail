@@ -25,12 +25,16 @@ def synthetic_root(tmp_path: Path) -> Path:
           semantic_masks/test/    (2 grayscale PNGs, 16x16, values {0, 255})
           probability_masks/train/ (5 float32 npy, 16x16)
           probability_masks/test/  (2 float32 npy, 16x16)
+          spectral_bands/train/   (5 float32 npy, 16x16x10, Kelvin)
+          spectral_bands/test/    (2 float32 npy, 16x16x10, Kelvin)
 
     The train/val split is handled on-the-fly by the dataset using
     ``val_fraction``.  With 5 stems and ``val_fraction=0.2``, the last
     stem goes to validation and the first 4 to training.
     """
     rng = np.random.RandomState(42)
+    # Separate stream so the spectral bands don't shift the images/masks drawn from ``rng``.
+    band_rng = np.random.RandomState(7)
     size = (16, 16)
 
     intermediate_stems = {"train_000001", "test_000002"}
@@ -39,11 +43,11 @@ def synthetic_root(tmp_path: Path) -> Path:
         img_dir = tmp_path / "images_semantic" / split
         binary_mask_dir = tmp_path / "semantic_masks" / split
         prob_mask_dir = tmp_path / "probability_masks" / split
-        fc_dir = tmp_path / "false_color" / split
+        sb_dir = tmp_path / "spectral_bands" / split
         img_dir.mkdir(parents=True)
         binary_mask_dir.mkdir(parents=True)
         prob_mask_dir.mkdir(parents=True)
-        fc_dir.mkdir(parents=True)
+        sb_dir.mkdir(parents=True)
 
         for i in range(1, count + 1):
             stem = f"{prefix}_{i:06d}"
@@ -59,8 +63,8 @@ def synthetic_root(tmp_path: Path) -> Path:
                 prob_mask[prob_mask > 0] = 0.75
             np.save(prob_mask_dir / f"{stem}.npy", prob_mask)
 
-            fc = rng.uniform(0, 1, (*size, 3)).astype(np.float32)
-            np.save(fc_dir / f"{stem}.npy", fc)
+            bands = band_rng.uniform(230, 300, (*size, 10)).astype(np.float32)
+            np.save(sb_dir / f"{stem}.npy", bands)
 
     return tmp_path
 

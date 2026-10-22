@@ -773,3 +773,50 @@ def test_getitem_spectral_source_numpy_fallback(synthetic_root: Path):
     assert image.shape == (_SYNTH_SIZE, _SYNTH_SIZE, 3)
     assert image.min() >= 0.0
     assert image.max() <= 1.0
+
+
+def test_getitem_spectral_source_builds_image_from_spectral_bands(synthetic_root: Path):
+    from deepcontrail.data._loading import false_color_from_spectral
+    from deepcontrail.data.config import DataConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    cfg = DataConfig(
+        root=str(synthetic_root), split="test", image_size=_SYNTH_SIZE, image_source="spectral"
+    )
+    ds = GOESDataset(cfg)
+    bands = np.load(synthetic_root / "spectral_bands" / "test" / f"{ds.stems[0]}.npy")
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, _mask = ds[0]
+
+    np.testing.assert_allclose(
+        image,
+        false_color_from_spectral(bands, cfg.false_color),
+        err_msg="spectral image must be built from spectral_bands/ with the configured channels",
+    )
+
+
+def test_getitem_spectral_source_green_follows_configured_bands(synthetic_root: Path):
+    from deepcontrail.data.config import DataConfig, FalseColorConfig
+    from deepcontrail.data.goes_semantic import GOESSemanticDataset as GOESDataset
+
+    legacy = FalseColorConfig()
+    green = legacy.channels[1].model_copy(update={"bands": ("data_11um", "cloud_top")})
+    standard = FalseColorConfig(channels=(legacy.channels[0], green, legacy.channels[2]))
+
+    def first_image(fc: FalseColorConfig) -> np.ndarray:
+        cfg = DataConfig(
+            root=str(synthetic_root),
+            split="test",
+            image_size=_SYNTH_SIZE,
+            image_source="spectral",
+            false_color=fc,
+        )
+        with mock.patch.dict("sys.modules", {"torch": None}):
+            return GOESDataset(cfg)[0][0]
+
+    img_legacy = first_image(legacy)
+    img_standard = first_image(standard)
+
+    assert np.array_equal(img_legacy[..., [0, 2]], img_standard[..., [0, 2]]), "R and B unchanged"
+    assert not np.array_equal(img_legacy[..., 1], img_standard[..., 1]), "G must change with bands"
