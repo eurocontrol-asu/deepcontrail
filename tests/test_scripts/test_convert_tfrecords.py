@@ -87,3 +87,48 @@ def test_convert_tfrecords_import_does_not_load_tensorflow():
     assert result.stdout.strip() == "False", (
         "tensorflow must be imported lazily: loading it next to torch segfaults the test suite"
     )
+
+
+def test_prepare_output_dir_writes_band_manifest(tmp_path: Path):
+    import json
+
+    from deepcontrail.data.config import SPECTRAL_BAND_INFO, SPECTRAL_BAND_KEYS
+    from scripts.convert_tfrecords import _prepare_output_dir
+
+    _prepare_output_dir(tmp_path)
+
+    manifest = json.loads((tmp_path / "spectral_bands" / "bands.json").read_text())
+    channels = manifest["channels"]
+    assert [c["key"] for c in channels] == list(SPECTRAL_BAND_KEYS), (
+        "channel i = SPECTRAL_BAND_KEYS[i]"
+    )
+    assert [c["index"] for c in channels] == list(range(len(SPECTRAL_BAND_KEYS)))
+    assert [c["abi_band"] for c in channels] == [
+        SPECTRAL_BAND_INFO[k].abi_band for k in SPECTRAL_BAND_KEYS
+    ]
+    assert manifest["dtype"] == "float32"
+    assert manifest["units"] == "K"
+
+
+def test_prepare_output_dir_creates_split_directories(tmp_path: Path):
+    from scripts.convert_tfrecords import _prepare_output_dir
+
+    _prepare_output_dir(tmp_path)
+
+    for sub in ("images_semantic", "semantic_masks", "probability_masks", "spectral_bands"):
+        for split in ("train", "val", "test"):
+            assert (tmp_path / sub / split).is_dir(), f"{sub}/{split} must exist before conversion"
+    assert (tmp_path / "metadata").is_dir()
+
+
+def test_prepare_output_dir_is_idempotent(tmp_path: Path):
+    from scripts.convert_tfrecords import _prepare_output_dir
+
+    _prepare_output_dir(tmp_path)
+    first = (tmp_path / "spectral_bands" / "bands.json").read_text()
+
+    _prepare_output_dir(tmp_path)
+
+    assert (tmp_path / "spectral_bands" / "bands.json").read_text() == first, (
+        "re-runs must not change it"
+    )
