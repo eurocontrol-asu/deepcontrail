@@ -61,14 +61,16 @@ import fnmatch
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from PIL import Image
 
+if TYPE_CHECKING:
+    import tensorflow as tf
+
 # Silence TensorFlow's CUDA/GPU chatter; this is a CPU-bound conversion.
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
-
-import tensorflow as tf
 
 SPECTRAL_BAND_KEYS = (
     "data_10um",
@@ -117,6 +119,8 @@ def _scalar_int(example: tf.train.Example, key: str) -> int | None:
 
 def _decode_mask(example: tf.train.Example, key: str) -> np.ndarray | None:
     """Decode a serialized int32 mask tensor, or ``None`` if the field is absent."""
+    import tensorflow as tf
+
     raw = _feature_bytes(example, key)
     if raw is None:
         return None
@@ -125,6 +129,8 @@ def _decode_mask(example: tf.train.Example, key: str) -> np.ndarray | None:
 
 def _decode_bands(example: tf.train.Example) -> dict[str, np.ndarray]:
     """Decode all spectral band tensors into ``(H, W, T)`` float64 arrays."""
+    import tensorflow as tf
+
     decoded: dict[str, np.ndarray] = {}
     for key in SPECTRAL_BAND_KEYS:
         raw = _feature_bytes(example, key)
@@ -153,15 +159,17 @@ def _false_color_frame(bands: dict[str, np.ndarray], t: int) -> np.ndarray:
         G = clip(normalize(band14 - band11, (-4, 5)), 0, 1)
         B = clip(normalize(band14, (243, 303)), 0, 1)
 
-    GOES-16 ABI band mapping: band11=8.5µm (data_10um), band14=11µm
-    (data_11um), band15=12µm (data_12um).
+    GOES-16 ABI band mapping (verified against Kaggle's labelled band files):
+    band11=8.4µm (``cloud_top``), band14=11.2µm (``data_11um``),
+    band15=12.3µm (``data_12um``). Despite its name, ``data_10um`` is band13
+    (10.3µm) and is not part of this recipe.
     """
-    b10 = _band_frame(bands, "data_10um", t)
-    b11 = _band_frame(bands, "data_11um", t)
-    b12 = _band_frame(bands, "data_12um", t)
-    r = np.clip((b12 - b11 - (-4)) / (2 - (-4)), 0, 1)
-    g = np.clip((b11 - b10 - (-4)) / (5 - (-4)), 0, 1)
-    b = np.clip((b11 - 243) / (303 - 243), 0, 1)
+    band11 = _band_frame(bands, "cloud_top", t)
+    band14 = _band_frame(bands, "data_11um", t)
+    band15 = _band_frame(bands, "data_12um", t)
+    r = np.clip((band15 - band14 - (-4)) / (2 - (-4)), 0, 1)
+    g = np.clip((band14 - band11 - (-4)) / (5 - (-4)), 0, 1)
+    b = np.clip((band14 - 243) / (303 - 243), 0, 1)
     return np.stack([r, g, b], axis=-1).astype(np.float32)
 
 
@@ -259,6 +267,8 @@ def _verify_consensus(png_path: Path, pixel_mask: np.ndarray, stem: str) -> None
 
 def _probe_format(shards: list[Path]) -> FormatInfo:
     """Auto-detect the TFRecord format by examining the first available record."""
+    import tensorflow as tf
+
     for shard in shards:
         for raw in tf.data.TFRecordDataset(str(shard)):
             example = tf.train.Example()
@@ -310,6 +320,8 @@ def _process_shard(
     ``start_pos`` is the 0-based global position of the shard's first record; it
     advances past skipped records so stems stay aligned across shards.
     """
+    import tensorflow as tf
+
     processed = 0
     skipped = 0
     pos = start_pos

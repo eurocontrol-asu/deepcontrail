@@ -67,31 +67,32 @@ _T11_BOUNDS = (243.0, 303.0)
 
 
 def ash_false_color(
-    b10: np.ndarray,
-    b11: np.ndarray,
-    b12: np.ndarray,
+    band11: np.ndarray,
+    band14: np.ndarray,
+    band15: np.ndarray,
 ) -> np.ndarray:
     """GOES-16 ash false-color composite from three thermal bands.
 
     Parameters
     ----------
-    b10
-        Band 11 / 8.5 µm brightness temperatures (``data_10um``).
-    b11
-        Band 14 / 11 µm brightness temperatures (``data_11um``).
-    b12
-        Band 15 / 12 µm brightness temperatures (``data_12um``).
+    band11
+        ABI band 11 / 8.4 µm brightness temperatures (OpenContrails ``cloud_top``;
+        not ``data_10um``, which is band 13).
+    band14
+        ABI band 14 / 11.2 µm brightness temperatures (``data_11um``).
+    band15
+        ABI band 15 / 12.3 µm brightness temperatures (``data_12um``).
 
     Returns
     -------
     np.ndarray
         Float32 ``(H, W, 3)`` array with values in ``[0, 1]``.
     """
-    r = (b12 - b11 - _TDIFF_BOUNDS[0]) / (_TDIFF_BOUNDS[1] - _TDIFF_BOUNDS[0])
-    g = (b11 - b10 - _CLOUD_TOP_TDIFF_BOUNDS[0]) / (
+    r = (band15 - band14 - _TDIFF_BOUNDS[0]) / (_TDIFF_BOUNDS[1] - _TDIFF_BOUNDS[0])
+    g = (band14 - band11 - _CLOUD_TOP_TDIFF_BOUNDS[0]) / (
         _CLOUD_TOP_TDIFF_BOUNDS[1] - _CLOUD_TOP_TDIFF_BOUNDS[0]
     )
-    b = (b11 - _T11_BOUNDS[0]) / (_T11_BOUNDS[1] - _T11_BOUNDS[0])
+    b = (band14 - _T11_BOUNDS[0]) / (_T11_BOUNDS[1] - _T11_BOUNDS[0])
     return np.clip(np.stack([r, g, b], axis=-1), 0, 1).astype(np.float32)
 
 
