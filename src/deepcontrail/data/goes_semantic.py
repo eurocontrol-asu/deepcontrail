@@ -16,9 +16,9 @@ from PIL import Image
 
 from deepcontrail.data._loading import (
     binarize_mask,
-    load_false_color,
     load_image,
     load_mask,
+    load_spectral_false_color,
     shift_image,
     to_numpy,
     to_tensors,
@@ -61,7 +61,7 @@ class GOESSemanticDataset:
         self.config = config
         self._root = Path(config.root)
 
-        img_subdir = "false_color" if config.image_source == "spectral" else "images_semantic"
+        img_subdir = "spectral_bands" if config.image_source == "spectral" else "images_semantic"
         mask_subdir = "probability_masks" if config.mask_type == "probability" else "semantic_masks"
         ds = "test" if config.split == "test" else "train"
         self._dir_pairs = [
@@ -221,7 +221,7 @@ class GOESSemanticDataset:
 
         img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
         if self.config.image_source == "spectral":
-            image = load_false_color(img_dir / f"{stem}.npy")
+            image = load_spectral_false_color(img_dir / f"{stem}.npy", self.config.false_color)
         else:
             image = load_image(img_dir / f"{stem}.jpg")
         if self.config.pixel_shift != 0.0:

@@ -319,3 +319,109 @@ def test_image_source_rejects_invalid():
 
     with pytest.raises(ValidationError, match="image_source"):
         DataConfig(root="/tmp/fake", image_source="raw")
+
+
+# --- false_color ---
+
+_LEGACY_CHANNELS = (
+    (("data_12um", "data_11um"), (-4.0, 2.0)),
+    (("data_11um", "data_10um"), (-4.0, 5.0)),
+    (("data_11um",), (243.0, 303.0)),
+)
+
+
+def test_spectral_band_keys_match_converter_channel_order():
+    from deepcontrail.data.config import SPECTRAL_BAND_KEYS
+
+    expected = (
+        "data_10um",
+        "data_11um",
+        "data_12um",
+        "brightness_temperature_difference",
+        "cloud_top",
+        "co2",
+        "low_vapor",
+        "mid_vapor",
+        "upper_vapor",
+        "ozone",
+    )
+
+    assert expected == SPECTRAL_BAND_KEYS, "channel order of spectral_bands/*.npy files on disk"
+
+
+def test_false_color_defaults_to_band13_legacy_recipe():
+    from deepcontrail.data.config import DataConfig
+
+    cfg = DataConfig(root="/tmp/fake", image_source="spectral")
+
+    got = tuple((ch.bands, ch.bounds) for ch in cfg.false_color.channels)
+    assert got == _LEGACY_CHANNELS, (
+        "default must stay the band13 legacy recipe so existing configs keep their inputs"
+    )
+
+
+def test_false_color_accepts_custom_bands_from_dict():
+    from deepcontrail.data.config import DataConfig
+
+    cfg = DataConfig.from_dict(
+        {
+            "root": "/tmp/fake",
+            "false_color": {
+                "channels": [
+                    {"bands": ["data_12um", "data_11um"], "bounds": [-4, 2]},
+                    {"bands": ["data_11um", "cloud_top"], "bounds": [-4, 5]},
+                    {"bands": ["data_11um"], "bounds": [243, 303]},
+                ]
+            },
+        }
+    )
+
+    assert cfg.false_color.channels[1].bands == ("data_11um", "cloud_top")
+
+
+def _channels(**green: object) -> list[dict[str, object]]:
+    g = {"bands": ["data_11um", "cloud_top"], "bounds": [-4, 5]} | green
+    return [
+        {"bands": ["data_12um", "data_11um"], "bounds": [-4, 2]},
+        g,
+        {"bands": ["data_11um"], "bounds": [243, 303]},
+    ]
+
+
+def test_false_color_rejects_unknown_band():
+    from deepcontrail.data.config import DataConfig
+
+    with pytest.raises(ValidationError, match="bands"):
+        DataConfig.from_dict(
+            {"root": "/tmp/fake", "false_color": {"channels": _channels(bands=["band_11"])}}
+        )
+
+
+def test_false_color_rejects_more_than_two_bands_per_channel():
+    from deepcontrail.data.config import DataConfig
+
+    with pytest.raises(ValidationError, match="bands"):
+        DataConfig.from_dict(
+            {
+                "root": "/tmp/fake",
+                "false_color": {
+                    "channels": _channels(bands=["data_11um", "cloud_top", "data_10um"])
+                },
+            }
+        )
+
+
+def test_false_color_rejects_bounds_not_increasing():
+    from deepcontrail.data.config import DataConfig
+
+    with pytest.raises(ValidationError, match="bounds"):
+        DataConfig.from_dict(
+            {"root": "/tmp/fake", "false_color": {"channels": _channels(bounds=[5, -4])}}
+        )
+
+
+def test_false_color_rejects_channel_count_other_than_three():
+    from deepcontrail.data.config import DataConfig
+
+    with pytest.raises(ValidationError, match="channels"):
+        DataConfig.from_dict({"root": "/tmp/fake", "false_color": {"channels": _channels()[:2]}})

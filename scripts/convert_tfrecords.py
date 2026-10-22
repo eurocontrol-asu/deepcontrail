@@ -7,13 +7,17 @@ consensus pixel mask, ...). This script decodes those shards into the layout the
 rest of the pipeline expects::
 
     <output-dir>/
-        images_semantic/{train,val,test}/{stem}.jpg        # (unchanged)
+        images_semantic/{train,val,test}/{stem}.jpg        # uint8 preview, default composite
         semantic_masks/{train,val,test}/{stem}.png         # (already present)
         probability_masks/{train,val,test}/{stem}.npy      # float32 (H, W)
         annotator_masks/{train,val,test}/{stem}.npy        # uint8   (H, W, 4)
         instance_masks/{train,val,test}/{stem}.npy         # int8    (N, H, W, 4)
         spectral_bands/{train,val,test}/{stem}.npy         # float32 (H, W, 10)
         metadata/{train,val,test}_record_ids.json          # {stem: record_id}
+
+``spectral_bands`` channels follow ``deepcontrail.data.SPECTRAL_BAND_KEYS``. No
+composite is stored as ``.npy``: training builds it at load time from the
+configured bands (``DataConfig.false_color``).
 
 Two export flavours are handled transparently:
 
@@ -61,27 +65,19 @@ import fnmatch
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from PIL import Image
 
+from deepcontrail.data._loading import false_color_from_spectral
+from deepcontrail.data.config import SPECTRAL_BAND_KEYS, FalseColorConfig
+
+if TYPE_CHECKING:
+    import tensorflow as tf
+
 # Silence TensorFlow's CUDA/GPU chatter; this is a CPU-bound conversion.
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
-
-import tensorflow as tf
-
-SPECTRAL_BAND_KEYS = (
-    "data_10um",
-    "data_11um",
-    "data_12um",
-    "brightness_temperature_difference",
-    "cloud_top",
-    "co2",
-    "low_vapor",
-    "mid_vapor",
-    "upper_vapor",
-    "ozone",
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -117,6 +113,8 @@ def _scalar_int(example: tf.train.Example, key: str) -> int | None:
 
 def _decode_mask(example: tf.train.Example, key: str) -> np.ndarray | None:
     """Decode a serialized int32 mask tensor, or ``None`` if the field is absent."""
+    import tensorflow as tf
+
     raw = _feature_bytes(example, key)
     if raw is None:
         return None
@@ -125,6 +123,8 @@ def _decode_mask(example: tf.train.Example, key: str) -> np.ndarray | None:
 
 def _decode_bands(example: tf.train.Example) -> dict[str, np.ndarray]:
     """Decode all spectral band tensors into ``(H, W, T)`` float64 arrays."""
+    import tensorflow as tf
+
     decoded: dict[str, np.ndarray] = {}
     for key in SPECTRAL_BAND_KEYS:
         raw = _feature_bytes(example, key)
@@ -143,26 +143,14 @@ def _band_frame(bands: dict[str, np.ndarray], key: str, t: int) -> np.ndarray:
     return bands[key][:, :, t]
 
 
-def _false_color_frame(bands: dict[str, np.ndarray], t: int) -> np.ndarray:
-    """GOES-16 ash false-color composite for frame ``t`` as ``(H, W, 3)`` float32.
+def _preview_rgb(spectral: np.ndarray) -> np.ndarray:
+    """Render a ``(H, W, 10)`` spectral frame as a uint8 preview for ``images_semantic/``.
 
-    Standard recipe used by Google Research, the OpenContrails paper, and all
-    top Kaggle competition teams::
-
-        R = clip(normalize(band15 - band14, (-4, 2)), 0, 1)
-        G = clip(normalize(band14 - band11, (-4, 5)), 0, 1)
-        B = clip(normalize(band14, (243, 303)), 0, 1)
-
-    GOES-16 ABI band mapping: band11=8.5µm (data_10um), band14=11µm
-    (data_11um), band15=12µm (data_12um).
+    Uses the default ``FalseColorConfig`` (band13 legacy recipe), so the JPEG
+    pipeline keeps the inputs it was trained on. Spectral training builds its
+    composite at load time from ``spectral_bands/`` instead.
     """
-    b10 = _band_frame(bands, "data_10um", t)
-    b11 = _band_frame(bands, "data_11um", t)
-    b12 = _band_frame(bands, "data_12um", t)
-    r = np.clip((b12 - b11 - (-4)) / (2 - (-4)), 0, 1)
-    g = np.clip((b11 - b10 - (-4)) / (5 - (-4)), 0, 1)
-    b = np.clip((b11 - 243) / (303 - 243), 0, 1)
-    return np.stack([r, g, b], axis=-1).astype(np.float32)
+    return (false_color_from_spectral(spectral, FalseColorConfig()) * 255).astype(np.uint8)
 
 
 def _spectral_bands_frame(bands: dict[str, np.ndarray], t: int) -> np.ndarray:
@@ -259,6 +247,8 @@ def _verify_consensus(png_path: Path, pixel_mask: np.ndarray, stem: str) -> None
 
 def _probe_format(shards: list[Path]) -> FormatInfo:
     """Auto-detect the TFRecord format by examining the first available record."""
+    import tensorflow as tf
+
     for shard in shards:
         for raw in tf.data.TFRecordDataset(str(shard)):
             example = tf.train.Example()
@@ -310,6 +300,8 @@ def _process_shard(
     ``start_pos`` is the 0-based global position of the shard's first record; it
     advances past skipped records so stems stay aligned across shards.
     """
+    import tensorflow as tf
+
     processed = 0
     skipped = 0
     pos = start_pos
@@ -340,8 +332,8 @@ def _process_shard(
             label_frame = 0
 
         mask_path = output_dir / "semantic_masks" / split / f"{stem}.png"
-        fc_path = output_dir / "false_color" / split / f"{stem}.npy"
-        if skip_existing and fc_path.exists() and mask_path.exists():
+        sb_path = output_dir / "spectral_bands" / split / f"{stem}.npy"
+        if skip_existing and sb_path.exists() and mask_path.exists():
             metadata[split].setdefault(stem, record_id)
             skipped += 1
             continue
@@ -382,17 +374,10 @@ def _process_shard(
         for t in range(n_frames):
             fstem = _frame_stem(stem, t, label_frame, n_frames)
 
-            false_color = _false_color_frame(bands, t)
-            np.save(
-                output_dir / "false_color" / split / f"{fstem}.npy",
-                false_color,
-            )
-            Image.fromarray((false_color * 255).astype(np.uint8), mode="RGB").save(
+            spectral = _spectral_bands_frame(bands, t)
+            np.save(output_dir / "spectral_bands" / split / f"{fstem}.npy", spectral)
+            Image.fromarray(_preview_rgb(spectral), mode="RGB").save(
                 output_dir / "images_semantic" / split / f"{fstem}.jpg"
-            )
-            np.save(
-                output_dir / "spectral_bands" / split / f"{fstem}.npy",
-                _spectral_bands_frame(bands, t),
             )
 
         metadata[split][stem] = record_id
@@ -459,7 +444,6 @@ def main(argv: list[str] | None = None) -> int:
         "annotator_masks",
         "instance_masks",
         "spectral_bands",
-        "false_color",
     ):
         for split in ("train", "val", "test"):
             (output_dir / sub / split).mkdir(parents=True, exist_ok=True)
