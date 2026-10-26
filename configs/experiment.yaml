@@ -1,50 +1,72 @@
 # Default experiment configuration for DeepContrail semantic segmentation.
 #
-# This is the current best configuration, updated as improvements are validated.
-# Best result: val Dice 0.678, test Dice 0.637 (threshold 0.51 — well calibrated)
-# See TODO.md for the full improvement roadmap and completed runs table.
+# Reference model: UPerNet + CAFormer-B36 at 512 px on the OpenContrails 20250305 export,
+# standard ash RGB built at load time from spectral_bands/.
+# Results of this exact configuration (MLflow run 56806bb1, single seed):
+#   test Dice 0.6856 (val-chosen threshold), 0.6875 @0.5; D4 TTA 0.6889, 0.6942 @0.5
+#   Kaggle hidden test (TTA, threshold 0.5): private 0.6914 / public 0.6994
 #
-# Data splits: train (18,080), val (2,008), test (1,879 — holdout only).
-# The data.split field sets the training split; val and test configs are
-# derived automatically in scripts/train.py (no augmentation, same root).
+# Key choices:
+# - false_color: standard ash RGB, G = band 14 - band 11 (data_11um - cloud_top).
+#   data_10um is ABI band 13, not band 11; the standard recipe beat it by +0.009 to +0.018.
+# - pixel_shift 0.0: 20250305 masks are already aligned with the images. The 0.5 shift
+#   used for the 2023/Kaggle export misaligns this one (TTA then lowers Dice).
+# - 512 px: 1024 px gained at most +0.005 for ~4x the compute.
+# - 40 epochs: validation Dice plateaus after epoch ~28.
+#
+# Splits: train/ is split at load time (val_fraction 0.1, seed 42); test/ (1,879) is the
+# holdout. Val and test configs are derived in scripts/train.py (no augmentation).
 
 data:
-  root: /data/aheffar/projects/contrails/semanticseg
+  root: /data/aheffar/projects/contrails/goes_contrails_dataset/20250305
   split: train
-  pixel_shift: 0.5
+  mask_type: probability
+  image_source: spectral
+  false_color:
+    channels:
+      - {bands: [data_12um, data_11um], bounds: [-4, 2]}     # R: band 15 - band 14
+      - {bands: [data_11um, cloud_top], bounds: [-4, 5]}     # G: band 14 - band 11
+      - {bands: [data_11um],            bounds: [243, 303]}  # B: band 14
+  pixel_shift: 0.0
   seed: 42
   image_size: 512
   batch_size: 32
   num_workers: 4
+  val_fraction: 0.1
   augmentation:
     horizontal_flip: 0.5
     vertical_flip: 0.5
-    random_rotate_90: 0.0  # disabled — corrupts 0.5px label shift after rotation
+    random_rotate_90: 0.5
+    shift_scale_rotate: 0.5
+    shift_limit: 0.0625
+    scale_limit: 0.1
+    rotate_limit: 30
   normalize:
     mean: [0.485, 0.456, 0.406]
     std: [0.229, 0.224, 0.225]
 
 model:
-  architecture: UnetPlusPlus
-  encoder_name: tu-maxvit_base_tf_512
+  architecture: UPerNet
+  encoder_name: tu-caformer_b36.sail_in22k_ft_in1k_384
   encoder_weights: imagenet
   in_channels: 3
   classes: 1
-  decoder_attention_type: null
-  decoder_use_norm: batchnorm
 
 loss:
-  name: dice
-  smooth: 1.0
+  name: composite
   from_logits: true
+  smooth: 1.0
+  composite_weights:
+    bce: 1.0
+    dice: 0.2
 
 training:
-  epochs: 100
+  epochs: 40
   lr: 1.0e-4
   optimizer: AdamW
   scheduler: CosineAnnealingLR
-  warmup_epochs: 5
+  warmup_epochs: 3
   scheduler_interval: step
-  weight_decay: 1.0e-4
+  weight_decay: 1.0e-2
   precision: bf16-mixed
   gradient_clip_val: 1.0
