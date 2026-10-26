@@ -107,23 +107,6 @@ def load_spectral_false_color(path: str | Path, config: FalseColorConfig) -> np.
     return false_color_from_spectral(np.load(path), config)
 
 
-def load_false_color(path: str | Path) -> np.ndarray:
-    """Load a pre-computed ash false-color composite.
-
-    Parameters
-    ----------
-    path
-        Path to a ``false_color/*.npy`` file with shape ``(H, W, 3)``,
-        float32 values in ``[0, 1]``.
-
-    Returns
-    -------
-    np.ndarray
-        Float32 ``(H, W, 3)`` array.
-    """
-    return np.load(path).astype(np.float32)
-
-
 def load_image(path: str | Path) -> np.ndarray:
     """Open an image file and return a uint8 RGB numpy array.
 

@@ -393,36 +393,6 @@ def test_false_color_from_spectral_rejects_wrong_channel_count():
 
 
 # ---------------------------------------------------------------------------
-# load_false_color
-# ---------------------------------------------------------------------------
-
-
-def test_load_false_color_returns_float32_hwc(tmp_path: Path):
-    from deepcontrail.data._loading import load_false_color
-
-    rng = np.random.RandomState(0)
-    fc = rng.uniform(0, 1, (8, 8, 3)).astype(np.float32)
-    np.save(tmp_path / "fc.npy", fc)
-
-    result = load_false_color(tmp_path / "fc.npy")
-
-    assert result.dtype == np.float32
-    assert result.shape == (8, 8, 3)
-    np.testing.assert_array_equal(result, fc)
-
-
-def test_load_false_color_preserves_values(tmp_path: Path):
-    from deepcontrail.data._loading import load_false_color
-
-    fc = np.array([[[0.1, 0.5, 0.9]]], dtype=np.float32)
-    np.save(tmp_path / "fc.npy", fc)
-
-    result = load_false_color(tmp_path / "fc.npy")
-
-    np.testing.assert_array_equal(result, fc, err_msg="must return pre-computed values as-is")
-
-
-# ---------------------------------------------------------------------------
 # to_tensors / to_numpy with float32 input
 # ---------------------------------------------------------------------------
 
