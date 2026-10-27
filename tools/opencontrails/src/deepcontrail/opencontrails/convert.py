@@ -6,14 +6,14 @@ module decodes the shards into the layout the rest of the pipeline expects::
 
     <output-dir>/
         spectral_bands/{train,test}/{stem}.npy      # float32 (H, W, 10), SPECTRAL_BAND_KEYS order
-        spectral_bands/bands.json                   # channel -> key, ABI band, wavelength
+        spectral_bands/bands.json                   # format v1: channel key, sensor band, units
         images_semantic/{train,test}/{stem}.jpg     # uint8 preview, standard ash RGB
         semantic_masks/{train,test}/{stem}.png      # consensus mask, values {0, 255}
         probability_masks/{train,test}/{stem}.npy   # float32 (H, W), mean of the annotators
         annotator_masks/{train,test}/{stem}.npy     # uint8 (H, W, n_annotators)
         instance_masks/{train,test}/{stem}.npy      # int8 (N, H, W, K), 20250305 only
         splits_{train,test}.txt                     # stems with a consensus mask
-        metadata/dataset_info.json                  # format, counts, recommended pixel_shift
+        metadata/dataset_info.json                  # format v1: counts, labels, pixel_shift
 
 Each sample is named after its TFRecord ``record_id`` (``{stem}`` above), so a name
 does not depend on shard order: any subset of shards (``--file-glob``) converts to
@@ -52,20 +52,28 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import fnmatch
-import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 from PIL import Image
 
 from deepcontrail.core.bands import SPECTRAL_BAND_INFO, SPECTRAL_BAND_KEYS
+from deepcontrail.core.contract import (
+    BAND_MANIFEST_PATH,
+    DATASET_INFO_PATH,
+    BandChannel,
+    BandManifest,
+    DatasetInfo,
+    Label,
+)
 from deepcontrail.core.false_color import (
     FalseColorChannel,
     FalseColorConfig,
     false_color_from_spectral,
 )
+from deepcontrail.core.splits import is_sequence_stem
 
 if TYPE_CHECKING:
     import tensorflow as tf
@@ -426,28 +434,42 @@ _OUTPUT_SUBDIRS = (
 )
 
 
-def _band_manifest() -> dict[str, Any]:
-    """Describe the channels of ``spectral_bands/*.npy`` for readers without this code."""
-    channels = []
-    for index, key in enumerate(SPECTRAL_BAND_KEYS):
-        info = SPECTRAL_BAND_INFO[key]
-        channels.append(
-            {
-                "index": index,
-                "key": key,
-                "abi_band": info.abi_band,
-                "wavelength_um": info.wavelength_um,
-                "name": info.name,
-                "derived_from": list(info.derived_from) if info.derived_from else None,
-            }
+_LABEL_DIRS: dict[Label, str] = {
+    "semantic": "semantic_masks",
+    "probability": "probability_masks",
+    "annotator": "annotator_masks",
+    "instance": "instance_masks",
+}
+
+
+def _band_manifest() -> BandManifest:
+    """Describe the channels of ``spectral_bands/*.npy`` (dataset format v1)."""
+    channels = tuple(
+        BandChannel(
+            index=index,
+            key=key,
+            units="K",
+            sensor_band=None if info.abi_band is None else str(info.abi_band),
+            wavelength_um=info.wavelength_um,
+            name=info.name,
+            derived_from=info.derived_from,
         )
-    return {
-        "description": "Channel layout of spectral_bands/{split}/{stem}.npy (GOES-16 ABI)",
-        "shape": ["H", "W", len(SPECTRAL_BAND_KEYS)],
-        "dtype": "float32",
-        "units": "K",
-        "channels": channels,
-    }
+        for index, (key, info) in enumerate((k, SPECTRAL_BAND_INFO[k]) for k in SPECTRAL_BAND_KEYS)
+    )
+    return BandManifest(
+        format_version=1,
+        sensor="GOES-16 ABI",
+        dtype="float32",
+        channels=channels,
+        description="Brightness temperatures of spectral_bands/{split}/{stem}.npy, shape (H, W, C)",
+    )
+
+
+def _write_band_manifest(output_dir: Path) -> None:
+    """Write ``spectral_bands/bands.json``."""
+    path = output_dir / BAND_MANIFEST_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_band_manifest().model_dump_json(indent=2) + "\n")
 
 
 def _prepare_output_dir(output_dir: Path) -> None:
@@ -456,8 +478,32 @@ def _prepare_output_dir(output_dir: Path) -> None:
     for sub in _OUTPUT_SUBDIRS:
         for split in _SPLITS:
             (output_dir / sub / split).mkdir(parents=True, exist_ok=True)
-    manifest = output_dir / "spectral_bands" / "bands.json"
-    manifest.write_text(json.dumps(_band_manifest(), indent=2) + "\n")
+    _write_band_manifest(output_dir)
+
+
+def _labels_on_disk(output_dir: Path) -> tuple[Label, ...]:
+    """Label kinds whose directory holds at least one file, in ``_LABEL_DIRS`` order."""
+
+    def has_files(directory: Path) -> bool:
+        return directory.is_dir() and next(directory.iterdir(), None) is not None
+
+    return tuple(
+        label
+        for label, sub in _LABEL_DIRS.items()
+        if any(has_files(output_dir / sub / split) for split in _SPLITS)
+    )
+
+
+def _format_from_disk(output_dir: Path) -> FormatInfo:
+    """Detect the export flavour from an already converted dataset (no TFRecords needed)."""
+    is_temporal = any(
+        is_sequence_stem(path.stem)
+        for split in _SPLITS
+        for path in (output_dir / "spectral_bands" / split).glob("*.npy")
+    )
+    return FormatInfo(
+        is_temporal=is_temporal, has_instance_masks="instance" in _labels_on_disk(output_dir)
+    )
 
 
 def _write_split_lists(output_dir: Path) -> None:
@@ -475,7 +521,9 @@ _KNOWN_EXPORTS: dict[tuple[bool, bool], tuple[str, float]] = {
 }
 
 
-def _dataset_info(fmt: FormatInfo, records: dict[str, int]) -> dict[str, Any]:
+def _dataset_info(
+    fmt: FormatInfo, records: dict[str, int], labels: tuple[Label, ...]
+) -> DatasetInfo:
     """Describe a converted dataset, including the ``pixel_shift`` to train it with."""
     export, shift = _KNOWN_EXPORTS.get((fmt.is_temporal, fmt.has_instance_masks), (None, None))
     note = (
@@ -484,23 +532,26 @@ def _dataset_info(fmt: FormatInfo, records: dict[str, int]) -> dict[str, Any]:
         if export
         else "Unknown export: measure the image/mask alignment before choosing pixel_shift."
     )
-    return {
-        "source": "OpenContrails GOES-16 ABI TFRecords",
-        "export": export,
-        "temporal": fmt.is_temporal,
-        "instance_masks": fmt.has_instance_masks,
-        "naming": "record_id",
-        "records": records,
-        "recommended_pixel_shift": shift,
-        "pixel_shift_note": note,
-    }
+    return DatasetInfo(
+        format_version=1,
+        source="OpenContrails GOES-16 ABI TFRecords",
+        records={"train": records["train"], "test": records["test"]},
+        labels=labels,
+        recommended_pixel_shift=shift,
+        temporal=fmt.is_temporal,
+        export=export,
+        naming="record_id",
+        pixel_shift_note=note,
+    )
 
 
 def _write_dataset_info(output_dir: Path, fmt: FormatInfo) -> None:
-    """Write ``metadata/dataset_info.json``, counting records from ``splits_*.txt``."""
+    """Write ``metadata/dataset_info.json`` from ``splits_*.txt`` and the label dirs on disk."""
     records = {s: len((output_dir / f"splits_{s}.txt").read_text().split()) for s in _SPLITS}
-    path = output_dir / "metadata" / "dataset_info.json"
-    path.write_text(json.dumps(_dataset_info(fmt, records), indent=2) + "\n")
+    info = _dataset_info(fmt, records, _labels_on_disk(output_dir))
+    path = output_dir / DATASET_INFO_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(info.model_dump_json(indent=2) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -513,8 +564,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--tfrecord-dir",
         type=Path,
-        required=True,
-        help="Directory holding ``train.tfrecords-*`` and ``validation.tfrecords-*`` shards.",
+        default=None,
+        help="Directory holding ``train.tfrecords-*`` and ``validation.tfrecords-*`` shards "
+        "(required unless --metadata-only).",
     )
     parser.add_argument("--output-dir", type=Path, required=True, help="Dataset root to write.")
     parser.add_argument(
@@ -538,15 +590,42 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         '(e.g. "*.tfrecords-00000-of-00100"). Names do not depend on shard order, '
         "so a subset converts to the same files as a full run.",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--metadata-only",
+        action="store_true",
+        help="Only rewrite spectral_bands/bands.json and metadata/dataset_info.json of an "
+        "already converted --output-dir (detects the export from the files on disk; no "
+        "TFRecords or TensorFlow needed).",
+    )
+    args = parser.parse_args(argv)
+    if args.tfrecord_dir is None and not args.metadata_only:
+        parser.error("--tfrecord-dir is required unless --metadata-only is given")
+    return args
+
+
+def _print_summary(output_dir: Path) -> None:
+    info = DatasetInfo.model_validate_json((output_dir / DATASET_INFO_PATH).read_text())
+    print(
+        f"Dataset now holds {info.records['train']} train + {info.records['test']} test records "
+        f"(labels: {', '.join(info.labels)}); recommended pixel_shift: "
+        f"{info.recommended_pixel_shift}"
+    )
+    print("Done.")
 
 
 def main(argv: list[str] | None = None) -> int:
     """Convert the TFRecord shards to the filesystem layout and return 0."""
     args = _parse_args(argv)
     output_dir = Path(args.output_dir)
-    tf_dir = Path(args.tfrecord_dir)
 
+    if args.metadata_only:
+        fmt = _format_from_disk(output_dir)
+        _write_band_manifest(output_dir)
+        _write_dataset_info(output_dir, fmt)
+        _print_summary(output_dir)
+        return 0
+
+    tf_dir = Path(args.tfrecord_dir)
     _prepare_output_dir(output_dir)
 
     shards_by_split = {
@@ -586,12 +665,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _write_split_lists(output_dir)
     _write_dataset_info(output_dir, fmt)
-    info = json.loads((output_dir / "metadata" / "dataset_info.json").read_text())
-    print(
-        f"Dataset now holds {info['records']['train']} train + {info['records']['test']} "
-        f"test records; recommended pixel_shift: {info['recommended_pixel_shift']}"
-    )
-    print("Done.")
+    _print_summary(output_dir)
     return 0
 
 

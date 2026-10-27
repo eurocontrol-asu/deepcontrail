@@ -5,12 +5,15 @@ from __future__ import annotations
 import subprocess
 import sys
 from typing import TYPE_CHECKING
+from unittest import mock
 
 import numpy as np
 import pytest
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from deepcontrail.core.contract import DatasetInfo
 
 
 def _bands_dict(n_frames: int = 1) -> dict[str, np.ndarray]:
@@ -92,25 +95,23 @@ def test_convert_tfrecords_import_does_not_load_tensorflow():
     )
 
 
-def test_prepare_output_dir_writes_band_manifest(tmp_path: Path):
-    import json
-
+def test_prepare_output_dir_writes_a_format_v1_band_manifest(tmp_path: Path):
     from deepcontrail.core.bands import SPECTRAL_BAND_INFO, SPECTRAL_BAND_KEYS
+    from deepcontrail.core.contract import read_band_manifest
     from deepcontrail.opencontrails.convert import _prepare_output_dir
 
     _prepare_output_dir(tmp_path)
 
-    manifest = json.loads((tmp_path / "spectral_bands" / "bands.json").read_text())
-    channels = manifest["channels"]
-    assert [c["key"] for c in channels] == list(SPECTRAL_BAND_KEYS), (
+    manifest = read_band_manifest(tmp_path)
+    assert manifest.sensor == "GOES-16 ABI"
+    assert [c.key for c in manifest.channels] == list(SPECTRAL_BAND_KEYS), (
         "channel i = SPECTRAL_BAND_KEYS[i]"
     )
-    assert [c["index"] for c in channels] == list(range(len(SPECTRAL_BAND_KEYS)))
-    assert [c["abi_band"] for c in channels] == [
-        SPECTRAL_BAND_INFO[k].abi_band for k in SPECTRAL_BAND_KEYS
-    ]
-    assert manifest["dtype"] == "float32"
-    assert manifest["units"] == "K"
+    assert [c.sensor_band for c in manifest.channels] == [
+        None if SPECTRAL_BAND_INFO[k].abi_band is None else str(SPECTRAL_BAND_INFO[k].abi_band)
+        for k in SPECTRAL_BAND_KEYS
+    ], "data_10um is ABI band 13, cloud_top band 11"
+    assert {c.units for c in manifest.channels} == {"K"}
 
 
 def test_prepare_output_dir_creates_train_and_test_directories_only(tmp_path: Path):
@@ -367,63 +368,154 @@ def test_write_split_lists_from_masks_on_disk(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_dataset_info_temporal_export_recommends_half_pixel_shift():
+def _info(is_temporal: bool, has_instance_masks: bool) -> DatasetInfo:
     from deepcontrail.opencontrails.convert import FormatInfo, _dataset_info
 
-    info = _dataset_info(
-        FormatInfo(is_temporal=True, has_instance_masks=False), {"train": 3, "test": 1}
+    return _dataset_info(
+        FormatInfo(is_temporal=is_temporal, has_instance_masks=has_instance_masks),
+        {"train": 3, "test": 1},
+        ("semantic", "probability"),
     )
 
-    assert info["export"] == "20230419"
-    assert info["recommended_pixel_shift"] == 0.5, "2023 masks follow the Kaggle convention"
+
+def test_dataset_info_temporal_export_recommends_half_pixel_shift():
+    info = _info(is_temporal=True, has_instance_masks=False)
+
+    assert info.export == "20230419"
+    assert info.recommended_pixel_shift == 0.5, "2023 masks follow the Kaggle convention"
 
 
 def test_dataset_info_single_frame_export_recommends_no_shift():
-    from deepcontrail.opencontrails.convert import FormatInfo, _dataset_info
+    info = _info(is_temporal=False, has_instance_masks=True)
 
-    info = _dataset_info(
-        FormatInfo(is_temporal=False, has_instance_masks=True), {"train": 3, "test": 1}
-    )
-
-    assert info["export"] == "20250305"
-    assert info["recommended_pixel_shift"] == 0.0, "2025 masks are already aligned with the images"
+    assert info.export == "20250305"
+    assert info.recommended_pixel_shift == 0.0, "2025 masks are already aligned with the images"
 
 
 def test_dataset_info_unknown_format_has_no_recommendation():
-    from deepcontrail.opencontrails.convert import FormatInfo, _dataset_info
+    info = _info(is_temporal=False, has_instance_masks=False)
 
-    info = _dataset_info(
-        FormatInfo(is_temporal=False, has_instance_masks=False), {"train": 3, "test": 1}
+    assert info.export is None
+    assert info.recommended_pixel_shift is None, "never guess a shift for an unmeasured export"
+
+
+def test_dataset_info_records_format_counts_labels_and_naming():
+    info = _info(is_temporal=True, has_instance_masks=False)
+
+    assert info.format_version == 1
+    assert info.temporal is True
+    assert info.records == {"train": 3, "test": 1}
+    assert info.labels == ("semantic", "probability")
+    assert info.naming == "record_id"
+
+
+def _converted_root(tmp_path: Path, *, temporal: bool = False, instance: bool = True) -> Path:
+    """Build a tiny already-converted dataset: one train and one test record."""
+    from deepcontrail.opencontrails.convert import _prepare_output_dir
+
+    _prepare_output_dir(tmp_path)
+    for split, stem in (("train", "11"), ("test", "22")):
+        np.save(
+            tmp_path / "spectral_bands" / split / f"{stem}.npy", np.zeros((2, 2, 10), np.float32)
+        )
+        if temporal:
+            np.save(tmp_path / "spectral_bands" / split / f"{stem}_b1.npy", np.zeros((2, 2, 10)))
+        (tmp_path / "semantic_masks" / split / f"{stem}.png").touch()
+        np.save(tmp_path / "probability_masks" / split / f"{stem}.npy", np.zeros((2, 2)))
+        if instance:
+            np.save(tmp_path / "instance_masks" / split / f"{stem}.npy", np.zeros((0, 2, 2, 1)))
+        (tmp_path / f"splits_{split}.txt").write_text(f"{stem}\n")
+    return tmp_path
+
+
+def test_labels_on_disk_lists_only_label_directories_with_files(tmp_path: Path):
+    from deepcontrail.opencontrails.convert import _labels_on_disk
+
+    root = _converted_root(tmp_path, instance=False)
+
+    assert _labels_on_disk(root) == ("semantic", "probability"), (
+        "empty label directories (annotator, instance here) are not labels"
     )
 
-    assert info["export"] is None
-    assert info["recommended_pixel_shift"] is None, "never guess a shift for an unmeasured export"
+
+@pytest.mark.parametrize(("temporal", "instance"), [(False, True), (True, False)])
+def test_format_from_disk_detects_context_frames_and_instance_masks(
+    tmp_path: Path, temporal: bool, instance: bool
+):
+    from deepcontrail.opencontrails.convert import FormatInfo, _format_from_disk
+
+    root = _converted_root(tmp_path, temporal=temporal, instance=instance)
+
+    assert _format_from_disk(root) == FormatInfo(is_temporal=temporal, has_instance_masks=instance)
 
 
-def test_dataset_info_records_format_counts_and_naming():
-    from deepcontrail.opencontrails.convert import FormatInfo, _dataset_info
-
-    info = _dataset_info(
-        FormatInfo(is_temporal=True, has_instance_masks=False), {"train": 3, "test": 1}
-    )
-
-    assert info["temporal"] is True
-    assert info["instance_masks"] is False
-    assert info["records"] == {"train": 3, "test": 1}
-    assert info["naming"] == "record_id"
-
-
-def test_write_dataset_info_counts_records_from_split_lists(tmp_path: Path):
-    import json
-
+def test_write_dataset_info_counts_records_and_labels_on_disk(tmp_path: Path):
+    from deepcontrail.core.contract import read_dataset_info
     from deepcontrail.opencontrails.convert import FormatInfo, _write_dataset_info
 
-    (tmp_path / "metadata").mkdir()
-    (tmp_path / "splits_train.txt").write_text("1\n2\n3\n")
-    (tmp_path / "splits_test.txt").write_text("4\n")
+    root = _converted_root(tmp_path)
 
-    _write_dataset_info(tmp_path, FormatInfo(is_temporal=False, has_instance_masks=True))
+    _write_dataset_info(root, FormatInfo(is_temporal=False, has_instance_masks=True))
 
-    info = json.loads((tmp_path / "metadata" / "dataset_info.json").read_text())
-    assert info["records"] == {"train": 3, "test": 1}
-    assert info["recommended_pixel_shift"] == 0.0
+    info = read_dataset_info(root)
+    assert info.records == {"train": 1, "test": 1}
+    assert info.labels == ("semantic", "probability", "instance")
+    assert info.recommended_pixel_shift == 0.0
+
+
+def test_parse_args_requires_tfrecord_dir_for_a_conversion():
+    from deepcontrail.opencontrails.convert import _parse_args
+
+    with pytest.raises(SystemExit):
+        _parse_args(["--output-dir", "out"])
+
+
+def test_parse_args_metadata_only_needs_no_tfrecord_dir():
+    from deepcontrail.opencontrails.convert import _parse_args
+
+    args = _parse_args(["--metadata-only", "--output-dir", "out"])
+
+    assert args.metadata_only is True
+    assert args.tfrecord_dir is None
+
+
+def test_metadata_only_rewrites_both_json_files_and_nothing_else(tmp_path: Path):
+    import json
+
+    from deepcontrail.core.contract import read_band_manifest, read_dataset_info
+    from deepcontrail.opencontrails.convert import main
+
+    root = _converted_root(tmp_path)
+    legacy = {"dtype": "float32", "units": "K", "channels": []}
+    (root / "spectral_bands" / "bands.json").write_text(json.dumps(legacy))
+    (root / "metadata" / "dataset_info.json").write_text(json.dumps({"export": "20250305"}))
+    jsons = {"spectral_bands/bands.json", "metadata/dataset_info.json"}
+    before = {
+        str(p.relative_to(root)): p.read_bytes()
+        for p in root.rglob("*")
+        if p.is_file() and str(p.relative_to(root)) not in jsons
+    }
+
+    with mock.patch.dict("sys.modules", {"tensorflow": None}):
+        assert main(["--metadata-only", "--output-dir", str(root)]) == 0
+
+    after = {
+        str(p.relative_to(root)): p.read_bytes()
+        for p in root.rglob("*")
+        if p.is_file() and str(p.relative_to(root)) not in jsons
+    }
+    assert after == before, "--metadata-only must not touch anything but the two JSON files"
+    assert read_band_manifest(root).format_version == 1
+    info = read_dataset_info(root)
+    assert info.export == "20250305"
+    assert info.records == {"train": 1, "test": 1}
+
+
+def test_metadata_only_without_split_lists_fails_clearly(tmp_path: Path):
+    from deepcontrail.opencontrails.convert import main
+
+    root = _converted_root(tmp_path)
+    (root / "splits_test.txt").unlink()
+
+    with pytest.raises(FileNotFoundError, match=r"splits_test\.txt"):
+        main(["--metadata-only", "--output-dir", str(root)])
