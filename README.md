@@ -16,48 +16,42 @@ Provide a clean, well-typed, and reusable library for detecting contrails in sat
 
 ## Installation
 
-```bash
-# Inference only
-pip install deepcontrail
-
-# Full training stack
-pip install "deepcontrail[train]"
-
-# Development
-pip install "deepcontrail[dev]"
-```
-
-With [`uv`](https://github.com/astral-sh/uv) (recommended):
+The repository is a [uv](https://github.com/astral-sh/uv) workspace of separately
+installable packages. From a clone:
 
 ```bash
-uv venv
-uv pip install -e ".[dev]"
+uv sync                    # core + segmentation, dev tools, training scripts' dependencies
+uv sync --group convert    # + the OpenContrails converter (TensorFlow)
 ```
+
+| Package | Import | Contents |
+|---|---|---|
+| `deepcontrail-core` | `deepcontrail.core` | Shared and torch-free: dataset config, spectral bands, composites, splits, Dice/IoU |
+| `deepcontrail-segmentation` | `deepcontrail.segmentation` | Semantic segmentation: dataset, transforms, models, losses, training, TTA, evaluation |
+| `deepcontrail-opencontrails` | `deepcontrail.opencontrails` | Converter from the OpenContrails TFRecords (tool, not part of the library) |
 
 ## Layout
 
 ```
-src/deepcontrail/   # shipped library
-├── core/           # shared, torch-free: dataset config, spectral bands, composites, splits, metrics
-└── segmentation/   # semantic segmentation: config, dataset, transforms
-    ├── models/     # model construction
-    ├── losses/     # training losses
-    └── training/   # Lightning module, TTA, evaluation
-scripts/            # training and evaluation scripts (not shipped)
-configs/            # experiment YAMLs
-tests/              # unit and integration tests
+packages/
+├── core/            # deepcontrail-core:          src/deepcontrail/core/, tests/
+└── segmentation/    # deepcontrail-segmentation:  src/deepcontrail/segmentation/, tests/,
+                     #   scripts/ (train, evaluate; not shipped), configs/experiment.yaml
+tools/
+└── opencontrails/   # deepcontrail-opencontrails: src/deepcontrail/opencontrails/, tests/
+tests/               # workspace-level checks (versions, licences, namespace layout)
 ```
 
 ## Development
 
 ```bash
-ruff check .          # lint
-ruff format --check . # format
-pyright               # types
-uv run pytest         # tests
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
 ```
 
-All three must be green before opening a pull request.
+All four must be green before opening a pull request.
 
 ## License
 
