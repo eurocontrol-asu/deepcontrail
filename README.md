@@ -38,11 +38,11 @@ uv pip install -e ".[dev]"
 
 ```
 src/deepcontrail/   # shipped library
-├── data/           # dataset loaders (GOES-16, later MTG)
-├── models/         # model construction
-├── losses/         # training losses
-├── metrics/        # evaluation (Dice, …)
-└── training/       # training infrastructure
+├── core/           # shared, torch-free: dataset config, spectral bands, composites, splits, metrics
+└── segmentation/   # semantic segmentation: config, dataset, transforms
+    ├── models/     # model construction
+    ├── losses/     # training losses
+    └── training/   # Lightning module, TTA, evaluation
 scripts/            # training and evaluation scripts (not shipped)
 configs/            # experiment YAMLs
 tests/              # unit and integration tests

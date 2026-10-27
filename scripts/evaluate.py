@@ -39,10 +39,10 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader
 
-from deepcontrail.data import DataConfig, GOESSemanticDataset
-from deepcontrail.losses import build_loss
-from deepcontrail.models import build_model
-from deepcontrail.training import (
+from deepcontrail.segmentation import GOESSemanticDataset, SegmentationDataConfig
+from deepcontrail.segmentation.losses import build_loss
+from deepcontrail.segmentation.models import build_model
+from deepcontrail.segmentation.training import (
     ContrailSegmentationModule,
     evaluate_ensemble,
     evaluate_global,
@@ -52,8 +52,8 @@ from deepcontrail.training import (
 logger = logging.getLogger(__name__)
 
 
-def _build_loader(cfg: DataConfig) -> DataLoader[Any]:
-    """Build a no-augmentation ``DataLoader`` for the given ``DataConfig``."""
+def _build_loader(cfg: SegmentationDataConfig) -> DataLoader[Any]:
+    """Build a no-augmentation ``DataLoader`` for the given ``SegmentationDataConfig``."""
     ds = GOESSemanticDataset(cfg)
     return DataLoader(
         ds,  # type: ignore[arg-type]
@@ -65,12 +65,12 @@ def _build_loader(cfg: DataConfig) -> DataLoader[Any]:
     )
 
 
-def _eval_config(val_data_cfg: DataConfig, split: str) -> DataConfig:
+def _eval_config(val_data_cfg: SegmentationDataConfig, split: str) -> SegmentationDataConfig:
     """Build a no-augmentation eval config for the requested split."""
     no_aug = {**val_data_cfg.model_dump(), "augmentation": None}
     if split == "val":
-        return DataConfig.from_dict(no_aug)
-    return DataConfig.from_dict({**no_aug, "split": "test", "fold": None})
+        return SegmentationDataConfig.from_dict(no_aug)
+    return SegmentationDataConfig.from_dict({**no_aug, "split": "test", "fold": None})
 
 
 # ---------------------------------------------------------------------------
