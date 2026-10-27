@@ -509,7 +509,7 @@ def _write_dataset_info(output_dir: Path, fmt: FormatInfo) -> None:
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").partition("\n")[0])
     parser.add_argument(
         "--tfrecord-dir",
         type=Path,

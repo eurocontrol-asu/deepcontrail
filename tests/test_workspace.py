@@ -62,3 +62,13 @@ def test_installed_versions_match_pyproject():
         deepcontrail.segmentation.__version__
         == _project(ROOT / "packages/segmentation")["project"]["version"]
     )
+
+
+def test_pyright_checks_every_package_source_tree():
+    include = set(_project(ROOT)["tool"]["pyright"]["include"])
+
+    expected = {str((m / "src").relative_to(ROOT)) for m in MEMBERS}
+
+    assert include == expected, (
+        "pyright must list each package's src/ explicitly: glob patterns matched no files"
+    )

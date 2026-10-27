@@ -77,7 +77,7 @@ convention = "numpy"
 "**/tests/**" = ["E501", "ANN001", "ANN201", "D103", "D104"]
 
 [tool.pyright]
-include = ["packages/*/src", "tools/*/src"]
+include = ["packages/core/src", "packages/segmentation/src", "tools/opencontrails/src"]
 # old_references/ is colleague reference code, not ours — keep it out of type-checking.
 exclude = ["old_references"]
 pythonVersion = "3.11"

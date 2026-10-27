@@ -165,3 +165,21 @@ def test_iou_score_symmetric() -> None:
     b = np.array([1, 0, 0, 0])
 
     assert iou_score(a, b) == pytest.approx(iou_score(b, a), abs=1e-10), "IoU must be symmetric"
+
+
+def test_dice_coefficient_on_numpy_arrays_does_not_import_torch():
+    import subprocess
+    import sys
+
+    code = (
+        "import sys, numpy as np; from deepcontrail.core.metrics import dice_coefficient; "
+        "dice_coefficient(np.ones(4), np.ones(4)); print(sys.modules.get('torch') is not None)"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+
+    assert result.stdout.strip() == "False", (
+        "metrics on numpy input must work where torch is not installed (deepcontrail-core)"
+    )

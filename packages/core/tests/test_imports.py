@@ -9,7 +9,8 @@ import sys
 def test_core_import_loads_no_heavy_dependency():
     code = (
         "import sys, deepcontrail.core; "
-        "print(sorted(m for m in ('torch', 'albumentations', 'tensorflow') if m in sys.modules))"
+        "print(sorted(m for m in ('torch', 'albumentations', 'tensorflow') "
+        "if sys.modules.get(m) is not None))"
     )
 
     result = subprocess.run(

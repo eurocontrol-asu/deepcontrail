@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import sys
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -16,13 +17,12 @@ def _to_numpy(x: object) -> np.ndarray:
     float32 is enough for binary {0, 1} mask metrics; it halves the host-side
     memory footprint when full val/test sets are concatenated.
     """
-    try:
-        import torch
-
-        if isinstance(x, torch.Tensor):
-            return x.detach().cpu().numpy().astype(np.float32).ravel()
-    except ImportError:
-        pass
+    # A tensor can only exist if torch is already imported: look it up instead of
+    # importing it, so numpy-only callers never load torch (deepcontrail-core has no torch).
+    torch = sys.modules.get("torch")
+    if torch is not None and isinstance(x, torch.Tensor):
+        tensor: Any = x
+        return tensor.detach().cpu().numpy().astype(np.float32).ravel()
     return np.asarray(x, dtype=np.float32).ravel()
 
 
