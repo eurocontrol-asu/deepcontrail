@@ -20,6 +20,7 @@ from deepcontrail.core.false_color import (
 )
 from deepcontrail.core.metrics import dice_coefficient, iou_score
 from deepcontrail.core.splits import is_sequence_stem, partition_stems
+from deepcontrail.core.validate import Issue, ValidationReport, validate_dataset
 
 __version__ = version("deepcontrail-core")
 
@@ -31,6 +32,8 @@ __all__ = [
     "DatasetInfo",
     "FalseColorChannel",
     "FalseColorConfig",
+    "Issue",
+    "ValidationReport",
     "__version__",
     "check_false_color",
     "dice_coefficient",
@@ -41,4 +44,5 @@ __all__ = [
     "partition_stems",
     "read_band_manifest",
     "read_dataset_info",
+    "validate_dataset",
 ]
