@@ -16,7 +16,7 @@ from deepcontrail.losses import LossConfig
 from deepcontrail.models import ModelConfig
 
 CHECKPOINT_ROOT = Path("/data/aheffar/deepcontrail_checkpoints")
-MLFLOW_TRACKING_URI = "sqlite:///data/aheffar/mlruns/mlflow.db"
+MLFLOW_TRACKING_URI = "sqlite:////data/aheffar/mlruns/mlflow.db"
 MLFLOW_EXPERIMENT_NAME = "deepcontrail-segmentation"
 
 

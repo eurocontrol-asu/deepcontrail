@@ -226,3 +226,17 @@ def test_load_configs_eval_always_uses_binary_masks(tmp_path):
     assert train.mask_type == "probability", "train keeps soft labels"
     assert val.mask_type == "binary", "val always uses ground truth"
     assert test.mask_type == "binary", "test always uses ground truth"
+
+
+def test_mlflow_tracking_uri_is_an_absolute_sqlite_path() -> None:
+    from pathlib import Path
+
+    from deepcontrail.training.config import MLFLOW_TRACKING_URI
+
+    prefix = "sqlite:///"
+    assert MLFLOW_TRACKING_URI.startswith(prefix)
+    db_path = MLFLOW_TRACKING_URI[len(prefix) :]
+
+    assert Path(db_path).is_absolute(), (
+        "sqlite:///relative/path depends on the working directory; use sqlite:////abs/path"
+    )
