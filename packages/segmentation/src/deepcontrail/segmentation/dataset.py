@@ -119,8 +119,8 @@ class GOESSemanticDataset:
         """Scan ``image_dir`` for paired images/masks, return sorted stems.
 
         Checks that each image has a matching mask file.  For deeper
-        validation (corruption, size mismatches), run the standalone
-        ``scripts/validate_dataset.py`` on the dataset root.
+        validation (corruption, sizes, mask values), run
+        ``deepcontrail-validate <root> --deep`` on the dataset root.
         """
         mask_ext = ".npy" if self.config.mask_type == "probability" else ".png"
         image_paths = sorted(image_dir.glob("*.npy"))
