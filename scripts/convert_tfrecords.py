@@ -21,11 +21,11 @@ does not depend on shard order: any subset of shards (``--file-glob``) converts 
 the same names as a full run.
 
 * Raw ``train`` shards go to ``train/``. Validation is drawn from ``train/`` at
-  load time (``DataConfig.val_fraction`` or ``fold``), so no ``val/`` folder exists.
+  load time (``SegmentationDataConfig.val_fraction`` or ``fold``), so no ``val/`` folder exists.
 * Raw ``validation`` shards (Kaggle's validation set) go to ``test/``.
 
 No composite is stored as ``.npy``: training builds it at load time from
-``spectral_bands/`` with the bands configured in ``DataConfig.false_color``.
+``spectral_bands/`` with the bands configured in ``SegmentationDataConfig.false_color``.
 
 Two export flavours are handled transparently (auto-detected from the first record):
 
@@ -58,12 +58,11 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from PIL import Image
 
-from deepcontrail.data._loading import false_color_from_spectral
-from deepcontrail.data.config import (
-    SPECTRAL_BAND_INFO,
-    SPECTRAL_BAND_KEYS,
+from deepcontrail.core.bands import SPECTRAL_BAND_INFO, SPECTRAL_BAND_KEYS
+from deepcontrail.core.false_color import (
     FalseColorChannel,
     FalseColorConfig,
+    false_color_from_spectral,
 )
 
 if TYPE_CHECKING:
@@ -181,7 +180,7 @@ def _preview_rgb(spectral: np.ndarray) -> np.ndarray:
 
     Written to ``images_semantic/``. Spectral training does not use these; it
     builds its composite at load time from ``spectral_bands/`` with the bands
-    set in ``DataConfig.false_color``.
+    set in ``SegmentationDataConfig.false_color``.
     """
     return (false_color_from_spectral(spectral, _PREVIEW_FALSE_COLOR) * 255).astype(np.uint8)
 
@@ -478,7 +477,7 @@ def _dataset_info(fmt: FormatInfo, records: dict[str, int]) -> dict[str, Any]:
     """Describe a converted dataset, including the ``pixel_shift`` to train it with."""
     export, shift = _KNOWN_EXPORTS.get((fmt.is_temporal, fmt.has_instance_masks), (None, None))
     note = (
-        "Use as DataConfig.pixel_shift. 20230419 masks follow the Kaggle convention (0.5); "
+        "Use as the data config's pixel_shift. 20230419 masks follow the Kaggle convention (0.5); "
         "20250305 masks are already aligned with the images (0.0)."
         if export
         else "Unknown export: measure the image/mask alignment before choosing pixel_shift."
