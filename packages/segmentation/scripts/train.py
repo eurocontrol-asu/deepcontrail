@@ -1,8 +1,14 @@
 """Training and MLflow tracking for DeepContrail segmentation.
 
-Trains a segmentation model on the GOES-16 semantic dataset, evaluates on
+Trains a segmentation model on a DeepContrail-format dataset, evaluates on
 the validation split, and logs all parameters, per-epoch metrics, and the
 best checkpoint to MLflow.
+
+Where runs are written has no default: pass ``--checkpoint-root`` and
+``--mlflow-uri``, or set them once in the environment::
+
+    export DEEPCONTRAIL_CHECKPOINT_ROOT=/path/to/checkpoints
+    export MLFLOW_TRACKING_URI=sqlite:////path/to/mlflow.db
 
 Usage
 -----
@@ -41,20 +47,20 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import MLFlowLogger
 from torch.utils.data import DataLoader
 
-from deepcontrail.segmentation import GOESSemanticDataset, SegmentationDataConfig
+from deepcontrail.segmentation import SegmentationDataConfig, SegmentationDataset
 from deepcontrail.segmentation.losses import LossConfig, build_loss
 from deepcontrail.segmentation.models import ModelConfig, build_model
 from deepcontrail.segmentation.training import (
-    CHECKPOINT_ROOT,
-    MLFLOW_EXPERIMENT_NAME,
-    MLFLOW_TRACKING_URI,
-    ContrailSegmentationModule,
+    SegmentationModule,
     TrainingConfig,
     evaluate_global,
     load_configs,
+    resolve_run_paths,
 )
 
 logger = logging.getLogger(__name__)
+
+MLFLOW_EXPERIMENT_NAME = "deepcontrail-segmentation"
 
 
 # ---------------------------------------------------------------------------
@@ -82,8 +88,8 @@ def build_dataloaders(
     tuple[DataLoader, DataLoader]
         ``(train_loader, val_loader)``.
     """
-    train_ds = GOESSemanticDataset(train_cfg)
-    val_ds = GOESSemanticDataset(val_cfg)
+    train_ds = SegmentationDataset(train_cfg)
+    val_ds = SegmentationDataset(val_cfg)
 
     persistent = train_cfg.num_workers > 0
 
@@ -185,6 +191,8 @@ def main(args: argparse.Namespace) -> None:
     args
         Parsed command-line arguments.
     """
+    # Fail before any work if the run has nowhere to write.
+    checkpoint_root, mlflow_uri = resolve_run_paths(args.checkpoint_root, args.mlflow_uri)
     config_path = Path(args.config)
     train_data_cfg, val_data_cfg, test_data_cfg, model_cfg, loss_cfg, training_cfg, seed = (
         load_configs(config_path, args)
@@ -212,7 +220,7 @@ def main(args: argparse.Namespace) -> None:
     # Model + loss
     model = build_model(model_cfg)
     loss_fn = build_loss(loss_cfg)
-    module = ContrailSegmentationModule(
+    module = SegmentationModule(
         model=model,
         loss_fn=loss_fn,
         lr=training_cfg.lr,
@@ -231,13 +239,13 @@ def main(args: argparse.Namespace) -> None:
     # MLflow logger
     mlf_logger = MLFlowLogger(
         experiment_name=MLFLOW_EXPERIMENT_NAME,
-        tracking_uri=MLFLOW_TRACKING_URI,
+        tracking_uri=mlflow_uri,
         run_name=run_name,
         log_model=False,
     )
 
     # Checkpoint callback
-    ckpt_dir = CHECKPOINT_ROOT / run_name
+    ckpt_dir = checkpoint_root / run_name
     checkpoint_cb = ModelCheckpoint(
         dirpath=str(ckpt_dir),
         filename="best-{val_dice:.4f}",
@@ -257,7 +265,7 @@ def main(args: argparse.Namespace) -> None:
         max_epochs=training_cfg.epochs,
         precision=training_cfg.precision,
         callbacks=callbacks,
-        default_root_dir=str(CHECKPOINT_ROOT),
+        default_root_dir=str(checkpoint_root),
         logger=mlf_logger,
         deterministic=False,
         gradient_clip_val=training_cfg.gradient_clip_val,
@@ -265,7 +273,7 @@ def main(args: argparse.Namespace) -> None:
 
     # Bridge the MLFlowLogger's run with the global mlflow API so we can
     # use mlflow.log_params / log_metrics / log_artifact on the same run.
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    mlflow.set_tracking_uri(mlflow_uri)
     _ = mlf_logger.experiment  # force run creation
     run_id = mlf_logger.run_id
 
@@ -285,7 +293,7 @@ def main(args: argparse.Namespace) -> None:
         mlflow.log_params(system_params)
 
         # Dataset sample counts
-        test_ds_for_count = GOESSemanticDataset(test_data_cfg) if not args.skip_test else None
+        test_ds_for_count = SegmentationDataset(test_data_cfg) if not args.skip_test else None
         mlflow.log_param("data/train_samples", len(train_loader.dataset))  # type: ignore[arg-type]
         mlflow.log_param("data/val_samples", len(val_loader.dataset))  # type: ignore[arg-type]
         mlflow.log_param("data/test_samples", len(test_ds_for_count) if test_ds_for_count else 0)
@@ -301,7 +309,7 @@ def main(args: argparse.Namespace) -> None:
         best_ckpt_path = checkpoint_cb.best_model_path
         if best_ckpt_path:
             logger.info("Loading best checkpoint: %s", best_ckpt_path)
-            best_module = ContrailSegmentationModule.load_from_checkpoint(
+            best_module = SegmentationModule.load_from_checkpoint(
                 best_ckpt_path,
                 model=build_model(model_cfg),
                 loss_fn=build_loss(loss_cfg),
@@ -339,7 +347,7 @@ def main(args: argparse.Namespace) -> None:
         test_tta_metrics: dict[str, float] = {}
         if not args.skip_test:
             logger.info("Evaluating on test set (threshold=%.2f from val)...", val_threshold)
-            test_ds = test_ds_for_count or GOESSemanticDataset(test_data_cfg)
+            test_ds = test_ds_for_count or SegmentationDataset(test_data_cfg)
             test_loader: DataLoader[Any] = DataLoader(
                 test_ds,
                 batch_size=test_data_cfg.batch_size,
@@ -408,6 +416,25 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=str(_DEFAULT_CONFIG),
         help="Path to the experiment YAML config (default: the package's configs/experiment.yaml).",
+    )
+    parser.add_argument(
+        "--data-root",
+        type=str,
+        default=None,
+        help="Dataset root overriding data.root of the config.",
+    )
+    parser.add_argument(
+        "--checkpoint-root",
+        type=str,
+        default=None,
+        help="Directory for checkpoints (default: $DEEPCONTRAIL_CHECKPOINT_ROOT).",
+    )
+    parser.add_argument(
+        "--mlflow-uri",
+        type=str,
+        default=None,
+        help="MLflow tracking URI, e.g. sqlite:////abs/path/mlflow.db "
+        "(default: $MLFLOW_TRACKING_URI).",
     )
     parser.add_argument("--epochs", type=int, default=None, help="Override number of epochs.")
     parser.add_argument("--lr", type=float, default=None, help="Override learning rate.")

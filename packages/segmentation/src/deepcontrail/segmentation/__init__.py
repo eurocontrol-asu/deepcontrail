@@ -1,4 +1,4 @@
-"""Semantic segmentation of contrails (Phase 1: GOES-16).
+"""Semantic segmentation of contrails in satellite imagery.
 
 The data pipeline imported here is torch-free; ``models``, ``losses`` and
 ``training`` are subpackages that need the training stack.
@@ -11,17 +11,14 @@ from deepcontrail.segmentation.config import (
     NormalizeConfig,
     SegmentationDataConfig,
 )
-from deepcontrail.segmentation.dataset import GOESSemanticDataset
-
-GOESDataset = GOESSemanticDataset
+from deepcontrail.segmentation.dataset import SegmentationDataset
 
 __version__ = version("deepcontrail-segmentation")
 
 __all__ = [
     "AugmentationConfig",
-    "GOESDataset",
-    "GOESSemanticDataset",
     "NormalizeConfig",
     "SegmentationDataConfig",
+    "SegmentationDataset",
     "__version__",
 ]

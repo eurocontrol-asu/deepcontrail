@@ -1,10 +1,11 @@
-"""Tests for ContrailSegmentationModule forward-pass resizing."""
+"""Tests for SegmentationModule forward-pass resizing."""
 
 from __future__ import annotations
 
+import pytest
 import torch
 
-from deepcontrail.segmentation.training import ContrailSegmentationModule
+from deepcontrail.segmentation.training import SegmentationModule
 
 
 class _DummySeg(torch.nn.Module):
@@ -18,10 +19,10 @@ class _DummySeg(torch.nn.Module):
         return self.conv(x)
 
 
-def _module(native_size: int = 256) -> ContrailSegmentationModule:
+def _module(native_size: int = 256) -> SegmentationModule:
     model = _DummySeg()
     # A loss_fn is required by the module even though forward() ignores it.
-    module = ContrailSegmentationModule(
+    module = SegmentationModule(
         model=model,
         loss_fn=torch.nn.Identity(),
         lr=1e-4,
@@ -78,3 +79,19 @@ def test_forward_output_shape_matches_mask_resolution():
     # Output (B,1,256,256) pairs with mask (B,256,256) for loss/metric calls.
     assert out.shape == (4, 1, 256, 256)
     assert masks.shape == (4, 256, 256)
+
+
+def test_module_requires_the_native_size() -> None:
+    import torch
+
+    from deepcontrail.segmentation.training.module import SegmentationModule
+
+    with pytest.raises(TypeError, match="native_size"):
+        SegmentationModule(  # type: ignore[call-arg]
+            model=torch.nn.Identity(),
+            loss_fn=torch.nn.Identity(),
+            lr=1e-3,
+            weight_decay=0.0,
+            scheduler="none",
+            epochs=1,
+        )

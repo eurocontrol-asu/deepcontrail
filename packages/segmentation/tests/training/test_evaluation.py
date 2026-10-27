@@ -53,9 +53,9 @@ class _ValDataset(torch.utils.data.Dataset):
 def _make_dummy_module(seed: int, scale: float) -> object:
     pytest.importorskip("torch")
 
-    from deepcontrail.segmentation.training import ContrailSegmentationModule
+    from deepcontrail.segmentation.training import SegmentationModule
 
-    module = ContrailSegmentationModule(
+    module = SegmentationModule(
         model=_RampConv(seed, scale),
         loss_fn=_SqueezingBCE(),
         lr=1e-4,

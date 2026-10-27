@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from deepcontrail.core.metrics import dice_coefficient, iou_score
 
 
-class ContrailSegmentationModule(pl.LightningModule):
+class SegmentationModule(pl.LightningModule):
     """Thin Lightning wrapper around a plain ``nn.Module`` segmentation model.
 
     Parameters
@@ -31,7 +31,7 @@ class ContrailSegmentationModule(pl.LightningModule):
     native_size
         Native mask resolution (height and width) the model output is resized
         back to before loss/metric computation. The dataset keeps masks at this
-        size even when images are upscaled to ``image_size``; default 256.
+        size even when images are upscaled to ``image_size`` (``SegmentationDataset.native_size``).
     """
 
     def __init__(
@@ -42,10 +42,10 @@ class ContrailSegmentationModule(pl.LightningModule):
         weight_decay: float,
         scheduler: str,
         epochs: int,
+        native_size: int,
         warmup_epochs: int = 0,
         scheduler_interval: str = "epoch",
         steps_per_epoch: int = 1,
-        native_size: int = 256,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["model", "loss_fn"])
