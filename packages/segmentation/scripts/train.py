@@ -4,11 +4,13 @@ Trains a segmentation model on a DeepContrail-format dataset, evaluates on
 the validation split, and logs all parameters, per-epoch metrics, and the
 best checkpoint to MLflow.
 
-Where runs are written has no default: pass ``--checkpoint-root`` and
-``--mlflow-uri``, or set them once in the environment::
+Where runs are written has no default. Set it once in a ``.env`` file at the
+repository root (``cp .env.example .env``, then edit the paths), or export the
+variables, or pass ``--checkpoint-root`` / ``--mlflow-uri``. A flag wins over a
+variable set in the shell, which wins over ``.env``::
 
-    export DEEPCONTRAIL_CHECKPOINT_ROOT=/path/to/checkpoints
-    export MLFLOW_TRACKING_URI=sqlite:////path/to/mlflow.db
+    DEEPCONTRAIL_CHECKPOINT_ROOT=/path/to/checkpoints
+    MLFLOW_TRACKING_URI=sqlite:////path/to/mlflow.db
 
 Usage
 -----
@@ -43,6 +45,7 @@ import mlflow
 import pytorch_lightning as pl
 import segmentation_models_pytorch as smp
 import torch
+from dotenv import find_dotenv, load_dotenv
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import MLFlowLogger
 from torch.utils.data import DataLoader
@@ -191,7 +194,10 @@ def main(args: argparse.Namespace) -> None:
     args
         Parsed command-line arguments.
     """
-    # Fail before any work if the run has nowhere to write.
+    # Fail before any work if the run has nowhere to write. The nearest .env (searched
+    # from the working directory upwards) fills in variables the shell does not set;
+    # CLI flags win over both.
+    load_dotenv(find_dotenv(usecwd=True), override=False)
     checkpoint_root, mlflow_uri = resolve_run_paths(args.checkpoint_root, args.mlflow_uri)
     config_path = Path(args.config)
     train_data_cfg, val_data_cfg, test_data_cfg, model_cfg, loss_cfg, training_cfg, seed = (
@@ -427,14 +433,14 @@ def parse_args() -> argparse.Namespace:
         "--checkpoint-root",
         type=str,
         default=None,
-        help="Directory for checkpoints (default: $DEEPCONTRAIL_CHECKPOINT_ROOT).",
+        help="Directory for checkpoints (default: $DEEPCONTRAIL_CHECKPOINT_ROOT, or .env).",
     )
     parser.add_argument(
         "--mlflow-uri",
         type=str,
         default=None,
         help="MLflow tracking URI, e.g. sqlite:////abs/path/mlflow.db "
-        "(default: $MLFLOW_TRACKING_URI).",
+        "(default: $MLFLOW_TRACKING_URI, or .env).",
     )
     parser.add_argument("--epochs", type=int, default=None, help="Override number of epochs.")
     parser.add_argument("--lr", type=float, default=None, help="Override learning rate.")
