@@ -92,6 +92,7 @@ def test_training_config_rejects_an_unknown_logger():
 def test_prepare_training_logger_argument_overrides_the_config(
     tmp_path: Path, synthetic_root: Path
 ):
+    pytest.importorskip("mlflow", reason="needs deepcontrail-segmentation[mlflow]")
     from pytorch_lightning.loggers import MLFlowLogger
 
     from deepcontrail.segmentation.training import prepare_training
@@ -171,6 +172,7 @@ def test_build_logger_without_its_package_names_the_extra(
 
 
 def test_build_logger_mlflow_uses_the_given_uri(tmp_path: Path):
+    pytest.importorskip("mlflow", reason="needs deepcontrail-segmentation[mlflow]")
     from deepcontrail.segmentation.training import build_logger
 
     uri = f"sqlite:///{tmp_path}/given.db"
@@ -183,6 +185,7 @@ def test_build_logger_mlflow_uses_the_given_uri(tmp_path: Path):
 def test_build_logger_mlflow_falls_back_to_the_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    pytest.importorskip("mlflow", reason="needs deepcontrail-segmentation[mlflow]")
     from deepcontrail.segmentation.training import build_logger
 
     uri = f"sqlite:///{tmp_path}/env.db"
@@ -196,6 +199,7 @@ def test_build_logger_mlflow_falls_back_to_the_environment(
 def test_build_logger_mlflow_defaults_to_a_database_in_the_output_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    pytest.importorskip("mlflow", reason="needs deepcontrail-segmentation[mlflow]")
     from deepcontrail.segmentation.training import build_logger
 
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
