@@ -1,4 +1,4 @@
-"""OpenContrails spectral band keys and what each one holds.
+"""OpenContrails spectral band keys and what each one holds (written to bands.json).
 
 Channel order of every ``spectral_bands/{split}/{stem}.npy`` file written by the converter.
 """

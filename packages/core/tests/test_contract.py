@@ -222,3 +222,24 @@ def test_dataset_contract_error_is_a_value_error():
     from deepcontrail.core.contract import DatasetContractError
 
     assert issubclass(DatasetContractError, ValueError)
+
+
+# --- band lookup ----------------------------------------------------------------------
+
+
+def test_band_manifest_index_of_returns_the_channel_position():
+    from deepcontrail.core.contract import BandManifest
+
+    manifest = BandManifest.model_validate(_manifest())
+
+    assert manifest.index_of("data_12um") == 1
+    assert manifest.keys == ("data_11um", "data_12um", "btd")
+
+
+def test_band_manifest_index_of_unknown_key_lists_available_keys():
+    from deepcontrail.core.contract import BandManifest, DatasetContractError
+
+    manifest = BandManifest.model_validate(_manifest())
+
+    with pytest.raises(DatasetContractError, match=r"cloud_top.*data_11um, data_12um, btd"):
+        manifest.index_of("cloud_top")

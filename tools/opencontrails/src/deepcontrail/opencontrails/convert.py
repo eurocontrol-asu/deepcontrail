@@ -52,6 +52,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import fnmatch
+import functools
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -59,7 +60,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 from PIL import Image
 
-from deepcontrail.core.bands import SPECTRAL_BAND_INFO, SPECTRAL_BAND_KEYS
 from deepcontrail.core.contract import (
     BAND_MANIFEST_PATH,
     DATASET_INFO_PATH,
@@ -74,6 +74,7 @@ from deepcontrail.core.false_color import (
     false_color_from_spectral,
 )
 from deepcontrail.core.splits import is_sequence_stem
+from deepcontrail.opencontrails.bands import SPECTRAL_BAND_INFO, SPECTRAL_BAND_KEYS
 
 if TYPE_CHECKING:
     import tensorflow as tf
@@ -192,7 +193,8 @@ def _preview_rgb(spectral: np.ndarray) -> np.ndarray:
     builds its composite at load time from ``spectral_bands/`` with the bands
     set in ``SegmentationDataConfig.false_color``.
     """
-    return (false_color_from_spectral(spectral, _PREVIEW_FALSE_COLOR) * 255).astype(np.uint8)
+    rgb = false_color_from_spectral(spectral, _PREVIEW_FALSE_COLOR, _band_manifest())
+    return (rgb * 255).astype(np.uint8)
 
 
 def _spectral_bands_frame(bands: dict[str, np.ndarray], t: int) -> np.ndarray:
@@ -442,6 +444,7 @@ _LABEL_DIRS: dict[Label, str] = {
 }
 
 
+@functools.cache
 def _band_manifest() -> BandManifest:
     """Describe the channels of ``spectral_bands/*.npy`` (dataset format v1)."""
     channels = tuple(

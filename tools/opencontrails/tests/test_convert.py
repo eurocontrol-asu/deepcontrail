@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 def _bands_dict(n_frames: int = 1) -> dict[str, np.ndarray]:
-    from deepcontrail.core.bands import SPECTRAL_BAND_KEYS
+    from deepcontrail.opencontrails.bands import SPECTRAL_BAND_KEYS
 
     return {
         key: np.full((2, 2, n_frames), 200.0 + i, dtype=np.float64)
@@ -53,7 +53,7 @@ def test_spectral_bands_frame_reads_requested_frame():
 
 
 def _spectral_frame(**values: float) -> np.ndarray:
-    from deepcontrail.core.bands import SPECTRAL_BAND_KEYS
+    from deepcontrail.opencontrails.bands import SPECTRAL_BAND_KEYS
 
     base = dict.fromkeys(SPECTRAL_BAND_KEYS, 260.0) | values
     return np.stack([np.full((2, 2), base[k], dtype=np.float32) for k in SPECTRAL_BAND_KEYS], -1)
@@ -96,8 +96,8 @@ def test_convert_tfrecords_import_does_not_load_tensorflow():
 
 
 def test_prepare_output_dir_writes_a_format_v1_band_manifest(tmp_path: Path):
-    from deepcontrail.core.bands import SPECTRAL_BAND_INFO, SPECTRAL_BAND_KEYS
     from deepcontrail.core.contract import read_band_manifest
+    from deepcontrail.opencontrails.bands import SPECTRAL_BAND_INFO, SPECTRAL_BAND_KEYS
     from deepcontrail.opencontrails.convert import _prepare_output_dir
 
     _prepare_output_dir(tmp_path)

@@ -1,22 +1,23 @@
-"""GOES-16 semantic segmentation dataset.
+"""Semantic segmentation dataset over a DeepContrail-format dataset root.
 
-Loads paired RGB images and binary masks from the filesystem.
+Builds each image from ``spectral_bands/`` with the configured false-colour recipe
+(band keys from the root's ``bands.json``) and pairs it with its mask.
 ``import deepcontrail.segmentation`` requires only numpy + Pillow — torch is
 imported lazily inside ``__getitem__`` and is optional.
 """
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from PIL import Image
 
-from deepcontrail.core.false_color import load_spectral_false_color
+from deepcontrail.core.contract import read_band_manifest, read_dataset_info
+from deepcontrail.core.false_color import check_false_color, load_spectral_false_color
 from deepcontrail.core.readers import (
     binarize_mask,
-    load_image,
     load_mask,
     shift_image,
     to_numpy,
@@ -42,8 +43,11 @@ class GOESSemanticDataset:
 
     Raises
     ------
-    FileNotFoundError
-        If any image in the split directory has no matching mask.
+    DatasetContractError
+        If the root's ``bands.json`` or ``dataset_info.json`` is missing or invalid,
+        or if ``false_color`` uses a band key the manifest does not declare.
+    ValueError
+        If any labelled image in the split directory has no matching mask.
     ImportError
         If augmentation or resize is requested but albumentations is not
         installed.
@@ -52,8 +56,11 @@ class GOESSemanticDataset:
     def __init__(self, config: SegmentationDataConfig) -> None:
         self.config = config
         self._root = Path(config.root)
+        self.manifest = read_band_manifest(self._root)
+        check_false_color(config.false_color, self.manifest)
+        self._warn_on_pixel_shift_mismatch()
 
-        img_subdir = "spectral_bands" if config.image_source == "spectral" else "images_semantic"
+        img_subdir = "spectral_bands"
         mask_subdir = "probability_masks" if config.mask_type == "probability" else "semantic_masks"
         ds = "test" if config.split == "test" else "train"
         self._dir_pairs = [
@@ -65,6 +72,16 @@ class GOESSemanticDataset:
         self.stems = self._discover_stems()
         self.native_size = self._native_size()
         self._aug_transform, self._resize_transform = self._build_transform()
+
+    def _warn_on_pixel_shift_mismatch(self) -> None:
+        """Warn when ``pixel_shift`` differs from the dataset's recommendation."""
+        recommended = read_dataset_info(self._root).recommended_pixel_shift
+        if recommended is not None and recommended != self.config.pixel_shift:
+            msg = (
+                f"pixel_shift={self.config.pixel_shift} but {self._root} recommends "
+                f"{recommended} (metadata/dataset_info.json): images and masks may be misaligned"
+            )
+            warnings.warn(msg, UserWarning, stacklevel=3)
 
     @property
     def native_resolution(self) -> int:
@@ -106,8 +123,7 @@ class GOESSemanticDataset:
         ``scripts/validate_dataset.py`` on the dataset root.
         """
         mask_ext = ".npy" if self.config.mask_type == "probability" else ".png"
-        img_ext = ".npy" if self.config.image_source == "spectral" else ".jpg"
-        image_paths = sorted(image_dir.glob(f"*{img_ext}"))
+        image_paths = sorted(image_dir.glob("*.npy"))
         stems: list[str] = []
         missing: list[str] = []
 
@@ -130,12 +146,8 @@ class GOESSemanticDataset:
         """Native square resolution of the images (256 for GOES-16)."""
         if not self.stems:
             return self.config.image_size
-        if self.config.image_source == "spectral":
-            arr = np.load(self._image_dir / f"{self.stems[0]}.npy")
-            return arr.shape[0]
-        with Image.open(self._image_dir / f"{self.stems[0]}.jpg") as img:
-            width, _height = img.size
-        return width
+        arr = np.load(self._image_dir / f"{self.stems[0]}.npy", mmap_mode="r")
+        return arr.shape[0]
 
     def _needs_resize(self) -> bool:
         """Whether images must be resized to match ``image_size``.
@@ -200,10 +212,9 @@ class GOESSemanticDataset:
         stem = self.stems[index]
 
         img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
-        if self.config.image_source == "spectral":
-            image = load_spectral_false_color(img_dir / f"{stem}.npy", self.config.false_color)
-        else:
-            image = load_image(img_dir / f"{stem}.jpg")
+        image = load_spectral_false_color(
+            img_dir / f"{stem}.npy", self.config.false_color, self.manifest
+        )
         if self.config.pixel_shift != 0.0:
             image = shift_image(image, self.config.pixel_shift)
         if self.config.mask_type == "probability":
