@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Every job installs exactly one package (plus its dev group) from the lock, so a package
+# that imports something it does not declare fails here. `--locked` fails the job when
+# uv.lock does not match the pyproject files instead of re-resolving silently.
+
 jobs:
   lint:
     name: Lint & format
@@ -16,12 +20,12 @@ jobs:
         with:
           version: "latest"
       - run: uv python install 3.11
-      - run: uv sync --extra dev
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
+      - run: uv sync --locked --only-group dev
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync ruff format --check .
 
-  types:
-    name: Type check
+  workspace:
+    name: Workspace checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -29,17 +33,46 @@ jobs:
         with:
           version: "latest"
       - run: uv python install 3.11
-      - run: uv sync --extra dev --extra train
-      - run: uv run pyright
+      - run: uv sync --locked
+      - run: uv run --no-sync pytest tests
 
-  tests:
-    name: Tests
+  package:
+    name: ${{ matrix.package }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # core has no torch: its job proves `import deepcontrail.core` needs none.
+          - package: deepcontrail-core
+            path: packages/core
+          - package: deepcontrail-segmentation
+            path: packages/segmentation
+          - package: deepcontrail-opencontrails
+            path: tools/opencontrails
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
       - run: uv python install 3.11
-      - run: uv sync --extra dev --extra train
-      - run: uv run pytest
+      - run: uv sync --locked --package ${{ matrix.package }}
+      - run: uv run --no-sync pyright ${{ matrix.path }}/src
+      - run: uv run --no-sync pytest ${{ matrix.path }}/tests
+
+  build:
+    name: Build wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - run: uv build --all-packages
+      # A deepcontrail/__init__.py in any wheel would shadow the other namespace packages.
+      - run: |
+          for wheel in dist/*.whl; do
+            if unzip -l "$wheel" | grep -q " deepcontrail/__init__.py$"; then
+              echo "$wheel ships deepcontrail/__init__.py"; exit 1
+            fi
+          done

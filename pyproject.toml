@@ -1,89 +1,38 @@
-[build-system]
-requires = ["setuptools>=64", "wheel"]
-build-backend = "setuptools.build_meta"
+# Development environment for the whole repository: the workspace root. Never built or
+# published. The installable packages are the workspace members under packages/ and tools/.
 
 [project]
-name = "deepcontrail"
+name = "deepcontrail-workspace"
 version = "0.1.0"
-description = "DeepContrail — open-source library for semantic segmentation of contrails from satellite imagery."
-readme = "README.md"
+description = "DeepContrail development workspace (not published)."
 requires-python = ">=3.11"
-license = { text = "EUPL-1.2" }
-authors = [{ name = "EUROCONTROL" }]
-maintainers = [{ name = "EUROCONTROL" }]
-keywords = ["contrails", "segmentation", "remote-sensing", "deep-learning", "satellite", "GOES"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: European Union Public Licence (EUPL)",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Topic :: Scientific/Engineering :: Image Processing",
-]
-dependencies = [
-    "numpy>=1.24",
-    "pillow>=10.0",
-    "pydantic>=2.0",
-    "pyyaml>=6.0",
-    "scikit-learn>=1.3",
-    "huggingface_hub>=0.19",
-]
+dependencies = ["deepcontrail-core", "deepcontrail-segmentation"]
 
-[project.urls]
-Homepage = "https://github.com/eurocontrol-asu/deepcontrail"
-Documentation = "https://eurocontrol-asu.github.io/deepcontrail"
-Repository = "https://github.com/eurocontrol-asu/deepcontrail"
-"Bug Tracker" = "https://github.com/eurocontrol-asu/deepcontrail/issues"
+[dependency-groups]
+dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.1", "pyright>=1.1"]
+# Imported only by the training/evaluation scripts, never by the library.
+experiments = ["mlflow==3.17.0"]
+# TensorFlow for the OpenContrails converter; opt-in with `uv sync --group convert`.
+convert = ["deepcontrail-opencontrails"]
 
-[project.optional-dependencies]
-train = [
-    "torch>=2.1",
-    "torchvision>=0.16",
-    "segmentation_models_pytorch>=0.4",
-    "timm>=0.9",
-    "pytorch-lightning>=2.1",
-    "albumentations>=1.4",
-    "pyyaml>=6.0",
-    # Pinned to the versions training runs on: newer lightning-utilities/torchmetrics
-    # broke Lightning's progress bar and changed metric behaviour.
-    "mlflow==3.17.0",
-    "lightning-utilities==0.11.8",
-    "torchmetrics==1.0.3",
-]
-convert = [
-    # scripts/convert_tfrecords.py only; kept out of `train` so CI never installs it.
-    "tensorflow==2.21.0",
-]
-inference = [
-    "fastapi>=0.100",
-    "uvicorn>=0.23",
-    "opencv-python>=4.8",
-    "pandas>=2.0",
-]
-dev = [
-    "pytest>=7.4",
-    "pytest-cov>=4.1",
-    "ruff>=0.1",
-    "pyright>=1.1",
-    "pre-commit>=3.5",
-]
-docs = [
-    "mkdocs-material>=9.5",
-    "mkdocstrings[python]>=0.22",
-    "pymdown-extensions>=10.0",
-]
+[tool.uv]
+package = false
+default-groups = ["dev", "experiments"]
+# Pinned to the versions training runs on: newer lightning-utilities/torchmetrics broke
+# Lightning's progress bar and changed metric behaviour. uv reads constraints only here,
+# so they never reach the published packages.
+constraint-dependencies = ["lightning-utilities==0.11.8", "torchmetrics==1.0.3"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.uv.sources]
+deepcontrail-core = { workspace = true }
+deepcontrail-segmentation = { workspace = true }
+deepcontrail-opencontrails = { workspace = true }
 
-[tool.setuptools.package-data]
-deepcontrail = ["py.typed"]
+[tool.uv.workspace]
+members = ["packages/*", "tools/*"]
 
 # ---------------------------------------------------------------------------
-# Tooling
+# Tooling (shared by every member)
 # ---------------------------------------------------------------------------
 
 [tool.ruff]
@@ -118,22 +67,31 @@ ignore = [
     "D417",  # missing argument descriptions (numpy documents params in the Args: block)
 ]
 
+[tool.ruff.lint.isort]
+known-first-party = ["deepcontrail"]
+
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["E501", "ANN001", "ANN201", "D103", "D104"]
+"**/tests/**" = ["E501", "ANN001", "ANN201", "D103", "D104"]
 
 [tool.pyright]
-include = ["src"]
+include = ["packages/core/src", "packages/segmentation/src", "tools/opencontrails/src"]
 # old_references/ is colleague reference code, not ours — keep it out of type-checking.
 exclude = ["old_references"]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-ra"
+testpaths = [
+    "tests",
+    "packages/core/tests",
+    "packages/segmentation/tests",
+    "tools/opencontrails/tests",
+]
+# importlib mode: several packages have a tests/test_config.py.
+addopts = "-ra --import-mode=importlib"
 
 [tool.coverage.run]
 branch = true
