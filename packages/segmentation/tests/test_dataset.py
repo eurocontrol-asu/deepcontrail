@@ -1,4 +1,4 @@
-"""Tests for deepcontrail.segmentation.dataset — GOESSemanticDataset."""
+"""Tests for deepcontrail.segmentation.dataset — SegmentationDataset."""
 
 from __future__ import annotations
 
@@ -31,21 +31,21 @@ RECIPE = {
 
 def test_init_discovers_paired_samples(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     assert len(ds) == 4, "5 stems with val_fraction=0.1 → 4 train"
 
 
 def test_init_splits_train_val_on_the_fly(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
-    train_ds = GOESDataset(
+    train_ds = SegmentationDataset(
         SegmentationDataConfig(
             false_color=RECIPE,
             root=str(synthetic_root),
@@ -54,7 +54,7 @@ def test_init_splits_train_val_on_the_fly(synthetic_root: Path):
             val_fraction=0.2,
         )
     )
-    val_ds = GOESDataset(
+    val_ds = SegmentationDataset(
         SegmentationDataConfig(
             false_color=RECIPE,
             root=str(synthetic_root),
@@ -74,7 +74,7 @@ def test_init_splits_train_val_on_the_fly(synthetic_root: Path):
 
 def test_init_raises_on_missing_mask(synthetic_root_missing_mask: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE,
@@ -84,12 +84,12 @@ def test_init_raises_on_missing_mask(synthetic_root_missing_mask: Path):
     )
 
     with pytest.raises(ValueError, match="train_000002"):
-        GOESDataset(cfg)
+        SegmentationDataset(cfg)
 
 
 def test_init_skips_sequence_files_without_masks(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     # Context frames of train_000001 (no masks) next to the labelled scenes.
     for stem in ["train_000001_a1", "train_000001_a2", "train_000001_b1"]:
@@ -99,7 +99,7 @@ def test_init_skips_sequence_files_without_masks(synthetic_root: Path):
     stems = [
         stem
         for split in ("train", "val")
-        for stem in GOESDataset(
+        for stem in SegmentationDataset(
             SegmentationDataConfig(false_color=RECIPE, root=str(synthetic_root), split=split)
         ).stems
     ]
@@ -111,12 +111,12 @@ def test_init_skips_sequence_files_without_masks(synthetic_root: Path):
 
 def test_init_discovers_test_samples(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="test", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     assert len(ds) == 2, "should discover 2 test pairs"
 
@@ -132,12 +132,12 @@ def test_init_raises_on_invalid_split():
 
 def test_stems_are_sorted(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     assert ds.stems == sorted(ds.stems), "stems must be deterministically sorted"
 
@@ -149,9 +149,9 @@ def test_stems_are_sorted(synthetic_root: Path):
 
 def test_val_split_reads_from_train_directory(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
-    val_ds = GOESDataset(
+    val_ds = SegmentationDataset(
         SegmentationDataConfig(
             false_color=RECIPE, root=str(synthetic_root), split="val", val_fraction=0.4
         )
@@ -163,14 +163,14 @@ def test_val_split_reads_from_train_directory(synthetic_root: Path):
 
 def test_val_split_is_seeded_and_reproducible(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
-    ds1 = GOESDataset(
+    ds1 = SegmentationDataset(
         SegmentationDataConfig(
             false_color=RECIPE, root=str(synthetic_root), split="val", val_fraction=0.2, seed=42
         )
     )
-    ds2 = GOESDataset(
+    ds2 = SegmentationDataset(
         SegmentationDataConfig(
             false_color=RECIPE, root=str(synthetic_root), split="val", val_fraction=0.2, seed=42
         )
@@ -182,15 +182,15 @@ def test_val_split_is_seeded_and_reproducible(synthetic_root: Path):
 
 def test_train_val_no_overlap_and_full_coverage(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     for frac in [0.1, 0.2, 0.4, 0.5]:
-        train_ds = GOESDataset(
+        train_ds = SegmentationDataset(
             SegmentationDataConfig(
                 false_color=RECIPE, root=str(synthetic_root), split="train", val_fraction=frac
             )
         )
-        val_ds = GOESDataset(
+        val_ds = SegmentationDataset(
             SegmentationDataConfig(
                 false_color=RECIPE, root=str(synthetic_root), split="val", val_fraction=frac
             )
@@ -209,12 +209,12 @@ def test_train_val_no_overlap_and_full_coverage(synthetic_root: Path):
 def test_getitem_returns_correct_shapes(synthetic_root: Path):
     torch = pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     image, mask = ds[0]
 
@@ -226,12 +226,12 @@ def test_getitem_returns_correct_shapes(synthetic_root: Path):
 def test_getitem_image_dtype_float32(synthetic_root: Path):
     torch = pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     image, _ = ds[0]
 
@@ -241,12 +241,12 @@ def test_getitem_image_dtype_float32(synthetic_root: Path):
 def test_getitem_mask_dtype_long(synthetic_root: Path):
     torch = pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     _, mask = ds[0]
 
@@ -256,12 +256,12 @@ def test_getitem_mask_dtype_long(synthetic_root: Path):
 def test_getitem_mask_is_binary(synthetic_root: Path):
     pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     for i in range(len(ds)):
         _, mask = ds[i]
@@ -272,7 +272,7 @@ def test_getitem_mask_is_binary(synthetic_root: Path):
 def test_getitem_allzero_mask_is_valid(synthetic_root_allzero_mask: Path):
     pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE,
@@ -280,7 +280,7 @@ def test_getitem_allzero_mask_is_valid(synthetic_root_allzero_mask: Path):
         split="val",
         image_size=_SYNTH_SIZE,
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     image, mask = ds[0]
 
@@ -291,12 +291,12 @@ def test_getitem_allzero_mask_is_valid(synthetic_root_allzero_mask: Path):
 def test_getitem_image_normalized(synthetic_root: Path):
     pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     image, _ = ds[0]
 
@@ -312,12 +312,12 @@ def test_getitem_image_normalized(synthetic_root: Path):
 
 def test_getitem_without_torch_returns_numpy(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     with mock.patch.dict("sys.modules", {"torch": None}):
         image, mask = ds[0]
@@ -331,12 +331,12 @@ def test_getitem_without_torch_returns_numpy(synthetic_root: Path):
 
 def test_getitem_numpy_fallback_mask_binary(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     with mock.patch.dict("sys.modules", {"torch": None}):
         _, mask = ds[0]
@@ -353,7 +353,7 @@ def test_getitem_numpy_fallback_mask_binary(synthetic_root: Path):
 def test_getitem_seeded_augmentation_is_reproducible(synthetic_root: Path):
     torch = pytest.importorskip("torch")
     from deepcontrail.segmentation.config import AugmentationConfig, SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     aug = AugmentationConfig()
     cfg = SegmentationDataConfig(
@@ -365,10 +365,10 @@ def test_getitem_seeded_augmentation_is_reproducible(synthetic_root: Path):
         image_size=_SYNTH_SIZE,
     )
 
-    ds1 = GOESDataset(cfg)
+    ds1 = SegmentationDataset(cfg)
     img1, mask1 = ds1[0]
 
-    ds2 = GOESDataset(cfg)
+    ds2 = SegmentationDataset(cfg)
     img2, mask2 = ds2[0]
 
     assert torch.equal(img1, img2), "same seed must produce identical image"
@@ -382,7 +382,7 @@ def test_getitem_seeded_augmentation_is_reproducible(synthetic_root: Path):
 
 def test_build_transform_raises_without_albumentations(synthetic_root: Path):
     from deepcontrail.segmentation.config import AugmentationConfig, SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     aug = AugmentationConfig()
     cfg = SegmentationDataConfig(
@@ -402,7 +402,7 @@ def test_build_transform_raises_without_albumentations(synthetic_root: Path):
             ),
             pytest.raises(ImportError, match="deepcontrail\\[train\\]"),
         ):
-            GOESDataset(cfg)
+            SegmentationDataset(cfg)
     finally:
         if transforms_mod is not None:
             sys.modules["deepcontrail.segmentation.transforms"] = transforms_mod
@@ -417,12 +417,12 @@ def test_getitem_resizes_image_only_stays_mask_native(synthetic_root: Path):
     pytest.importorskip("torch")
     pytest.importorskip("albumentations")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=8
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     image, mask = ds[0]
 
@@ -433,10 +433,10 @@ def test_getitem_resizes_image_only_stays_mask_native(synthetic_root: Path):
 
 def test_dataset_reports_native_resolution(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(false_color=RECIPE, root=str(synthetic_root), split="train")
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     assert ds.native_size == _SYNTH_SIZE
     assert ds.native_resolution == _SYNTH_SIZE
@@ -445,12 +445,12 @@ def test_dataset_reports_native_resolution(synthetic_root: Path):
 def test_getitem_no_resize_when_image_size_matches_native(synthetic_root: Path):
     pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     image, mask = ds[0]
 
@@ -462,12 +462,12 @@ def test_getitem_resize_keeps_mask_binary(synthetic_root: Path):
     pytest.importorskip("torch")
     pytest.importorskip("albumentations")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=8
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     for i in range(len(ds)):
         _, mask = ds[i]
@@ -491,7 +491,7 @@ def test_dataset_no_shift_by_default():
 def test_dataset_applies_pixel_shift(synthetic_root: Path):
     torch = pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg_no_shift = SegmentationDataConfig(
         false_color=RECIPE,
@@ -508,9 +508,9 @@ def test_dataset_applies_pixel_shift(synthetic_root: Path):
         pixel_shift=0.5,
     )
 
-    ds_no = GOESDataset(cfg_no_shift)
+    ds_no = SegmentationDataset(cfg_no_shift)
     with pytest.warns(UserWarning, match="pixel_shift"):
-        ds_yes = GOESDataset(cfg_with_shift)
+        ds_yes = SegmentationDataset(cfg_with_shift)
 
     img_no, _ = ds_no[0]
     img_yes, _ = ds_yes[0]
@@ -536,14 +536,14 @@ def test_fold_defaults_to_none():
 
 def test_fold_partitions_train_stems(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
-    cv_train = GOESDataset(
+    cv_train = SegmentationDataset(
         SegmentationDataConfig(
             false_color=RECIPE, root=str(synthetic_root), split="train", fold=0, num_folds=5
         )
     )
-    cv_val = GOESDataset(
+    cv_val = SegmentationDataset(
         SegmentationDataConfig(
             false_color=RECIPE, root=str(synthetic_root), split="val", fold=0, num_folds=5
         )
@@ -557,9 +557,9 @@ def test_fold_partitions_train_stems(synthetic_root: Path):
 def test_fold_getitem_loads_from_correct_directory(synthetic_root: Path):
     pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
-    cv_ds = GOESDataset(
+    cv_ds = SegmentationDataset(
         SegmentationDataConfig(
             false_color=RECIPE,
             root=str(synthetic_root),
@@ -578,9 +578,9 @@ def test_fold_getitem_loads_from_correct_directory(synthetic_root: Path):
 
 def test_fold_test_is_not_folded(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
-    test_ds = GOESDataset(
+    test_ds = SegmentationDataset(
         SegmentationDataConfig(
             false_color=RECIPE, root=str(synthetic_root), split="test", fold=1, num_folds=4
         )
@@ -598,7 +598,7 @@ def test_fold_test_is_not_folded(synthetic_root: Path):
 def test_binary_mask_is_long_tensor(synthetic_root: Path):
     torch = pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE,
@@ -607,7 +607,7 @@ def test_binary_mask_is_long_tensor(synthetic_root: Path):
         mask_type="binary",
         image_size=_SYNTH_SIZE,
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     _, mask = ds[0]
 
@@ -617,7 +617,7 @@ def test_binary_mask_is_long_tensor(synthetic_root: Path):
 def test_probability_mask_returns_float32_tensor(synthetic_root: Path):
     torch = pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE,
@@ -626,7 +626,7 @@ def test_probability_mask_returns_float32_tensor(synthetic_root: Path):
         mask_type="probability",
         image_size=_SYNTH_SIZE,
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     _, mask = ds[0]
 
@@ -636,7 +636,7 @@ def test_probability_mask_returns_float32_tensor(synthetic_root: Path):
 def test_probability_mask_values_in_range_zero_to_one(synthetic_root: Path):
     pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE,
@@ -645,7 +645,7 @@ def test_probability_mask_values_in_range_zero_to_one(synthetic_root: Path):
         mask_type="probability",
         image_size=_SYNTH_SIZE,
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     _, mask = ds[0]
 
@@ -656,7 +656,7 @@ def test_probability_mask_values_in_range_zero_to_one(synthetic_root: Path):
 def test_probability_mask_shape_is_hw(synthetic_root: Path):
     pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE,
@@ -665,7 +665,7 @@ def test_probability_mask_shape_is_hw(synthetic_root: Path):
         mask_type="probability",
         image_size=_SYNTH_SIZE,
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     _, mask = ds[0]
 
@@ -677,7 +677,7 @@ def test_probability_mask_shape_is_hw(synthetic_root: Path):
 def test_probability_mask_not_validated_as_binary(synthetic_root: Path):
     pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE,
@@ -686,7 +686,7 @@ def test_probability_mask_not_validated_as_binary(synthetic_root: Path):
         mask_type="probability",
         image_size=_SYNTH_SIZE,
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     for i in range(len(ds)):
         _, mask = ds[i]
@@ -695,14 +695,14 @@ def test_probability_mask_not_validated_as_binary(synthetic_root: Path):
 
 def test_stems_discovered_with_probability_mask_type(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
-    binary_ds = GOESDataset(
+    binary_ds = SegmentationDataset(
         SegmentationDataConfig(
             false_color=RECIPE, root=str(synthetic_root), split="train", mask_type="binary"
         )
     )
-    prob_ds = GOESDataset(
+    prob_ds = SegmentationDataset(
         SegmentationDataConfig(
             false_color=RECIPE, root=str(synthetic_root), split="train", mask_type="probability"
         )
@@ -715,7 +715,7 @@ def test_probability_mask_with_augmentation_stays_float(synthetic_root: Path):
     torch = pytest.importorskip("torch")
     pytest.importorskip("albumentations")
     from deepcontrail.segmentation.config import AugmentationConfig, SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE,
@@ -726,7 +726,7 @@ def test_probability_mask_with_augmentation_stays_float(synthetic_root: Path):
         seed=7,
         image_size=_SYNTH_SIZE,
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     _, mask = ds[0]
 
@@ -738,7 +738,7 @@ def test_probability_mask_augmentation_is_reproducible(synthetic_root: Path):
     torch = pytest.importorskip("torch")
     pytest.importorskip("albumentations")
     from deepcontrail.segmentation.config import AugmentationConfig, SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE,
@@ -750,10 +750,10 @@ def test_probability_mask_augmentation_is_reproducible(synthetic_root: Path):
         image_size=_SYNTH_SIZE,
     )
 
-    ds1 = GOESDataset(cfg)
+    ds1 = SegmentationDataset(cfg)
     img1, mask1 = ds1[0]
 
-    ds2 = GOESDataset(cfg)
+    ds2 = SegmentationDataset(cfg)
     img2, mask2 = ds2[0]
 
     assert torch.equal(img1, img2), "same seed must produce identical image"
@@ -768,13 +768,13 @@ def test_probability_mask_augmentation_is_reproducible(synthetic_root: Path):
 def test_getitem_spectral_returns_correct_shapes(synthetic_root: Path):
     pytest.importorskip("torch")
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
     )
 
-    image, mask = GOESDataset(cfg)[0]
+    image, mask = SegmentationDataset(cfg)[0]
 
     assert image.shape == (3, _SYNTH_SIZE, _SYNTH_SIZE), "image should be CHW"
     assert mask.shape == (_SYNTH_SIZE, _SYNTH_SIZE)
@@ -782,12 +782,12 @@ def test_getitem_spectral_returns_correct_shapes(synthetic_root: Path):
 
 def test_getitem_spectral_numpy_fallback(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
 
     with mock.patch.dict("sys.modules", {"torch": None}):
         image, _mask = ds[0]
@@ -802,12 +802,12 @@ def test_getitem_spectral_numpy_fallback(synthetic_root: Path):
 def test_getitem_builds_image_from_spectral_bands_with_the_recipe(synthetic_root: Path):
     from deepcontrail.core.false_color import false_color_from_spectral
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(
         false_color=RECIPE, root=str(synthetic_root), split="test", image_size=_SYNTH_SIZE
     )
-    ds = GOESDataset(cfg)
+    ds = SegmentationDataset(cfg)
     bands = np.load(synthetic_root / "spectral_bands" / "test" / f"{ds.stems[0]}.npy")
 
     with mock.patch.dict("sys.modules", {"torch": None}):
@@ -822,7 +822,7 @@ def test_getitem_builds_image_from_spectral_bands_with_the_recipe(synthetic_root
 
 def test_getitem_green_follows_configured_bands(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     other_green = {
         "channels": [
@@ -837,7 +837,7 @@ def test_getitem_green_follows_configured_bands(synthetic_root: Path):
             false_color=recipe, root=str(synthetic_root), split="test", image_size=_SYNTH_SIZE
         )
         with mock.patch.dict("sys.modules", {"torch": None}):
-            return GOESDataset(cfg)[0][0]
+            return SegmentationDataset(cfg)[0][0]
 
     img_a = first_image(RECIPE)
     img_b = first_image(other_green)
@@ -854,46 +854,46 @@ def test_getitem_green_follows_configured_bands(synthetic_root: Path):
 def test_init_rejects_a_recipe_with_a_band_key_the_dataset_lacks(synthetic_root: Path):
     from deepcontrail.core.contract import DatasetContractError
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     recipe = {"channels": [*RECIPE["channels"][:2], {"bands": ["cloud_top"], "bounds": [0, 1]}]}
 
     with pytest.raises(DatasetContractError, match=r"cloud_top.*ir_87, ir_105, ir_123"):
-        GOESDataset(SegmentationDataConfig(false_color=recipe, root=str(synthetic_root)))
+        SegmentationDataset(SegmentationDataConfig(false_color=recipe, root=str(synthetic_root)))
 
 
 def test_init_without_band_manifest_raises(synthetic_root: Path):
     from deepcontrail.core.contract import DatasetContractError
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     (synthetic_root / "spectral_bands" / "bands.json").unlink()
 
     with pytest.raises(DatasetContractError, match=r"bands\.json"):
-        GOESDataset(SegmentationDataConfig(false_color=RECIPE, root=str(synthetic_root)))
+        SegmentationDataset(SegmentationDataConfig(false_color=RECIPE, root=str(synthetic_root)))
 
 
 def test_init_warns_when_pixel_shift_differs_from_the_recommendation(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(false_color=RECIPE, root=str(synthetic_root), pixel_shift=0.5)
 
     with pytest.warns(UserWarning, match=r"pixel_shift=0\.5.*recommends 0\.0"):
-        GOESDataset(cfg)
+        SegmentationDataset(cfg)
 
 
 def test_init_does_not_warn_when_pixel_shift_matches(synthetic_root: Path):
     import warnings
 
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     cfg = SegmentationDataConfig(false_color=RECIPE, root=str(synthetic_root), pixel_shift=0.0)
 
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        GOESDataset(cfg)
+        SegmentationDataset(cfg)
 
 
 def test_init_does_not_warn_when_no_shift_is_recommended(synthetic_root: Path):
@@ -901,7 +901,7 @@ def test_init_does_not_warn_when_no_shift_is_recommended(synthetic_root: Path):
     import warnings
 
     from deepcontrail.segmentation.config import SegmentationDataConfig
-    from deepcontrail.segmentation.dataset import GOESSemanticDataset as GOESDataset
+    from deepcontrail.segmentation.dataset import SegmentationDataset
 
     info_path = synthetic_root / "metadata" / "dataset_info.json"
     info = json.loads(info_path.read_text()) | {"recommended_pixel_shift": None}
@@ -910,4 +910,4 @@ def test_init_does_not_warn_when_no_shift_is_recommended(synthetic_root: Path):
 
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        GOESDataset(cfg)
+        SegmentationDataset(cfg)

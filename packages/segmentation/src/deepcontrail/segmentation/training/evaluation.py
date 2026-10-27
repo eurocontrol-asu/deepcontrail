@@ -10,7 +10,7 @@ import torch
 from deepcontrail.core.metrics import dice_coefficient, iou_score
 from deepcontrail.segmentation.losses import LossConfig, build_loss
 from deepcontrail.segmentation.models import ModelConfig, build_model
-from deepcontrail.segmentation.training.module import ContrailSegmentationModule
+from deepcontrail.segmentation.training.module import SegmentationModule
 from deepcontrail.segmentation.training.tta import tta_predict
 
 if TYPE_CHECKING:
@@ -89,7 +89,7 @@ def _threshold_metrics(
 
 @torch.no_grad()
 def evaluate_global(
-    module: ContrailSegmentationModule,
+    module: SegmentationModule,
     data_loader: DataLoader[Any],
     device: torch.device,
     prefix: str = "val",
@@ -161,7 +161,7 @@ def evaluate_ensemble(
 ) -> dict[str, float]:
     """Ensemble predictions from several checkpoints for a single metric pass.
 
-    Loads each checkpoint into a :class:`ContrailSegmentationModule`, runs
+    Loads each checkpoint into a :class:`SegmentationModule`, runs
     inference on every batch with all models, and averages the sigmoid
     probabilities pixel-wise across models before the threshold search. This
     averaging of probabilities (rather than of binary predictions) is what
@@ -194,8 +194,8 @@ def evaluate_ensemble(
     dict[str, float]
         Metrics dict in the same format as :func:`evaluate_global`.
     """
-    modules: list[ContrailSegmentationModule] = [
-        ContrailSegmentationModule.load_from_checkpoint(
+    modules: list[SegmentationModule] = [
+        SegmentationModule.load_from_checkpoint(
             ckpt,
             model=build_model(model_config),
             loss_fn=build_loss(loss_config),

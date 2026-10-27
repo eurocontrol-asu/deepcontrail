@@ -30,6 +30,20 @@ uv sync --group convert    # + the OpenContrails converter (TensorFlow)
 | `deepcontrail-segmentation` | `deepcontrail.segmentation` | Semantic segmentation: dataset, transforms, models, losses, training, TTA, evaluation |
 | `deepcontrail-opencontrails` | `deepcontrail.opencontrails` | Converter from the OpenContrails TFRecords (tool, not part of the library) |
 
+## Training runs
+
+`packages/segmentation/scripts/train.py` writes checkpoints and MLflow runs to paths
+you choose; there is no default. Set them once in a `.env` file at the repository
+root (git-ignored):
+
+```bash
+cp .env.example .env    # then edit the two paths
+uv run python packages/segmentation/scripts/train.py
+```
+
+A CLI flag (`--checkpoint-root`, `--mlflow-uri`) wins over a variable set in the
+shell, which wins over `.env`.
+
 ## Layout
 
 ```

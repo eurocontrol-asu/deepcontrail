@@ -39,11 +39,11 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader
 
-from deepcontrail.segmentation import GOESSemanticDataset, SegmentationDataConfig
+from deepcontrail.segmentation import SegmentationDataConfig, SegmentationDataset
 from deepcontrail.segmentation.losses import build_loss
 from deepcontrail.segmentation.models import build_model
 from deepcontrail.segmentation.training import (
-    ContrailSegmentationModule,
+    SegmentationModule,
     evaluate_ensemble,
     evaluate_global,
     load_configs,
@@ -57,7 +57,7 @@ _DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "experiment.
 
 def _build_loader(cfg: SegmentationDataConfig) -> DataLoader[Any]:
     """Build a no-augmentation ``DataLoader`` for the given ``SegmentationDataConfig``."""
-    ds = GOESSemanticDataset(cfg)
+    ds = SegmentationDataset(cfg)
     return DataLoader(
         ds,  # type: ignore[arg-type]
         batch_size=cfg.batch_size,
@@ -97,7 +97,7 @@ def _run_single(args: argparse.Namespace) -> None:
 
     model = build_model(model_cfg)
     loss_fn = build_loss(loss_cfg)
-    module = ContrailSegmentationModule.load_from_checkpoint(
+    module = SegmentationModule.load_from_checkpoint(
         str(checkpoint_path),
         model=model,
         loss_fn=loss_fn,
@@ -284,6 +284,12 @@ def parse_args() -> argparse.Namespace:
         help="Apply D4 test-time augmentation (8 geometric transforms, ~8x slower).",
     )
 
+    parser.add_argument(
+        "--data-root",
+        type=str,
+        default=None,
+        help="Dataset root overriding data.root of the config.",
+    )
     parser.add_argument("--epochs", type=int, default=None, help="Override number of epochs.")
     parser.add_argument("--lr", type=float, default=None, help="Override learning rate.")
     parser.add_argument("--batch-size", type=int, default=None, help="Override batch size.")
