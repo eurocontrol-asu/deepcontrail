@@ -1134,6 +1134,11 @@ dependencies = [
     { name = "torchvision" },
 ]
 
+[package.optional-dependencies]
+mlflow = [
+    { name = "mlflow" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "pyright" },
@@ -1144,6 +1149,7 @@ dev = [
 requires-dist = [
     { name = "albumentations", specifier = ">=1.4" },
     { name = "deepcontrail-core", editable = "packages/core" },
+    { name = "mlflow", marker = "extra == 'mlflow'", specifier = ">=2.10" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "pydantic", specifier = ">=2.0" },
@@ -1154,6 +1160,7 @@ requires-dist = [
     { name = "torch", specifier = ">=2.1" },
     { name = "torchvision", specifier = ">=0.16" },
 ]
+provides-extras = ["mlflow"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -31,6 +31,13 @@ dependencies = [
     "albumentations>=1.4",
 ]
 
+[project.optional-dependencies]
+# Optional Lightning logger for `logger: mlflow` (the default csv logger needs nothing).
+mlflow = ["mlflow>=2.10"]
+
+[project.scripts]
+deepcontrail-train = "deepcontrail.segmentation.training.run:main"
+
 [project.urls]
 Repository = "https://github.com/eurocontrol-asu/deepcontrail"
 "Bug Tracker" = "https://github.com/eurocontrol-asu/deepcontrail/issues"
