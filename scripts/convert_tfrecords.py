@@ -14,6 +14,7 @@ script decodes the shards into the layout the rest of the pipeline expects::
         annotator_masks/{train,test}/{stem}.npy     # uint8 (H, W, n_annotators)
         instance_masks/{train,test}/{stem}.npy      # int8 (N, H, W, K), 20250305 only
         splits_{train,test}.txt                     # stems with a consensus mask
+        metadata/dataset_info.json                  # format, counts, recommended pixel_shift
 
 Each sample is named after its TFRecord ``record_id`` (``{stem}`` above), so a name
 does not depend on shard order: any subset of shards (``--file-glob``) converts to
@@ -465,6 +466,42 @@ def _write_split_lists(output_dir: Path) -> None:
         (output_dir / f"splits_{split}.txt").write_text("".join(f"{s}\n" for s in stems))
 
 
+# Measured on the two OpenContrails exports: same images, but 20250305 masks are
+# rasterised ~0.5 px up-left of the 20230419 (Kaggle-convention) ones.
+_KNOWN_EXPORTS: dict[tuple[bool, bool], tuple[str, float]] = {
+    (True, False): ("20230419", 0.5),
+    (False, True): ("20250305", 0.0),
+}
+
+
+def _dataset_info(fmt: FormatInfo, records: dict[str, int]) -> dict[str, Any]:
+    """Describe a converted dataset, including the ``pixel_shift`` to train it with."""
+    export, shift = _KNOWN_EXPORTS.get((fmt.is_temporal, fmt.has_instance_masks), (None, None))
+    note = (
+        "Use as DataConfig.pixel_shift. 20230419 masks follow the Kaggle convention (0.5); "
+        "20250305 masks are already aligned with the images (0.0)."
+        if export
+        else "Unknown export: measure the image/mask alignment before choosing pixel_shift."
+    )
+    return {
+        "source": "OpenContrails GOES-16 ABI TFRecords",
+        "export": export,
+        "temporal": fmt.is_temporal,
+        "instance_masks": fmt.has_instance_masks,
+        "naming": "record_id",
+        "records": records,
+        "recommended_pixel_shift": shift,
+        "pixel_shift_note": note,
+    }
+
+
+def _write_dataset_info(output_dir: Path, fmt: FormatInfo) -> None:
+    """Write ``metadata/dataset_info.json``, counting records from ``splits_*.txt``."""
+    records = {s: len((output_dir / f"splits_{s}.txt").read_text().split()) for s in _SPLITS}
+    path = output_dir / "metadata" / "dataset_info.json"
+    path.write_text(json.dumps(_dataset_info(fmt, records), indent=2) + "\n")
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -547,8 +584,12 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     _write_split_lists(output_dir)
-    counts = {s: len((output_dir / f"splits_{s}.txt").read_text().split()) for s in _SPLITS}
-    print(f"Dataset now holds {counts['train']} train + {counts['test']} test records")
+    _write_dataset_info(output_dir, fmt)
+    info = json.loads((output_dir / "metadata" / "dataset_info.json").read_text())
+    print(
+        f"Dataset now holds {info['records']['train']} train + {info['records']['test']} "
+        f"test records; recommended pixel_shift: {info['recommended_pixel_shift']}"
+    )
     print("Done.")
     return 0
 

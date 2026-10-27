@@ -358,3 +358,70 @@ def test_write_split_lists_from_masks_on_disk(tmp_path: Path):
 
     assert (tmp_path / "splits_train.txt").read_text().split() == ["20", "3"]
     assert (tmp_path / "splits_test.txt").read_text().split() == ["7"]
+
+
+# ---------------------------------------------------------------------------
+# dataset_info.json
+# ---------------------------------------------------------------------------
+
+
+def test_dataset_info_temporal_export_recommends_half_pixel_shift():
+    from scripts.convert_tfrecords import FormatInfo, _dataset_info
+
+    info = _dataset_info(
+        FormatInfo(is_temporal=True, has_instance_masks=False), {"train": 3, "test": 1}
+    )
+
+    assert info["export"] == "20230419"
+    assert info["recommended_pixel_shift"] == 0.5, "2023 masks follow the Kaggle convention"
+
+
+def test_dataset_info_single_frame_export_recommends_no_shift():
+    from scripts.convert_tfrecords import FormatInfo, _dataset_info
+
+    info = _dataset_info(
+        FormatInfo(is_temporal=False, has_instance_masks=True), {"train": 3, "test": 1}
+    )
+
+    assert info["export"] == "20250305"
+    assert info["recommended_pixel_shift"] == 0.0, "2025 masks are already aligned with the images"
+
+
+def test_dataset_info_unknown_format_has_no_recommendation():
+    from scripts.convert_tfrecords import FormatInfo, _dataset_info
+
+    info = _dataset_info(
+        FormatInfo(is_temporal=False, has_instance_masks=False), {"train": 3, "test": 1}
+    )
+
+    assert info["export"] is None
+    assert info["recommended_pixel_shift"] is None, "never guess a shift for an unmeasured export"
+
+
+def test_dataset_info_records_format_counts_and_naming():
+    from scripts.convert_tfrecords import FormatInfo, _dataset_info
+
+    info = _dataset_info(
+        FormatInfo(is_temporal=True, has_instance_masks=False), {"train": 3, "test": 1}
+    )
+
+    assert info["temporal"] is True
+    assert info["instance_masks"] is False
+    assert info["records"] == {"train": 3, "test": 1}
+    assert info["naming"] == "record_id"
+
+
+def test_write_dataset_info_counts_records_from_split_lists(tmp_path: Path):
+    import json
+
+    from scripts.convert_tfrecords import FormatInfo, _write_dataset_info
+
+    (tmp_path / "metadata").mkdir()
+    (tmp_path / "splits_train.txt").write_text("1\n2\n3\n")
+    (tmp_path / "splits_test.txt").write_text("4\n")
+
+    _write_dataset_info(tmp_path, FormatInfo(is_temporal=False, has_instance_masks=True))
+
+    info = json.loads((tmp_path / "metadata" / "dataset_info.json").read_text())
+    assert info["records"] == {"train": 3, "test": 1}
+    assert info["recommended_pixel_shift"] == 0.0
