@@ -34,7 +34,6 @@ Usage
 from __future__ import annotations
 
 import argparse
-import datetime
 import logging
 import platform
 import time
@@ -42,11 +41,9 @@ from pathlib import Path
 from typing import Any
 
 import mlflow
-import pytorch_lightning as pl
 import segmentation_models_pytorch as smp
 import torch
 from dotenv import find_dotenv, load_dotenv
-from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import MLFlowLogger
 from torch.utils.data import DataLoader
 
@@ -57,7 +54,7 @@ from deepcontrail.segmentation.training import (
     SegmentationModule,
     TrainingConfig,
     evaluate_global,
-    load_configs,
+    prepare_training,
     resolve_run_paths,
 )
 
@@ -72,49 +69,6 @@ MLFLOW_EXPERIMENT_NAME = "deepcontrail-segmentation"
 
 
 _DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "experiment.yaml"
-
-
-def build_dataloaders(
-    train_cfg: SegmentationDataConfig, val_cfg: SegmentationDataConfig
-) -> tuple[DataLoader[Any], DataLoader[Any]]:
-    """Construct train and validation ``DataLoader`` instances.
-
-    Parameters
-    ----------
-    train_cfg
-        Data configuration for the training split (with augmentation).
-    val_cfg
-        Data configuration for the validation split (no augmentation).
-
-    Returns
-    -------
-    tuple[DataLoader, DataLoader]
-        ``(train_loader, val_loader)``.
-    """
-    train_ds = SegmentationDataset(train_cfg)
-    val_ds = SegmentationDataset(val_cfg)
-
-    persistent = train_cfg.num_workers > 0
-
-    train_loader: DataLoader[Any] = DataLoader(
-        train_ds,
-        batch_size=train_cfg.batch_size,
-        shuffle=True,
-        num_workers=train_cfg.num_workers,
-        pin_memory=True,
-        persistent_workers=persistent,
-        drop_last=True,
-    )
-    val_loader: DataLoader[Any] = DataLoader(
-        val_ds,
-        batch_size=val_cfg.batch_size,
-        shuffle=False,
-        num_workers=val_cfg.num_workers,
-        pin_memory=True,
-        persistent_workers=persistent,
-        drop_last=False,
-    )
-    return train_loader, val_loader
 
 
 # ---------------------------------------------------------------------------
@@ -169,23 +123,6 @@ def _flatten_configs(
 # ---------------------------------------------------------------------------
 
 
-def make_run_name(model_cfg: ModelConfig) -> str:
-    """Generate a descriptive MLflow run name.
-
-    Parameters
-    ----------
-    model_cfg
-        Model configuration.
-
-    Returns
-    -------
-    str
-        Run name in the format ``{architecture}-{encoder}-{timestamp}``.
-    """
-    ts = datetime.datetime.now(tz=datetime.UTC).strftime("%Y%m%d-%H%M%S")
-    return f"{model_cfg.architecture}-{model_cfg.encoder_name}-{ts}"
-
-
 def main(args: argparse.Namespace) -> None:
     """Orchestrate training, evaluation, and MLflow logging.
 
@@ -200,85 +137,37 @@ def main(args: argparse.Namespace) -> None:
     load_dotenv(find_dotenv(usecwd=True), override=False)
     checkpoint_root, mlflow_uri = resolve_run_paths(args.checkpoint_root, args.mlflow_uri)
     config_path = Path(args.config)
-    train_data_cfg, val_data_cfg, test_data_cfg, model_cfg, loss_cfg, training_cfg, seed = (
-        load_configs(config_path, args)
+
+    # Data, model, loss, checkpointing and Lightning's Trainer come from the library:
+    # the same run as `deepcontrail-train --logger mlflow`, plus the experiment
+    # tooling below (MLflow params and artifacts, threshold search, TTA, test).
+    run = prepare_training(
+        config_path,
+        output_dir=checkpoint_root,
+        run_name=args.run_name,
+        logger="mlflow",
+        overrides=args,
+        experiment_name=MLFLOW_EXPERIMENT_NAME,
+        mlflow_uri=mlflow_uri,
+        accelerator="gpu",
     )
-
-    # Reproducibility
-    pl.seed_everything(seed, workers=True)
-    torch.set_float32_matmul_precision("medium")
-
-    # Data
-    logger.info("Building data loaders...")
-    train_loader, val_loader = build_dataloaders(train_data_cfg, val_data_cfg)
-
-    # Masks are returned at the dataset's native resolution; the module resizes
-    # its output back to that size so loss/metric computation runs at mask
-    # resolution even when images are upscaled (image_size > native_size).
-    native_size = train_loader.dataset.native_size
-
+    train_data_cfg, test_data_cfg = run.train_data_cfg, run.test_data_cfg
+    model_cfg, loss_cfg, training_cfg = run.model_cfg, run.loss_cfg, run.training_cfg
+    seed = run.seed
+    train_loader, val_loader = run.train_loader, run.val_loader
+    native_size = run.module.native_size
+    run_name = run.run_dir.name
+    checkpoint_cb = run.checkpoint
     logger.info(
         "Train: %d samples, Val: %d samples",
         len(train_loader.dataset),  # type: ignore[arg-type]
         len(val_loader.dataset),  # type: ignore[arg-type]
     )
 
-    # Model + loss
-    model = build_model(model_cfg)
-    loss_fn = build_loss(loss_cfg)
-    module = SegmentationModule(
-        model=model,
-        loss_fn=loss_fn,
-        lr=training_cfg.lr,
-        weight_decay=training_cfg.weight_decay,
-        scheduler=training_cfg.scheduler,
-        epochs=training_cfg.epochs,
-        warmup_epochs=training_cfg.warmup_epochs,
-        scheduler_interval=training_cfg.scheduler_interval,
-        steps_per_epoch=len(train_loader),
-        native_size=native_size,
-    )
-
-    # Run name
-    run_name = args.run_name if args.run_name else make_run_name(model_cfg)
-
-    # MLflow logger
-    mlf_logger = MLFlowLogger(
-        experiment_name=MLFLOW_EXPERIMENT_NAME,
-        tracking_uri=mlflow_uri,
-        run_name=run_name,
-        log_model=False,
-    )
-
-    # Checkpoint callback
-    ckpt_dir = checkpoint_root / run_name
-    checkpoint_cb = ModelCheckpoint(
-        dirpath=str(ckpt_dir),
-        filename="best-{val_dice:.4f}",
-        monitor="val_dice",
-        mode="max",
-        save_top_k=1,
-        save_last=True,
-    )
-
-    # Callbacks
-    callbacks: list[pl.Callback] = [checkpoint_cb]
-
-    # Trainer
-    trainer = pl.Trainer(
-        accelerator="gpu",
-        devices=1,
-        max_epochs=training_cfg.epochs,
-        precision=training_cfg.precision,
-        callbacks=callbacks,
-        default_root_dir=str(checkpoint_root),
-        logger=mlf_logger,
-        deterministic=False,
-        gradient_clip_val=training_cfg.gradient_clip_val,
-    )
-
     # Bridge the MLFlowLogger's run with the global mlflow API so we can
     # use mlflow.log_params / log_metrics / log_artifact on the same run.
+    mlf_logger = run.trainer.logger
+    assert isinstance(mlf_logger, MLFlowLogger)
     mlflow.set_tracking_uri(mlflow_uri)
     _ = mlf_logger.experiment  # force run creation
     run_id = mlf_logger.run_id
@@ -307,7 +196,7 @@ def main(args: argparse.Namespace) -> None:
         # Train
         logger.info("Starting training for %d epochs...", training_cfg.epochs)
         t0 = time.monotonic()
-        trainer.fit(module, train_loader, val_loader)
+        run.fit()
         wall_seconds = time.monotonic() - t0
         mlflow.log_metric("training_wall_seconds", wall_seconds)
 
@@ -329,7 +218,7 @@ def main(args: argparse.Namespace) -> None:
                 native_size=native_size,
             )
         else:
-            best_module = module
+            best_module = run.module
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -355,7 +244,7 @@ def main(args: argparse.Namespace) -> None:
             logger.info("Evaluating on test set (threshold=%.2f from val)...", val_threshold)
             test_ds = test_ds_for_count or SegmentationDataset(test_data_cfg)
             test_loader: DataLoader[Any] = DataLoader(
-                test_ds,
+                test_ds,  # type: ignore[arg-type]  # map-style dataset
                 batch_size=test_data_cfg.batch_size,
                 shuffle=False,
                 num_workers=test_data_cfg.num_workers,

@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
-
-if TYPE_CHECKING:
-    import argparse
-    from collections.abc import Mapping
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -75,6 +73,9 @@ class TrainingConfig(BaseModel):
         Mixed-precision mode for Lightning (e.g. ``"16-mixed"``).
     gradient_clip_val
         Gradient clipping value, or ``None`` to disable.
+    logger
+        Where Lightning logs metrics: ``"csv"`` (default, no extra package) or
+        ``"mlflow"`` (extra ``deepcontrail-segmentation[mlflow]``).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -88,6 +89,7 @@ class TrainingConfig(BaseModel):
     weight_decay: float = Field(default=1e-4, ge=0)
     precision: str = "16-mixed"
     gradient_clip_val: float | None = None
+    logger: Literal["csv", "mlflow"] = "csv"
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TrainingConfig:
@@ -95,8 +97,23 @@ class TrainingConfig(BaseModel):
         return cls.model_validate(d)
 
 
+_OVERRIDES = (
+    "data_root",
+    "epochs",
+    "lr",
+    "batch_size",
+    "image_size",
+    "fold",
+    "num_folds",
+    "encoder",
+    "architecture",
+    "warmup_epochs",
+    "scheduler_interval",
+)
+
+
 def load_configs(
-    config_path: Path, args: argparse.Namespace
+    config_path: str | Path, overrides: Mapping[str, Any] | argparse.Namespace | None = None
 ) -> tuple[
     SegmentationDataConfig,
     SegmentationDataConfig,
@@ -112,8 +129,11 @@ def load_configs(
     ----------
     config_path
         Path to the experiment YAML file.
-    args
-        Parsed CLI arguments (may contain override values).
+    overrides
+        Values replacing the YAML ones, by CLI name (``data_root``, ``epochs``,
+        ``lr``, ``batch_size``, ``image_size``, ``fold``, ``num_folds``, ``encoder``,
+        ``architecture``, ``warmup_epochs``, ``scheduler_interval``); ``None`` or a
+        missing key keeps the YAML value. Parsed CLI arguments work as is.
 
     Returns
     -------
@@ -121,8 +141,15 @@ def load_configs(
         ``(train_data_cfg, val_data_cfg, test_data_cfg, model_cfg,
         loss_cfg, training_cfg, seed)``.
     """
-    with config_path.open() as f:
+    with Path(config_path).open() as f:
         raw = yaml.safe_load(f)
+    if overrides is None:
+        given: dict[str, Any] = {}
+    elif isinstance(overrides, Mapping):
+        given = dict(overrides)
+    else:
+        given = vars(overrides)
+    args = argparse.Namespace(**{k: given.get(k) for k in _OVERRIDES})
 
     data_raw: dict[str, Any] = dict(raw["data"])
     model_raw: dict[str, Any] = dict(raw["model"])
