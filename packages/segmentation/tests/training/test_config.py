@@ -9,9 +9,6 @@ import yaml
 from pydantic import ValidationError
 
 from deepcontrail.segmentation.training import (
-    CHECKPOINT_ROOT,
-    MLFLOW_EXPERIMENT_NAME,
-    MLFLOW_TRACKING_URI,
     TrainingConfig,
     load_configs,
 )
@@ -106,19 +103,59 @@ def test_training_config_from_dict_rejects_negative_weight_decay() -> None:
         TrainingConfig.from_dict({"weight_decay": -0.1})
 
 
-# --- Constants ---
+# --- checkpoint root and MLflow URI (no user-specific defaults) ---
 
 
-def test_checkpoint_root_is_on_data_volume() -> None:
-    assert str(CHECKPOINT_ROOT).startswith("/data/")
+def test_resolve_run_paths_prefers_explicit_values_over_the_environment(tmp_path) -> None:
+    from deepcontrail.segmentation.training import resolve_run_paths
+
+    env = {"DEEPCONTRAIL_CHECKPOINT_ROOT": "/env/ckpt", "MLFLOW_TRACKING_URI": "sqlite:////env.db"}
+
+    root, uri = resolve_run_paths(tmp_path, "sqlite:////flag.db", environ=env)
+
+    assert (root, uri) == (tmp_path, "sqlite:////flag.db")
 
 
-def test_mlflow_tracking_uri_is_set() -> None:
-    assert len(MLFLOW_TRACKING_URI) > 0
+def test_resolve_run_paths_falls_back_to_the_environment() -> None:
+    from pathlib import Path
+
+    from deepcontrail.segmentation.training import resolve_run_paths
+
+    env = {"DEEPCONTRAIL_CHECKPOINT_ROOT": "/env/ckpt", "MLFLOW_TRACKING_URI": "sqlite:////env.db"}
+
+    root, uri = resolve_run_paths(None, None, environ=env)
+
+    assert (root, uri) == (Path("/env/ckpt"), "sqlite:////env.db")
 
 
-def test_mlflow_experiment_name_is_set() -> None:
-    assert len(MLFLOW_EXPERIMENT_NAME) > 0
+@pytest.mark.parametrize(
+    ("env", "missing"),
+    [
+        ({"MLFLOW_TRACKING_URI": "sqlite:////a.db"}, "DEEPCONTRAIL_CHECKPOINT_ROOT"),
+        ({"DEEPCONTRAIL_CHECKPOINT_ROOT": "/ckpt"}, "MLFLOW_TRACKING_URI"),
+    ],
+)
+def test_resolve_run_paths_without_a_value_names_what_to_set(env, missing) -> None:
+    from deepcontrail.segmentation.training import resolve_run_paths
+
+    with pytest.raises(ValueError, match=missing):
+        resolve_run_paths(None, None, environ=env)
+
+
+def test_resolve_run_paths_rejects_a_relative_sqlite_path() -> None:
+    from deepcontrail.segmentation.training import resolve_run_paths
+
+    with pytest.raises(ValueError, match="sqlite:////"):
+        resolve_run_paths("/ckpt", "sqlite:///data/mlflow.db", environ={})
+
+
+@pytest.mark.parametrize("uri", ["sqlite:////data/mlflow.db", "http://localhost:5000"])
+def test_resolve_run_paths_accepts_absolute_sqlite_and_server_uris(uri) -> None:
+    from deepcontrail.segmentation.training import resolve_run_paths
+
+    _root, resolved = resolve_run_paths("/ckpt", uri, environ={})
+
+    assert resolved == uri
 
 
 # --- load_configs cross-validation handling ---
@@ -136,6 +173,7 @@ def _args_namespace(**overrides: object) -> argparse.Namespace:
         "scheduler_interval": None,
         "fold": None,
         "num_folds": None,
+        "data_root": None,
     }
     base.update(overrides)
     return argparse.Namespace(**base)  # type: ignore[arg-type]
@@ -242,15 +280,16 @@ def test_load_configs_eval_always_uses_binary_masks(tmp_path):
     assert test.mask_type == "binary", "test always uses ground truth"
 
 
-def test_mlflow_tracking_uri_is_an_absolute_sqlite_path() -> None:
-    from pathlib import Path
+def test_load_configs_data_root_overrides_every_split(tmp_path):
+    yaml_data = {
+        "data": {"root": "/data/x", "false_color": RECIPE},
+        "model": {"architecture": "Unet", "encoder_name": "resnet18"},
+    }
+    config_path = _write_config(tmp_path, yaml_data)
 
-    from deepcontrail.segmentation.training.config import MLFLOW_TRACKING_URI
-
-    prefix = "sqlite:///"
-    assert MLFLOW_TRACKING_URI.startswith(prefix)
-    db_path = MLFLOW_TRACKING_URI[len(prefix) :]
-
-    assert Path(db_path).is_absolute(), (
-        "sqlite:///relative/path depends on the working directory; use sqlite:////abs/path"
+    train, val, test, *_ = load_configs(
+        config_path,  # type: ignore[arg-type]
+        _args_namespace(data_root="/elsewhere"),  # type: ignore[arg-type]
     )
+
+    assert {train.root, val.root, test.root} == {"/elsewhere"}

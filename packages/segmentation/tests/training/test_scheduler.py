@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from torch import nn
 
-from deepcontrail.segmentation.training import ContrailSegmentationModule, TrainingConfig
+from deepcontrail.segmentation.training import SegmentationModule, TrainingConfig
 
 
 def _dummy_module(
@@ -14,24 +14,25 @@ def _dummy_module(
     warmup_epochs: int = 0,
     scheduler_interval: str = "epoch",
     steps_per_epoch: int = 100,
-) -> ContrailSegmentationModule:
-    """Build a minimal ContrailSegmentationModule for scheduler testing."""
+) -> SegmentationModule:
+    """Build a minimal SegmentationModule for scheduler testing."""
     model = nn.Conv2d(3, 1, 1)
     loss_fn = nn.BCEWithLogitsLoss()
-    return ContrailSegmentationModule(
+    return SegmentationModule(
         model=model,
         loss_fn=loss_fn,
         lr=lr,
         weight_decay=0.0,
         scheduler="CosineAnnealingLR",
         epochs=epochs,
+        native_size=16,
         warmup_epochs=warmup_epochs,
         scheduler_interval=scheduler_interval,
         steps_per_epoch=steps_per_epoch,
     )
 
 
-def _collect_lrs(module: ContrailSegmentationModule, num_steps: int) -> list[float]:
+def _collect_lrs(module: SegmentationModule, num_steps: int) -> list[float]:
     """Step the scheduler num_steps times and collect LRs."""
     opt_cfg = module.configure_optimizers()
     optimizer = opt_cfg["optimizer"]

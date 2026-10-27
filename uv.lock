@@ -1182,6 +1182,7 @@ dev = [
 ]
 experiments = [
     { name = "mlflow" },
+    { name = "python-dotenv" },
 ]
 
 [package.metadata]
@@ -1198,7 +1199,10 @@ dev = [
     { name = "pytest-cov", specifier = ">=4.1" },
     { name = "ruff", specifier = ">=0.1" },
 ]
-experiments = [{ name = "mlflow", specifier = "==3.17.0" }]
+experiments = [
+    { name = "mlflow", specifier = "==3.17.0" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+]
 
 [[package]]
 name = "docker"

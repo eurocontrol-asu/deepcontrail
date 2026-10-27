@@ -32,8 +32,8 @@ if TYPE_CHECKING:
     from deepcontrail.segmentation.config import SegmentationDataConfig
 
 
-class GOESSemanticDataset:
-    """Per-sample dataset for GOES-16 semantic segmentation images.
+class SegmentationDataset:
+    """Per-sample semantic segmentation dataset over a DeepContrail-format root.
 
     Parameters
     ----------

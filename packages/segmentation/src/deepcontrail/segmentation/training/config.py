@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     import argparse
+    from collections.abc import Mapping
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,9 +17,43 @@ from deepcontrail.segmentation import SegmentationDataConfig
 from deepcontrail.segmentation.losses import LossConfig
 from deepcontrail.segmentation.models import ModelConfig
 
-CHECKPOINT_ROOT = Path("/data/aheffar/deepcontrail_checkpoints")
-MLFLOW_TRACKING_URI = "sqlite:////data/aheffar/mlruns/mlflow.db"
-MLFLOW_EXPERIMENT_NAME = "deepcontrail-segmentation"
+CHECKPOINT_ROOT_ENV = "DEEPCONTRAIL_CHECKPOINT_ROOT"
+MLFLOW_TRACKING_URI_ENV = "MLFLOW_TRACKING_URI"
+
+
+def resolve_run_paths(
+    checkpoint_root: str | Path | None,
+    mlflow_uri: str | None,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[Path, str]:
+    """Return the checkpoint root and MLflow tracking URI of a training run.
+
+    Each value comes from the explicit argument (a CLI flag), else from the
+    environment (``DEEPCONTRAIL_CHECKPOINT_ROOT``, ``MLFLOW_TRACKING_URI``). There is
+    no built-in default, so a run never logs to an unexpected place.
+
+    Raises
+    ------
+    ValueError
+        If a value is missing, or if the URI is a relative ``sqlite:///`` path (it
+        would resolve against the working directory; use ``sqlite:////abs/path``).
+    """
+    env = os.environ if environ is None else environ
+    root = checkpoint_root if checkpoint_root is not None else env.get(CHECKPOINT_ROOT_ENV)
+    uri = mlflow_uri if mlflow_uri is not None else env.get(MLFLOW_TRACKING_URI_ENV)
+    if not root:
+        msg = f"no checkpoint root: pass --checkpoint-root or set {CHECKPOINT_ROOT_ENV}"
+        raise ValueError(msg)
+    if not uri:
+        msg = f"no MLflow tracking URI: pass --mlflow-uri or set {MLFLOW_TRACKING_URI_ENV}"
+        raise ValueError(msg)
+    if uri.startswith("sqlite:///") and not uri.startswith("sqlite:////"):
+        msg = (
+            f"{uri} is a relative sqlite path (it depends on the working directory); "
+            "use an absolute one: sqlite:////abs/path/mlflow.db"
+        )
+        raise ValueError(msg)
+    return Path(root), uri
 
 
 class TrainingConfig(BaseModel):
@@ -93,6 +129,8 @@ def load_configs(
     loss_raw: dict[str, Any] = dict(raw.get("loss", {}))
     training_raw: dict[str, Any] = dict(raw.get("training", {}))
 
+    if args.data_root is not None:
+        data_raw["root"] = args.data_root
     if args.epochs is not None:
         training_raw["epochs"] = args.epochs
     if args.lr is not None:
