@@ -13,44 +13,6 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# load_image
-# ---------------------------------------------------------------------------
-
-
-def test_load_image_returns_uint8_rgb(tmp_path: Path):
-    from deepcontrail.core.readers import load_image
-
-    rng = np.random.RandomState(0)
-    arr = rng.randint(0, 256, (8, 8, 3), dtype=np.uint8)
-    path = tmp_path / "img.jpg"
-    Image.fromarray(arr, mode="RGB").save(path)
-
-    result = load_image(path)
-
-    assert result.dtype == np.uint8
-    assert result.shape == (8, 8, 3)
-
-
-def test_load_image_converts_grayscale_to_rgb(tmp_path: Path):
-    from deepcontrail.core.readers import load_image
-
-    arr = np.full((8, 8), 128, dtype=np.uint8)
-    path = tmp_path / "gray.png"
-    Image.fromarray(arr, mode="L").save(path)
-
-    result = load_image(path)
-
-    assert result.shape == (8, 8, 3), "grayscale should be converted to RGB"
-
-
-def test_load_image_raises_on_missing_file(tmp_path: Path):
-    from deepcontrail.core.readers import load_image
-
-    with pytest.raises(FileNotFoundError):
-        load_image(tmp_path / "nonexistent.jpg")
-
-
-# ---------------------------------------------------------------------------
 # load_mask
 # ---------------------------------------------------------------------------
 

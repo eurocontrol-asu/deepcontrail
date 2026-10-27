@@ -21,7 +21,6 @@ data:
   root: /data/aheffar/projects/contrails/goes_contrails_dataset/20250305
   split: train
   mask_type: probability
-  image_source: spectral
   false_color:
     channels:
       - {bands: [data_12um, data_11um], bounds: [-4, 2]}     # R: band 15 - band 14

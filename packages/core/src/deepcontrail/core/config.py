@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal, Self
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from deepcontrail.core.false_color import FalseColorConfig
+from deepcontrail.core.false_color import FalseColorConfig  # noqa: TC001 (pydantic field)
 
 
 class DatasetConfig(BaseModel):
@@ -22,21 +22,19 @@ class DatasetConfig(BaseModel):
     Parameters
     ----------
     root
-        Path to the dataset root (contains ``images_semantic/`` and
-        ``semantic_masks/`` subdirectories).
+        Path to a dataset root in the DeepContrail format (``spectral_bands/``
+        with its ``bands.json``, label directories, ``metadata/``).
     split
         ``"train"``, ``"val"``, or ``"test"``.  Both ``"train"`` and ``"val"``
         read from the ``train/`` directory on disk; the dataset partitions stems
         deterministically using ``val_fraction``.  ``"test"`` reads from ``test/``.
-    image_source
-        ``"jpeg"`` reads pre-rendered ``images_semantic/`` JPEGs. ``"spectral"``
-        reads ``spectral_bands/`` and builds the composite with ``false_color``.
     false_color
-        Bands and bounds of the composite when ``image_source="spectral"``.
-        Defaults to the band13 legacy recipe.
+        Bands and bounds of the composite built from ``spectral_bands/``, by the
+        band keys of the dataset's ``bands.json``. Required: there is no default.
     pixel_shift
-        Sub-pixel translation applied to images at load time to correct a
-        labeling misalignment in the GOES-16 dataset. Default 0.0 (no shift).
+        Sub-pixel translation (right and down) applied to images at load time to
+        align them with the masks. Use the dataset's ``recommended_pixel_shift``
+        (``metadata/dataset_info.json``); default 0.0 (no shift).
     seed
         RNG seed for the train/val partition and for reproducible augmentation.
     val_fraction
@@ -53,8 +51,7 @@ class DatasetConfig(BaseModel):
 
     root: str
     split: Literal["train", "val", "test"] = "train"
-    image_source: Literal["jpeg", "spectral"] = "jpeg"
-    false_color: FalseColorConfig = FalseColorConfig()
+    false_color: FalseColorConfig
     pixel_shift: Annotated[float, Field(ge=0.0)] = 0.0
     seed: Annotated[int, Field(ge=0)] = 42
     val_fraction: Annotated[float, Field(default=0.1, ge=0.0, lt=1.0)] = 0.1

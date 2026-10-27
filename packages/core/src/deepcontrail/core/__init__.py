@@ -1,8 +1,7 @@
-"""Shared, torch-free foundations: dataset config, spectral bands, composites, splits, metrics."""
+"""Shared, torch-free foundations: dataset format, config, composites, splits, metrics."""
 
 from importlib.metadata import version
 
-from deepcontrail.core.bands import SPECTRAL_BAND_INFO, SPECTRAL_BAND_KEYS, SpectralBandInfo
 from deepcontrail.core.config import DatasetConfig
 from deepcontrail.core.contract import (
     BandChannel,
@@ -15,6 +14,7 @@ from deepcontrail.core.contract import (
 from deepcontrail.core.false_color import (
     FalseColorChannel,
     FalseColorConfig,
+    check_false_color,
     false_color_from_spectral,
     load_spectral_false_color,
 )
@@ -24,8 +24,6 @@ from deepcontrail.core.splits import is_sequence_stem, partition_stems
 __version__ = version("deepcontrail-core")
 
 __all__ = [
-    "SPECTRAL_BAND_INFO",
-    "SPECTRAL_BAND_KEYS",
     "BandChannel",
     "BandManifest",
     "DatasetConfig",
@@ -33,8 +31,8 @@ __all__ = [
     "DatasetInfo",
     "FalseColorChannel",
     "FalseColorConfig",
-    "SpectralBandInfo",
     "__version__",
+    "check_false_color",
     "dice_coefficient",
     "false_color_from_spectral",
     "iou_score",

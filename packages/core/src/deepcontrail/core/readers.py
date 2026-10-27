@@ -54,23 +54,6 @@ def shift_image(image: np.ndarray, pixel_shift: float) -> np.ndarray:
     return np.array(shifted, dtype=np.uint8)
 
 
-def load_image(path: str | Path) -> np.ndarray:
-    """Open an image file and return a uint8 RGB numpy array.
-
-    Parameters
-    ----------
-    path
-        Path to the image file (JPEG, PNG, etc.).
-
-    Returns
-    -------
-    np.ndarray
-        Array with shape ``(H, W, 3)`` and dtype ``uint8``.
-    """
-    with Image.open(path) as img:
-        return np.array(img.convert("RGB"), dtype=np.uint8)
-
-
 def load_mask(path: str | Path) -> np.ndarray:
     """Open a grayscale mask file and return a uint8 numpy array.
 
