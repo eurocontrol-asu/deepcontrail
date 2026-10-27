@@ -76,6 +76,25 @@ class BandManifest(BaseModel):
     channels: Annotated[tuple[BandChannel, ...], Field(min_length=1)]
     description: str | None = None
 
+    @property
+    def keys(self) -> tuple[str, ...]:
+        """Channel keys in channel order."""
+        return tuple(c.key for c in self.channels)
+
+    def index_of(self, key: str) -> int:
+        """Return the channel index of ``key``.
+
+        Raises
+        ------
+        DatasetContractError
+            If no channel has that key; the message lists the available keys.
+        """
+        try:
+            return self.keys.index(key)
+        except ValueError:
+            msg = f"unknown band key {key!r}; available: {', '.join(self.keys)}"
+            raise DatasetContractError(msg) from None
+
     @model_validator(mode="after")
     def _validate_channels(self) -> Self:
         keys = [c.key for c in self.channels]

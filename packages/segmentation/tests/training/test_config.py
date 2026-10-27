@@ -141,6 +141,15 @@ def _args_namespace(**overrides: object) -> argparse.Namespace:
     return argparse.Namespace(**base)  # type: ignore[arg-type]
 
 
+RECIPE = {
+    "channels": [
+        {"bands": ["ir_123", "ir_105"], "bounds": [-4, 2]},
+        {"bands": ["ir_105", "ir_87"], "bounds": [-4, 5]},
+        {"bands": ["ir_105"], "bounds": [243, 303]},
+    ]
+}
+
+
 def _write_config(tmp_path: object, data: object) -> object:
     path = tmp_path / "experiment.yaml"  # type: ignore[operator]
     path.write_text(yaml.dump(data))  # type: ignore[attr-defined]
@@ -151,7 +160,7 @@ def test_load_configs_fold_enables_cv_on_train_and_val(tmp_path):
     from deepcontrail.segmentation.training.config import ModelConfig  # noqa: F401
 
     yaml_data = {
-        "data": {"root": "/data/x", "split": "train", "image_size": 384},
+        "data": {"root": "/data/x", "false_color": RECIPE, "split": "train", "image_size": 384},
         "model": {"architecture": "Unet", "encoder_name": "resnet18"},
         "loss": {"name": "bce"},
         "training": {"epochs": 2},
@@ -172,7 +181,7 @@ def test_load_configs_fold_enables_cv_on_train_and_val(tmp_path):
 
 def test_load_configs_num_folds_override(tmp_path):
     yaml_data = {
-        "data": {"root": "/data/x", "split": "train"},
+        "data": {"root": "/data/x", "false_color": RECIPE, "split": "train"},
         "model": {"architecture": "Unet", "encoder_name": "resnet18"},
         "loss": {"name": "bce"},
         "training": {"epochs": 2},
@@ -192,7 +201,7 @@ def test_load_configs_num_folds_override(tmp_path):
 
 def test_load_configs_fold_disabled_by_default(tmp_path):
     yaml_data = {
-        "data": {"root": "/data/x", "split": "train"},
+        "data": {"root": "/data/x", "false_color": RECIPE, "split": "train"},
         "model": {"architecture": "Unet", "encoder_name": "resnet18"},
         "loss": {"name": "bce"},
         "training": {"epochs": 2},
@@ -211,7 +220,12 @@ def test_load_configs_fold_disabled_by_default(tmp_path):
 
 def test_load_configs_eval_always_uses_binary_masks(tmp_path):
     yaml_data = {
-        "data": {"root": "/data/x", "split": "train", "mask_type": "probability"},
+        "data": {
+            "root": "/data/x",
+            "false_color": RECIPE,
+            "split": "train",
+            "mask_type": "probability",
+        },
         "model": {"architecture": "Unet", "encoder_name": "resnet18"},
         "loss": {"name": "bce"},
         "training": {"epochs": 2},
