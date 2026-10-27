@@ -39,10 +39,10 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import MLFlowLogger
 from torch.utils.data import DataLoader
 
-from deepcontrail.data import DataConfig, GOESSemanticDataset
-from deepcontrail.losses import LossConfig, build_loss
-from deepcontrail.models import ModelConfig, build_model
-from deepcontrail.training import (
+from deepcontrail.segmentation import GOESSemanticDataset, SegmentationDataConfig
+from deepcontrail.segmentation.losses import LossConfig, build_loss
+from deepcontrail.segmentation.models import ModelConfig, build_model
+from deepcontrail.segmentation.training import (
     CHECKPOINT_ROOT,
     MLFLOW_EXPERIMENT_NAME,
     MLFLOW_TRACKING_URI,
@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_dataloaders(
-    train_cfg: DataConfig, val_cfg: DataConfig
+    train_cfg: SegmentationDataConfig, val_cfg: SegmentationDataConfig
 ) -> tuple[DataLoader[Any], DataLoader[Any]]:
     """Construct train and validation ``DataLoader`` instances.
 
@@ -109,7 +109,7 @@ def build_dataloaders(
 
 
 def _flatten_configs(
-    train_data_cfg: DataConfig,
+    train_data_cfg: SegmentationDataConfig,
     model_cfg: ModelConfig,
     loss_cfg: LossConfig,
     training_cfg: TrainingConfig,
