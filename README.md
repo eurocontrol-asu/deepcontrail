@@ -81,10 +81,10 @@ import numpy as np
 from deepcontrail.core import false_color_from_spectral, read_band_manifest
 from deepcontrail.segmentation import load_pretrained, predict
 
-model = load_pretrained("path/to/bundle")       # a local folder or a Hugging Face Hub repo id
+model = load_pretrained("path/to/bundle")  # a local folder or a Hugging Face Hub repo id
 bands = np.load(f"{root}/spectral_bands/test/{record_id}.npy")
 composite = false_color_from_spectral(bands, model.config.false_color, read_band_manifest(root))
-probabilities = predict(model, composite, tta=True)       # (H, W), float32 in [0, 1]
+probabilities = predict(model, composite, tta=True)  # (H, W), float32 in [0, 1]
 mask = probabilities > model.config.threshold
 ```
 

@@ -18,7 +18,7 @@ normalisation, input size, decision threshold and whether test-time augmentation
 from deepcontrail.core import false_color_from_spectral, read_band_manifest
 from deepcontrail.segmentation import load_pretrained, predict
 
-model = load_pretrained("path/to/bundle")   # or "org/repo" on the Hub, with revision="..."
+model = load_pretrained("path/to/bundle")  # or "org/repo" on the Hub, with revision="..."
 composite = false_color_from_spectral(bands, model.config.false_color, read_band_manifest(root))
 probabilities = predict(model, composite, tta=model.config.tta)
 mask = probabilities > model.config.threshold
