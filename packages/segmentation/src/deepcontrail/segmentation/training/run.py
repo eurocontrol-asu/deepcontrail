@@ -226,6 +226,9 @@ def prepare_training(
     train_data_cfg, val_data_cfg, test_data_cfg, model_cfg, loss_cfg, training_cfg, seed = (
         load_configs(config_path, overrides)
     )
+    if logger is not None:
+        # Record the logger actually used, so a logged or printed config tells the truth.
+        training_cfg = training_cfg.model_copy(update={"logger": logger})
     pl.seed_everything(seed, workers=True)
     torch.set_float32_matmul_precision("medium")
 
@@ -266,7 +269,7 @@ def prepare_training(
         callbacks=[checkpoint, TQDMProgressBar(), ModelSummary()],
         default_root_dir=str(output_dir),
         logger=build_logger(
-            logger or training_cfg.logger,
+            training_cfg.logger,
             output_dir=output_dir,
             run_name=name,
             experiment_name=experiment_name,

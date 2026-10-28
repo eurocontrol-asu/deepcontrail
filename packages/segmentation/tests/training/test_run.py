@@ -109,6 +109,7 @@ def test_prepare_training_logger_argument_overrides_the_config(
     )
 
     assert isinstance(run.trainer.logger, MLFlowLogger)
+    assert run.training_cfg.logger == "mlflow", "the run config must record the logger used"
 
 
 def test_prepare_training_applies_overrides(tmp_path: Path, synthetic_root: Path):
@@ -261,3 +262,18 @@ def test_prepare_training_uses_text_progress_and_summary_even_with_rich(
     assert any(isinstance(c, TQDMProgressBar) for c in callbacks), "nohup logs need a text bar"
     assert not any(isinstance(c, (RichProgressBar, RichModelSummary)) for c in callbacks)
     assert any(type(c) is ModelSummary for c in callbacks)
+
+
+def test_prepare_training_without_override_keeps_the_config_logger(
+    tmp_path: Path, synthetic_root: Path
+):
+    from pytorch_lightning.loggers import CSVLogger
+
+    from deepcontrail.segmentation.training import prepare_training
+
+    run = prepare_training(
+        _config(tmp_path, synthetic_root), output_dir=tmp_path, accelerator="cpu"
+    )
+
+    assert isinstance(run.trainer.logger, CSVLogger)
+    assert run.training_cfg.logger == "csv"
