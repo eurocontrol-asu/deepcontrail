@@ -277,3 +277,17 @@ def test_prepare_training_without_override_keeps_the_config_logger(
 
     assert isinstance(run.trainer.logger, CSVLogger)
     assert run.training_cfg.logger == "csv"
+
+
+def test_prepare_training_monitors_the_learning_rate(tmp_path: Path, synthetic_root: Path):
+    from pytorch_lightning.callbacks import LearningRateMonitor
+
+    from deepcontrail.segmentation.training import prepare_training
+
+    run = prepare_training(
+        _config(tmp_path, synthetic_root), output_dir=tmp_path, accelerator="cpu"
+    )
+
+    monitors = [c for c in run.trainer.callbacks if isinstance(c, LearningRateMonitor)]
+    assert monitors, "the learning-rate schedule must be logged"
+    assert monitors[0].logging_interval == "step", "warmup + cosine changes the LR every step"

@@ -86,6 +86,8 @@ class SegmentationModule(pl.LightningModule):
         loss = self.loss_fn(logits, masks.float())
 
         self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        # Per-step loss (every `log_every_n_steps`) for the fine-grained training curve.
+        self.log("train_loss_step", loss, on_step=True, on_epoch=False)
         return loss
 
     def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:

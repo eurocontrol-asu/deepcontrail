@@ -95,3 +95,27 @@ def test_module_requires_the_native_size() -> None:
             scheduler="none",
             epochs=1,
         )
+
+
+def test_training_step_logs_the_epoch_mean_and_the_per_step_loss(monkeypatch) -> None:
+    from deepcontrail.segmentation.losses import LossConfig, build_loss
+
+    module = SegmentationModule(
+        model=_DummySeg(),
+        loss_fn=build_loss(LossConfig(name="bce")),
+        lr=1e-4,
+        weight_decay=0.0,
+        scheduler="CosineAnnealingLR",
+        epochs=1,
+        native_size=8,
+    )
+    logged: dict[str, dict] = {}
+    monkeypatch.setattr(module, "log", lambda name, value, **kw: logged.setdefault(name, kw))
+    batch = (torch.zeros(2, 3, 8, 8), torch.zeros(2, 8, 8, dtype=torch.long))
+
+    module.training_step(batch, 0)
+
+    assert logged["train_loss"]["on_epoch"] is True, "train_loss stays the per-epoch mean"
+    assert logged["train_loss"]["on_step"] is False
+    assert logged["train_loss_step"]["on_step"] is True, "the per-step loss gives the fine curve"
+    assert logged["train_loss_step"]["on_epoch"] is False
