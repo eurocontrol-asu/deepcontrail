@@ -322,6 +322,8 @@ def main(args: argparse.Namespace) -> None:
                 "data/format_version": info.format_version,
             }
         )
+        # The exact train/val records of this run (their fingerprints are params).
+        mlflow.log_artifacts(str(run.run_dir / "split"), artifact_path="split")
         for relative in (DATASET_INFO_PATH, BAND_MANIFEST_PATH):
             mlflow.log_artifact(str(Path(train_data_cfg.root) / relative), artifact_path="dataset")
 

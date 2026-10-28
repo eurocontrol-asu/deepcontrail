@@ -38,6 +38,7 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.loggers import CSVLogger
 from torch.utils.data import DataLoader
 
+from deepcontrail.core.splits import split_fingerprint
 from deepcontrail.segmentation.dataset import SegmentationDataset
 from deepcontrail.segmentation.losses import build_loss
 from deepcontrail.segmentation.models import build_model
@@ -193,6 +194,21 @@ def build_logger(
     )
 
 
+def _record_split(
+    run_dir: Path, trainer: pl.Trainer, train_loader: DataLoader[Any], val_loader: DataLoader[Any]
+) -> None:
+    """Write the exact train/val records to ``run_dir/split/`` and log their fingerprints."""
+    split_dir = run_dir / "split"
+    split_dir.mkdir(parents=True, exist_ok=True)
+    fingerprints = {}
+    for name, loader in (("train", train_loader), ("val", val_loader)):
+        stems: list[str] = loader.dataset.stems  # type: ignore[attr-defined]
+        (split_dir / f"{name}.txt").write_text("".join(f"{s}\n" for s in stems))
+        fingerprints[f"data/{name}_split_fingerprint"] = split_fingerprint(stems)
+    if trainer.logger is not None:
+        trainer.logger.log_hyperparams(fingerprints)
+
+
 def prepare_training(
     config_path: str | Path,
     *,
@@ -288,6 +304,7 @@ def prepare_training(
         deterministic=False,
         gradient_clip_val=training_cfg.gradient_clip_val,
     )
+    _record_split(run_dir, trainer, train_loader, val_loader)
     return TrainingRun(
         run_dir=run_dir,
         trainer=trainer,
