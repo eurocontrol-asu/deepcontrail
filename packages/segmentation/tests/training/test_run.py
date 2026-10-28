@@ -238,3 +238,26 @@ def test_cli_passes_its_arguments_to_train(
     assert kwargs["logger"] == "mlflow"
     assert kwargs["overrides"] == {"epochs": 2}
     assert "best.ckpt" in capsys.readouterr().out
+
+
+def test_prepare_training_uses_text_progress_and_summary_even_with_rich(
+    tmp_path: Path, synthetic_root: Path
+):
+    from pytorch_lightning.callbacks import (
+        ModelSummary,
+        RichModelSummary,
+        RichProgressBar,
+        TQDMProgressBar,
+    )
+
+    from deepcontrail.segmentation.training import prepare_training
+
+    pytest.importorskip("rich")  # Lightning would pick its Rich bar, silent in log files
+    run = prepare_training(
+        _config(tmp_path, synthetic_root), output_dir=tmp_path, accelerator="cpu"
+    )
+
+    callbacks = run.trainer.callbacks
+    assert any(isinstance(c, TQDMProgressBar) for c in callbacks), "nohup logs need a text bar"
+    assert not any(isinstance(c, (RichProgressBar, RichModelSummary)) for c in callbacks)
+    assert any(type(c) is ModelSummary for c in callbacks)

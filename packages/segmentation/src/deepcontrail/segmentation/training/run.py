@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import pytorch_lightning as pl
 import torch
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, ModelSummary, TQDMProgressBar
 from pytorch_lightning.loggers import CSVLogger
 from torch.utils.data import DataLoader
 
@@ -261,7 +261,9 @@ def prepare_training(
         devices=1,
         max_epochs=training_cfg.epochs,
         precision=training_cfg.precision,  # type: ignore[arg-type]
-        callbacks=[checkpoint],
+        # Plain-text progress bar and summary: Lightning picks its Rich versions whenever
+        # `rich` is installed, and those print nothing when output goes to a log file.
+        callbacks=[checkpoint, TQDMProgressBar(), ModelSummary()],
         default_root_dir=str(output_dir),
         logger=build_logger(
             logger or training_cfg.logger,
