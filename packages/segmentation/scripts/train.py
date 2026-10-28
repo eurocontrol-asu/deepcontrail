@@ -134,7 +134,7 @@ def _flatten_configs(
 # ---------------------------------------------------------------------------
 
 # Categorical slots 1 and 2 of the validated default palette, in fixed order:
-# blue = train / val Dice, orange = val loss / val IoU. Ink and grid stay neutral.
+# blue = train, orange = val, in every panel. Ink and grid stay neutral.
 _BLUE, _BLUE_LIGHT, _ORANGE = "#2a78d6", "#86b6ef", "#eb6834"
 _INK, _INK_MUTED, _GRID, _SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 
@@ -148,7 +148,8 @@ def plot_training_curves(
     ----------
     history
         Metric name -> ``(global_step, value)`` points, as logged by Lightning
-        (``train_loss``, ``val_loss``, ``val_dice``, ``val_iou``, ``train_loss_step``,
+        (``train_loss``, ``val_loss``, ``train_dice``, ``val_dice``, ``train_iou``,
+        ``val_iou``, ``train_loss_step``,
         ``lr-<optimizer>``); missing series are skipped.
     steps_per_epoch
         Optimizer steps per epoch, to turn global steps into epochs.
@@ -158,7 +159,7 @@ def plot_training_curves(
     Returns
     -------
     Figure
-        Three panels: ``Loss``, ``Validation Dice / IoU``, ``Learning rate``.
+        Three panels: ``Loss``, ``Dice / IoU`` (train and val), ``Learning rate``.
     """
     import matplotlib
 
@@ -181,8 +182,11 @@ def plot_training_curves(
     draw(loss_ax, "train_loss_step", "train loss (per step)", _BLUE_LIGHT, linewidth=1, alpha=0.6)
     draw(loss_ax, "train_loss", "train loss", _BLUE, marker="o", markersize=4)
     draw(loss_ax, "val_loss", "val loss", _ORANGE, marker="o", markersize=4)
-    draw(score_ax, "val_dice", "val Dice", _BLUE, marker="o", markersize=4)
-    draw(score_ax, "val_iou", "val IoU", _ORANGE, marker="o", markersize=4)
+    # Colour = split (train blue, val orange, as in the loss panel); dash = metric.
+    draw(score_ax, "train_dice", "train Dice", _BLUE, marker="o", markersize=4)
+    draw(score_ax, "val_dice", "val Dice", _ORANGE, marker="o", markersize=4)
+    draw(score_ax, "train_iou", "train IoU", _BLUE, linestyle="--", marker="o", markersize=4)
+    draw(score_ax, "val_iou", "val IoU", _ORANGE, linestyle="--", marker="o", markersize=4)
     lr_key = next((k for k in history if k.startswith("lr-")), None)
     if lr_key:
         draw(lr_ax, lr_key, "learning rate", _BLUE)
@@ -194,7 +198,7 @@ def plot_training_curves(
 
     for ax, title, ylabel in (
         (loss_ax, "Loss", "loss"),
-        (score_ax, "Validation Dice / IoU", "score"),
+        (score_ax, "Dice / IoU", "score"),
         (lr_ax, "Learning rate", "learning rate"),
     ):
         ax.set_facecolor(_SURFACE)

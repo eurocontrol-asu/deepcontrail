@@ -94,6 +94,8 @@ def _history(steps_per_epoch: int = 10, epochs: int = 4) -> dict[str, list[tuple
         "val_loss": [(s, 1.2 / (i + 1)) for i, s in enumerate(ends)],
         "val_dice": [(s, v) for s, v in zip(ends, [0.5, 0.6, 0.7, 0.65], strict=True)],
         "val_iou": [(s, v) for s, v in zip(ends, [0.3, 0.4, 0.5, 0.45], strict=True)],
+        "train_dice": [(s, v) for s, v in zip(ends, [0.55, 0.7, 0.8, 0.85], strict=True)],
+        "train_iou": [(s, v) for s, v in zip(ends, [0.35, 0.5, 0.6, 0.7], strict=True)],
         "train_loss_step": [(s, 1.0 / (s + 1)) for s in range(0, epochs * steps_per_epoch, 5)],
         "lr-AdamW": [(s, 1e-4 * s / 40) for s in range(0, epochs * steps_per_epoch, 5)],
     }
@@ -105,7 +107,7 @@ def test_training_curves_have_one_panel_per_measure():
     fig = train.plot_training_curves(_history(), steps_per_epoch=10, best_epoch=3)
 
     titles = [ax.get_title(loc="left") for ax in fig.axes]
-    assert titles == ["Loss", "Validation Dice / IoU", "Learning rate"], (
+    assert titles == ["Loss", "Dice / IoU", "Learning rate"], (
         "losses, scores and the LR have different scales: one panel each, never a twin axis"
     )
 
@@ -120,6 +122,10 @@ def test_training_curves_plot_epochs_and_mark_the_best_epoch():
     assert list(val_loss.get_xdata()) == [1.0, 2.0, 3.0, 4.0], "per-epoch points sit on epochs"
     assert score_ax.get_legend() is not None, "two series need a legend"
     assert any(line.get_label() == "best epoch" for line in score_ax.get_lines())
+    labels = {line.get_label() for line in score_ax.get_lines()}
+    assert {"train Dice", "val Dice", "train IoU", "val IoU"} <= labels, (
+        "train next to val shows overfitting"
+    )
 
 
 def test_training_curves_tolerate_missing_series():
