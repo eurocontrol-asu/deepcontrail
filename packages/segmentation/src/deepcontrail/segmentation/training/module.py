@@ -62,6 +62,10 @@ class SegmentationModule(pl.LightningModule):
 
         self._val_preds: list[torch.Tensor] = []
         self._val_targets: list[torch.Tensor] = []
+        # Running (overlap, predicted, target) pixel counts of the training epoch: global
+        # train Dice/IoU at constant memory. A plain attribute, not a buffer, so the
+        # state_dict (and loading existing checkpoints) is unchanged.
+        self._train_counts: torch.Tensor | None = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass, resizing model output back to native mask resolution.
@@ -86,7 +90,32 @@ class SegmentationModule(pl.LightningModule):
         loss = self.loss_fn(logits, masks.float())
 
         self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        # Per-step loss (every `log_every_n_steps`) for the fine-grained training curve.
+        self.log("train_loss_step", loss, on_step=True, on_epoch=False)
+
+        with torch.no_grad():
+            preds = torch.sigmoid(logits).squeeze(1) > 0.5
+            # Soft labels: a pixel is contrail when more than half the annotators marked it.
+            targets = masks > 0.5
+            counts = torch.stack([(preds & targets).sum(), preds.sum(), targets.sum()]).to(
+                torch.float64
+            )
+            self._train_counts = (
+                counts if self._train_counts is None else self._train_counts + counts
+            )
         return loss
+
+    def on_train_epoch_end(self) -> None:
+        """Log global train Dice and IoU (threshold 0.5) for the epoch, then reset."""
+        if self._train_counts is None:
+            return
+        overlap, predicted, target = self._train_counts.tolist()
+        smooth = 1e-6  # as in deepcontrail.core.metrics: empty prediction and target give 1
+        self.log(
+            "train_dice", (2 * overlap + smooth) / (predicted + target + smooth), prog_bar=True
+        )
+        self.log("train_iou", (overlap + smooth) / (predicted + target - overlap + smooth))
+        self._train_counts = None
 
     def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
         """Accumulate predictions and targets for global Dice at epoch end."""

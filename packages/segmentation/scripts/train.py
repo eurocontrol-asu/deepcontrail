@@ -36,17 +36,25 @@ from __future__ import annotations
 import argparse
 import logging
 import platform
+import subprocess
 import time
+from importlib.metadata import version
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import mlflow
 import segmentation_models_pytorch as smp
+import timm
 import torch
 from dotenv import find_dotenv, load_dotenv
 from pytorch_lightning.loggers import MLFlowLogger
 from torch.utils.data import DataLoader
 
+from deepcontrail.core.contract import (
+    BAND_MANIFEST_PATH,
+    DATASET_INFO_PATH,
+    read_dataset_info,
+)
 from deepcontrail.segmentation import SegmentationDataConfig, SegmentationDataset
 from deepcontrail.segmentation.losses import LossConfig, build_loss
 from deepcontrail.segmentation.models import ModelConfig, build_model
@@ -57,6 +65,9 @@ from deepcontrail.segmentation.training import (
     prepare_training,
     resolve_run_paths,
 )
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +130,112 @@ def _flatten_configs(
 
 
 # ---------------------------------------------------------------------------
+# Training curves
+# ---------------------------------------------------------------------------
+
+# Categorical slots 1 and 2 of the validated default palette, in fixed order:
+# blue = train, orange = val, in every panel. Ink and grid stay neutral.
+_BLUE, _BLUE_LIGHT, _ORANGE = "#2a78d6", "#86b6ef", "#eb6834"
+_INK, _INK_MUTED, _GRID, _SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
+
+
+def plot_training_curves(
+    history: dict[str, list[tuple[int, float]]], steps_per_epoch: int, best_epoch: int | None
+) -> Figure:
+    """Draw loss, validation scores and learning rate against epochs, one panel each.
+
+    Parameters
+    ----------
+    history
+        Metric name -> ``(global_step, value)`` points, as logged by Lightning
+        (``train_loss``, ``val_loss``, ``train_dice``, ``val_dice``, ``train_iou``,
+        ``val_iou``, ``train_loss_step``,
+        ``lr-<optimizer>``); missing series are skipped.
+    steps_per_epoch
+        Optimizer steps per epoch, to turn global steps into epochs.
+    best_epoch
+        Epoch of the best checkpoint (1-based), marked on the scores panel.
+
+    Returns
+    -------
+    Figure
+        Three panels: ``Loss``, ``Dice / IoU`` (train and val), ``Learning rate``.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    def points(key: str) -> tuple[list[float], list[float]]:
+        pts = sorted(history.get(key, []))
+        return [(step + 1) / steps_per_epoch for step, _ in pts], [v for _, v in pts]
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), constrained_layout=True)
+    fig.patch.set_facecolor(_SURFACE)
+    loss_ax, score_ax, lr_ax = axes
+
+    def draw(ax: Any, key: str, label: str, color: str, **style: Any) -> None:  # noqa: ANN401
+        x, y = points(key)
+        if x:
+            ax.plot(x, y, label=label, color=color, linewidth=style.pop("linewidth", 2), **style)
+
+    draw(loss_ax, "train_loss_step", "train loss (per step)", _BLUE_LIGHT, linewidth=1, alpha=0.6)
+    draw(loss_ax, "train_loss", "train loss", _BLUE, marker="o", markersize=4)
+    draw(loss_ax, "val_loss", "val loss", _ORANGE, marker="o", markersize=4)
+    # Colour = split (train blue, val orange, as in the loss panel); dash = metric.
+    draw(score_ax, "train_dice", "train Dice", _BLUE, marker="o", markersize=4)
+    draw(score_ax, "val_dice", "val Dice", _ORANGE, marker="o", markersize=4)
+    draw(score_ax, "train_iou", "train IoU", _BLUE, linestyle="--", marker="o", markersize=4)
+    draw(score_ax, "val_iou", "val IoU", _ORANGE, linestyle="--", marker="o", markersize=4)
+    lr_key = next((k for k in history if k.startswith("lr-")), None)
+    if lr_key:
+        draw(lr_ax, lr_key, "learning rate", _BLUE)
+        lr_ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
+    if best_epoch is not None:
+        score_ax.axvline(
+            best_epoch, color=_INK_MUTED, linestyle="--", linewidth=1, label="best epoch"
+        )
+
+    for ax, title, ylabel in (
+        (loss_ax, "Loss", "loss"),
+        (score_ax, "Dice / IoU", "score"),
+        (lr_ax, "Learning rate", "learning rate"),
+    ):
+        ax.set_facecolor(_SURFACE)
+        ax.set_title(title, color=_INK, loc="left")
+        ax.set_xlabel("epoch", color=_INK_MUTED)
+        ax.set_ylabel(ylabel, color=_INK_MUTED)
+        ax.grid(color=_GRID, linewidth=0.8)
+        ax.tick_params(colors=_INK_MUTED)
+        for spine in ax.spines.values():
+            spine.set_color(_GRID)
+        if len(ax.get_lines()) >= 2:
+            ax.legend(frameon=False, labelcolor=_INK_MUTED)
+    return fig
+
+
+def _git_dirty(repo: Path) -> str:
+    """Return ``"true"``/``"false"`` for uncommitted changes in ``repo``, else ``"unknown"``."""
+    try:
+        out = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return "true" if out.strip() else "false"
+
+
+def _metric_history(client: Any, run_id: str) -> dict[str, list[tuple[int, float]]]:  # noqa: ANN401
+    """Return every metric of the run as ``(step, value)`` points."""
+    keys = client.get_run(run_id).data.metrics
+    return {k: [(m.step, m.value) for m in client.get_metric_history(run_id, k)] for k in keys}
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -171,6 +288,7 @@ def main(args: argparse.Namespace) -> None:
     mlflow.set_tracking_uri(mlflow_uri)
     _ = mlf_logger.experiment  # force run creation
     run_id = mlf_logger.run_id
+    assert run_id is not None, "the MLflow run must exist before logging to it"
 
     with mlflow.start_run(run_id=run_id):
         params = _flatten_configs(train_data_cfg, model_cfg, loss_cfg, training_cfg, seed)
@@ -185,7 +303,27 @@ def main(args: argparse.Namespace) -> None:
         }
         if torch.cuda.is_available():
             system_params["system/gpu_name"] = torch.cuda.get_device_name(0)
+        system_params |= {
+            "system/lightning_version": version("pytorch-lightning"),
+            "system/timm_version": timm.__version__,
+            "system/deepcontrail_version": version("deepcontrail-segmentation"),
+        }
         mlflow.log_params(system_params)
+        mlflow.set_tag("git.dirty", _git_dirty(Path(__file__).resolve().parent))
+
+        # Model size and the dataset the run read (its format metadata as artifacts)
+        mlflow.log_param("model/num_params", sum(p.numel() for p in run.module.model.parameters()))
+        mlflow.log_param("training/steps_per_epoch", len(train_loader))
+        info = read_dataset_info(train_data_cfg.root)
+        mlflow.log_params(
+            {
+                "data/export": info.export,
+                "data/source": info.source,
+                "data/format_version": info.format_version,
+            }
+        )
+        for relative in (DATASET_INFO_PATH, BAND_MANIFEST_PATH):
+            mlflow.log_artifact(str(Path(train_data_cfg.root) / relative), artifact_path="dataset")
 
         # Dataset sample counts
         test_ds_for_count = SegmentationDataset(test_data_cfg) if not args.skip_test else None
@@ -199,6 +337,17 @@ def main(args: argparse.Namespace) -> None:
         run.fit()
         wall_seconds = time.monotonic() - t0
         mlflow.log_metric("training_wall_seconds", wall_seconds)
+        if torch.cuda.is_available():
+            mlflow.log_metric("peak_gpu_memory_gb", torch.cuda.max_memory_allocated() / 1e9)
+
+        # Training curves against epochs, and the epoch of the best checkpoint
+        history = _metric_history(mlflow.MlflowClient(), run_id)
+        val_dice = [v for _, v in sorted(history.get("val_dice", []))]
+        best_epoch = val_dice.index(max(val_dice)) + 1 if val_dice else None
+        if best_epoch is not None:
+            mlflow.log_metric("best_epoch", best_epoch)
+        figure = plot_training_curves(history, len(train_loader), best_epoch)
+        mlflow.log_figure(figure, "training_curves.png")
 
         # Post-training global evaluation
         best_ckpt_path = checkpoint_cb.best_model_path
