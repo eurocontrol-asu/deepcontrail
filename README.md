@@ -1,60 +1,135 @@
 # DeepContrail
 
-Open-source library for **contrail detection, segmentation, tracking, and flight attribution** in satellite imagery.
+Open-source library for **contrail detection, segmentation, tracking, and flight attribution**
+in satellite imagery.
 
-> **Status:** early development — package skeleton, tooling, and test suite are in place; implementation is being built out incrementally.
+This repository will host every phase of the project. **Version 0.1.0 ships the first phase:
+semantic segmentation** of contrails in GOES-16 ABI imagery, trained and evaluated on the
+OpenContrails dataset. The later phases will be added as they are developed.
 
 ## Goal
 
-Provide a clean, well-typed, and reusable library for detecting contrails in satellite imagery. Development follows a phased roadmap:
+Provide a clean, well-typed, and reusable library for detecting contrails in satellite imagery.
+Development follows a phased roadmap:
 
-1. **Semantic segmentation** — detect contrail pixels in GOES-16 imagery (active)
-2. **Instance segmentation** — separate individual contrails (MTG)
-3. **Tracking** — follow contrails across time steps
-4. **Attribution** — assign ADS-B flight trajectories to detected contrails
-5. **Altitude estimation** — infer contrail altitude from imagery
+1. **Semantic segmentation**: detect contrail pixels in GOES-16 imagery (**released in v0.1.0**)
+2. **Instance segmentation**: separate individual contrails (MTG) (next)
+3. **Tracking**: follow contrails across time steps
+4. **Attribution**: assign ADS-B flight trajectories to detected contrails
+5. **Altitude estimation**: infer contrail altitude from imagery
 
-## Installation
+## Packages
 
-The repository is a [uv](https://github.com/astral-sh/uv) workspace of separately
-installable packages. From a clone:
-
-```bash
-uv sync                    # core + segmentation, dev tools, training scripts' dependencies
-uv sync --group convert    # + the OpenContrails converter (TensorFlow)
-```
+The repository is a [uv](https://github.com/astral-sh/uv) workspace of separately installable
+packages that share the `deepcontrail` namespace:
 
 | Package | Import | Contents |
 |---|---|---|
-| `deepcontrail-core` | `deepcontrail.core` | Shared and torch-free: dataset config, spectral bands, composites, splits, Dice/IoU |
-| `deepcontrail-segmentation` | `deepcontrail.segmentation` | Semantic segmentation: dataset, transforms, models, losses, training, TTA, evaluation |
-| `deepcontrail-opencontrails` | `deepcontrail.opencontrails` | Converter from the OpenContrails TFRecords (tool, not part of the library) |
+| [`deepcontrail-core`](packages/core) | `deepcontrail.core` | Torch-free foundations: the dataset format and its validation, false-colour composites, train/val/fold splits, Dice/IoU |
+| [`deepcontrail-segmentation`](packages/segmentation) | `deepcontrail.segmentation` | Semantic segmentation: dataset, models, losses, training (`train`), pretrained models (`load_pretrained`, `predict`) |
+| [`deepcontrail-opencontrails`](tools/opencontrails) | `deepcontrail.opencontrails` | Converter from the OpenContrails TFRecords to the dataset format (a tool, not part of the library) |
 
-## Training runs
+## Results: semantic segmentation
 
-`packages/segmentation/scripts/train.py` writes checkpoints and MLflow runs to paths
-you choose; there is no default. Set them once in a `.env` file at the repository
-root (git-ignored):
+Reference model: UPerNet with a CAFormer-B36 encoder at 512 px, trained 40 epochs on the
+OpenContrails `20250305` export with
+[`packages/segmentation/configs/experiment.yaml`](packages/segmentation/configs/experiment.yaml).
+Global Dice on the held-out test split (1,879 scenes):
+
+| Inference | Threshold | Test Dice |
+|---|---|---|
+| Single pass | 0.5 | 0.6892 |
+| Single pass | tuned on validation | 0.6913 |
+| D4 test-time augmentation (8×) | 0.5 | **0.6960** |
+| D4 test-time augmentation (8×) | tuned on validation | 0.6936 |
+
+GPU training is not bit-for-bit deterministic: four trainings of this configuration with the
+same seed and data scored 0.6916–0.6960 (TTA, threshold 0.5).
+
+An earlier run of the same configuration scored **0.6914 private / 0.6994 public** on the hidden
+test set of the Kaggle *Google Research – Identify Contrails to Reduce Global Warming*
+competition (TTA, threshold 0.5). Kaggle's labels follow the older `20230419` export, which
+differs from `20250305` (see [Data notes](#data-notes)).
+
+## Installation
+
+From a clone (the packages are not on PyPI yet):
 
 ```bash
-cp .env.example .env    # then edit the two paths
-uv run python packages/segmentation/scripts/train.py
+git clone https://github.com/eurocontrol-asu/deepcontrail.git
+cd deepcontrail
+uv sync                    # core + segmentation, with the dev tools and the training scripts' dependencies
+uv sync --group convert    # + the OpenContrails converter (TensorFlow)
 ```
 
-A CLI flag (`--checkpoint-root`, `--mlflow-uri`) wins over a variable set in the
-shell, which wins over `.env`.
+Or install the packages into an existing environment from git:
 
-## Layout
+```bash
+pip install \
+    "deepcontrail-core @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/core" \
+    "deepcontrail-segmentation @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/segmentation"
+```
 
+`deepcontrail-segmentation[mlflow]` adds the optional MLflow logger.
+
+## Quickstart
+
+### Predict with a pretrained model
+
+```python
+import numpy as np
+from deepcontrail.core import false_color_from_spectral, read_band_manifest
+from deepcontrail.segmentation import load_pretrained, predict
+
+model = load_pretrained("path/to/bundle")  # a local folder or a Hugging Face Hub repo id
+bands = np.load(f"{root}/spectral_bands/test/{record_id}.npy")
+composite = false_color_from_spectral(bands, model.config.false_color, read_band_manifest(root))
+probabilities = predict(model, composite, tta=True)  # (H, W), float32 in [0, 1]
+mask = probabilities > model.config.threshold
 ```
-packages/
-├── core/            # deepcontrail-core:          src/deepcontrail/core/, tests/
-└── segmentation/    # deepcontrail-segmentation:  src/deepcontrail/segmentation/, tests/,
-                     #   scripts/ (train, evaluate; not shipped), configs/experiment.yaml
-tools/
-└── opencontrails/   # deepcontrail-opencontrails: src/deepcontrail/opencontrails/, tests/
-tests/               # workspace-level checks (versions, licences, namespace layout)
+
+### Train
+
+```bash
+uv run deepcontrail-train packages/segmentation/configs/experiment.yaml \
+    --data-root /path/to/dataset --output-dir runs        # csv logger by default
 ```
+
+or from Python: `deepcontrail.segmentation.train("experiment.yaml", output_dir="runs")`.
+Lightning's `Trainer` does the training; each run writes its checkpoints, metrics and the exact
+train/validation records to `runs/<run-name>/`.
+
+The repository's experiment script adds MLflow tracking, test evaluation and test-time
+augmentation; see [`packages/segmentation`](packages/segmentation).
+
+## Data
+
+The library reads one on-disk **dataset format** and nothing else: spectral arrays, label
+masks and two small metadata files describing the bands and the dataset. Any data converted to
+it works, from any sensor; the format and its validation are described in
+[`packages/core`](packages/core). For the OpenContrails dataset the converter does it:
+
+```bash
+uv run deepcontrail-convert-opencontrails \
+    --tfrecord-dir /path/to/20250305/tfrecords --output-dir /path/to/dataset
+uv run deepcontrail-validate /path/to/dataset --deep
+```
+
+The raw TFRecords are on the public bucket `https://storage.googleapis.com/goes_contrails_dataset`
+(export `20250305/`).
+
+### Data notes
+
+- **Ash RGB recipe.** The models use the standard ash RGB: R = B15 − B14 on [−4, 2] K,
+  G = B14 − B11 on [−4, 5] K, B = B14 on [243, 303] K (GOES-16 ABI bands). In the OpenContrails
+  TFRecords `data_10um` is ABI band **13**; band 11 is the `cloud_top` key. A green channel built
+  from `data_10um` is not the standard recipe and scored 0.009–0.018 Dice lower.
+- **Pixel shift.** In the `20230419` export the masks follow the Kaggle convention, half a pixel
+  down-right of the images (`pixel_shift: 0.5`); in `20250305` they are aligned
+  (`pixel_shift: 0.0`). Each converted dataset records its value in
+  `metadata/dataset_info.json`. On Kaggle data, keep the 0.5 shift even with a `20250305` model.
+- **The exports differ beyond the shift.** After alignment the `20250305` masks overlap the
+  `20230419`/Kaggle ones at an IoU of about 0.78, so scores on the two are not directly comparable.
 
 ## Development
 
@@ -65,7 +140,8 @@ uv run pyright
 uv run pytest
 ```
 
-All four must be green before opening a pull request.
+All four must be green before opening a pull request. CI also tests each package in an
+environment with only that package installed.
 
 ## License
 
