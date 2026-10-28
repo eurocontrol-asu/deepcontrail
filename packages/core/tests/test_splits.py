@@ -107,3 +107,24 @@ def test_is_sequence_stem_accepts_labelled_stems(stem: str):
     from deepcontrail.core.splits import is_sequence_stem
 
     assert not is_sequence_stem(stem), f"{stem} is a labelled scene"
+
+
+def test_split_fingerprint_ignores_order():
+    from deepcontrail.core.splits import split_fingerprint
+
+    assert split_fingerprint(["b", "a", "c"]) == split_fingerprint(["a", "b", "c"])
+
+
+def test_split_fingerprint_differs_for_different_sets():
+    from deepcontrail.core.splits import split_fingerprint
+
+    assert split_fingerprint(["a", "b"]) != split_fingerprint(["a", "c"])
+
+
+def test_split_fingerprint_is_short_hex():
+    from deepcontrail.core.splits import split_fingerprint
+
+    fingerprint = split_fingerprint(["a"])
+
+    assert len(fingerprint) == 12
+    int(fingerprint, 16)

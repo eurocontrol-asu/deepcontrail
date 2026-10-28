@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Literal
 
@@ -52,3 +53,11 @@ def partition_stems(
     if split == "val":
         return [s for i, s in enumerate(stems) if i in val_idx]
     return [s for i, s in enumerate(stems) if i not in val_idx]
+
+
+def split_fingerprint(stems: list[str]) -> str:
+    """Return a 12-hex-digit fingerprint of a set of stems (independent of their order).
+
+    Two runs used the same records for a split exactly when the fingerprints match.
+    """
+    return hashlib.sha256("\n".join(sorted(stems)).encode()).hexdigest()[:12]
