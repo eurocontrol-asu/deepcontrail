@@ -291,3 +291,24 @@ def test_prepare_training_monitors_the_learning_rate(tmp_path: Path, synthetic_r
     monitors = [c for c in run.trainer.callbacks if isinstance(c, LearningRateMonitor)]
     assert monitors, "the learning-rate schedule must be logged"
     assert monitors[0].logging_interval == "step", "warmup + cosine changes the LR every step"
+
+
+def test_prepare_training_records_the_exact_train_and_val_records(
+    tmp_path: Path, synthetic_root: Path
+):
+    from deepcontrail.core.splits import split_fingerprint
+    from deepcontrail.segmentation.training import prepare_training
+
+    run = prepare_training(
+        _config(tmp_path, synthetic_root), output_dir=tmp_path, run_name="r", accelerator="cpu"
+    )
+
+    train = (run.run_dir / "split" / "train.txt").read_text().split()
+    val = (run.run_dir / "split" / "val.txt").read_text().split()
+    assert train == run.train_loader.dataset.stems  # type: ignore[attr-defined]
+    assert val == run.val_loader.dataset.stems  # type: ignore[attr-defined]
+    hparams = run.trainer.logger.experiment.hparams  # type: ignore[union-attr]
+    assert hparams["data/val_split_fingerprint"] == split_fingerprint(val), (
+        "the logger records which validation records the run used"
+    )
+    assert hparams["data/train_split_fingerprint"] == split_fingerprint(train)
