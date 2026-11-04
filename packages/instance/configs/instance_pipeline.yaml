@@ -1,0 +1,35 @@
+# Instance segmentation pipeline (deepcontrail.instance.detect_instances_from_probabilities).
+# Input: a semantic probability map in [0, 1]. Steps: threshold at semantic_threshold, split with
+# Mannstein, grow each contrail grow_steps px into pixels with probability > grow_threshold,
+# weight scores by mean probability. Identical to InstancePipelineConfig() (pinned by a test).
+#
+# Tuning (2026-10-31): scripts/optimize_pipeline.py, 100 trials on the reference semantic model's
+# validation-split predictions (1,000 search scenes), objective = pooled per-annotator mAP over
+# IoU 0.25-0.75; confirmed on 1,009 holdout scenes: mAP 0.248 (previous defaults) -> 0.269.
+# Re-checked 2026-11-04 after the direction-independent straightness (100 new trials, same scenes):
+# holdout 0.274 here vs 0.277 for the search's best (within the 0.005 noise margin), so kept. The line
+# filter is off: at these settings it kept every pixel.
+# For contrails agreed by most annotators, see configs/instance_pipeline_consensus.yaml.
+format_version: 1
+mannstein:
+  line_filter: false
+  num_kernels: 24
+  kernel_size: 25
+  sigma1: 3.38996845929638
+  sigma_delta: 0.7008195042725893
+  response_threshold: 0.00012714987768293402
+  min_pixels: 5
+  min_length: 4.173422506229322
+  min_r_score: 0.07830797096507566
+  lookback: 53
+  alignment_threshold: 2.4559123612088265
+  fit_avg_size: 2
+  filter_avg_size: 2
+  iou_threshold: 0.29602142259052816
+  score_saturation: 26.486876651437136
+pipeline:
+  semantic_threshold: 0.46466753022859164
+  grow_threshold: 0.3711273368123679
+  grow_steps: 1
+  grow_connectivity: 8
+  probability_scores: true

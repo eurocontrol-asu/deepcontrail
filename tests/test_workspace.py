@@ -22,7 +22,12 @@ def _project(path: Path) -> dict:
 def test_workspace_has_the_expected_members():
     names = {_project(m)["project"]["name"] for m in MEMBERS}
 
-    assert names == {"deepcontrail-core", "deepcontrail-segmentation", "deepcontrail-opencontrails"}
+    assert names == {
+        "deepcontrail-core",
+        "deepcontrail-segmentation",
+        "deepcontrail-instance",
+        "deepcontrail-opencontrails",
+    }
 
 
 def test_all_packages_share_one_version():
@@ -55,12 +60,17 @@ def test_member_ships_one_namespace_module(member: Path):
 
 def test_installed_versions_match_pyproject():
     import deepcontrail.core
+    import deepcontrail.instance
     import deepcontrail.segmentation
 
     assert deepcontrail.core.__version__ == _project(ROOT / "packages/core")["project"]["version"]
     assert (
         deepcontrail.segmentation.__version__
         == _project(ROOT / "packages/segmentation")["project"]["version"]
+    )
+    assert (
+        deepcontrail.instance.__version__
+        == _project(ROOT / "packages/instance")["project"]["version"]
     )
 
 
