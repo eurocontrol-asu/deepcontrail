@@ -12,10 +12,15 @@ Usage
         --checkpoint /path/to/run/best-val_dice=0.6963.ckpt \
         --config packages/segmentation/configs/experiment.yaml \
         --output-dir /path/to/bundle \
-        --metric test_dice_tta_at_0.5=0.6960 --metric test_dice_at_0.5=0.6892
+        --metric test_dice_tta_at_0.5=0.6960 --metric test_dice_at_0.5=0.6892 \
+        --instance-pipeline packages/instance/configs/instance_pipeline.yaml \
+        --score-model /path/to/score_model.json
 
-The licence and attribution sections of the card are left for a person to fill in
-before publishing.
+``--instance-pipeline`` (and ``--score-model``, trained on this model's predictions) ship the
+instance step with the weights; they need ``deepcontrail-instance``.
+
+The licence and attribution sections of the card are left for a person to fill in before
+publishing.
 """
 
 from __future__ import annotations
@@ -129,6 +134,41 @@ required by the training data's licence.
 """
 
 
+_INSTANCE_CARD_SECTION = """
+## Instance segmentation
+
+This bundle also carries the instance step tuned for this model (`instance_pipeline.yaml`,
+`score_model.json`), read with
+[`deepcontrail-instance`](https://github.com/eurocontrol-asu/deepcontrail/tree/main/packages/instance):
+
+```python
+from deepcontrail.instance import load_instance_step
+
+step = load_instance_step(model.directory, tta=model.config.tta)
+masks, scores = step(probabilities)  # one boolean mask and one score per contrail
+```
+
+The score model is valid only for this model's probabilities, made with the same TTA setting.
+"""
+
+
+def _add_instance_step(
+    directory: Path, pipeline: Path, score_model: Path | None, tta: bool
+) -> None:
+    """Copy the instance step into the bundle and check it fits the bundle's TTA setting."""
+    from deepcontrail.instance import (
+        InstancePipelineConfig,
+        ScoreModel,
+        load_instance_step,
+        save_instance_step,
+    )
+
+    config = InstancePipelineConfig.from_yaml(pipeline)
+    model = ScoreModel.from_json(score_model) if score_model is not None else None
+    save_instance_step(directory, config, model)
+    load_instance_step(directory, tta=tta)  # refuses a score model made with the other TTA
+
+
 def main(argv: list[str] | None = None) -> int:
     """Export the checkpoint, check the bundle against it, write the card; return 0."""
     parser = argparse.ArgumentParser(description="Export a checkpoint as a pretrained bundle.")
@@ -146,7 +186,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--run-name", default=None, help="Training run (default: ckpt folder).")
     parser.add_argument("--threshold", type=float, default=0.5, help="Decision threshold.")
+    parser.add_argument(
+        "--instance-pipeline",
+        type=Path,
+        default=None,
+        help="instance_pipeline.yaml to ship with the bundle (needs deepcontrail-instance).",
+    )
+    parser.add_argument(
+        "--score-model",
+        type=Path,
+        default=None,
+        help="score_model.json trained on this model's predictions (needs --instance-pipeline).",
+    )
     args = parser.parse_args(argv)
+    if args.score_model is not None and args.instance_pipeline is None:
+        parser.error("--score-model needs --instance-pipeline: it is valid only for its pipeline")
 
     data_cfg, _, _, model_cfg, *_ = load_configs(args.config)
     checkpoint: dict[str, Any] = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
@@ -191,8 +245,14 @@ def main(argv: list[str] | None = None) -> int:
             msg = "the exported bundle does not reproduce the checkpoint's outputs"
             raise RuntimeError(msg)
 
+    if args.instance_pipeline is not None:
+        _add_instance_step(args.output_dir, args.instance_pipeline, args.score_model, config.tta)
+
     name = args.run_name or args.checkpoint.parent.name
-    (args.output_dir / "README.md").write_text(_model_card(config, data_cfg.root, name))
+    card = _model_card(config, data_cfg.root, name)
+    if args.instance_pipeline is not None:
+        card += _INSTANCE_CARD_SECTION
+    (args.output_dir / "README.md").write_text(card)
     print(f"Exported {args.checkpoint} -> {args.output_dir} (outputs identical to the checkpoint)")
     return 0
 

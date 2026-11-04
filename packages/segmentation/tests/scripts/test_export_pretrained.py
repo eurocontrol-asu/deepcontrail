@@ -6,6 +6,7 @@ import importlib.util
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 import torch
 import yaml
 
@@ -120,3 +121,54 @@ def test_export_writes_a_draft_model_card(tmp_path: Path, synthetic_root: Path):
     assert "test_dice_tta_at_0.5" in card
     assert "ir_123 - ir_105" in card, "the card states the composite recipe"
     assert "TO FILL IN" in card, "licence and attribution are decided by a person"
+
+
+def _instance_files(tmp_path: Path, *, tta: bool | None) -> tuple[Path, Path]:
+    """Write a pipeline YAML and a tree-less score model trained with it."""
+    instance = pytest.importorskip("deepcontrail.instance")
+    config = instance.InstancePipelineConfig()
+    pipeline, score = tmp_path / "pipeline.yaml", tmp_path / "score.json"
+    config.to_yaml(pipeline)
+    trained_on = {} if tta is None else {"tta": tta}
+    instance.ScoreModel(0.5, (), config, trained_on=trained_on).to_json(score)
+    return pipeline, score
+
+
+def test_export_ships_the_instance_step_in_the_bundle(tmp_path: Path, synthetic_root: Path):
+    from deepcontrail.instance import load_instance_step
+
+    pipeline, score = _instance_files(tmp_path, tta=True)
+    ckpt, config, _ = _checkpoint(tmp_path, synthetic_root)
+    out = tmp_path / "bundle"
+
+    _load_script().main(
+        ["--checkpoint", str(ckpt), "--config", str(config), "--output-dir", str(out),
+         "--instance-pipeline", str(pipeline), "--score-model", str(score)]
+    )  # fmt: skip
+
+    step = load_instance_step(out, tta=True)
+    assert step.score_model is not None, "the score model travels with the weights it fits"
+    assert "load_instance_step" in (out / "README.md").read_text(), "the card shows how to use it"
+
+
+def test_export_refuses_a_score_model_made_with_the_other_tta(tmp_path: Path, synthetic_root: Path):
+    pipeline, score = _instance_files(tmp_path, tta=False)
+    ckpt, config, _ = _checkpoint(tmp_path, synthetic_root)
+
+    with pytest.raises(ValueError, match="TTA"):
+        _load_script().main(
+            ["--checkpoint", str(ckpt), "--config", str(config), "--output-dir",
+             str(tmp_path / "bundle"), "--instance-pipeline", str(pipeline),
+             "--score-model", str(score)]
+        )  # fmt: skip
+
+
+def test_export_score_model_needs_its_pipeline(tmp_path: Path, synthetic_root: Path):
+    _, score = _instance_files(tmp_path, tta=True)
+    ckpt, config, _ = _checkpoint(tmp_path, synthetic_root)
+
+    with pytest.raises(SystemExit):
+        _load_script().main(
+            ["--checkpoint", str(ckpt), "--config", str(config), "--output-dir",
+             str(tmp_path / "bundle"), "--score-model", str(score)]
+        )  # fmt: skip

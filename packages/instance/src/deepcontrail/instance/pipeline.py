@@ -50,7 +50,7 @@ def detect_instances_from_probabilities(
     ------
     ValueError
         If ``probs`` is not 2-D, not finite or outside ``[0, 1]``, or if ``score_model`` was
-        trained with another pipeline config.
+        trained with another pipeline config or on scenes of another size.
     """
     if config is None:
         config = InstancePipelineConfig()
@@ -63,6 +63,12 @@ def detect_instances_from_probabilities(
         raise ValueError("probabilities must be finite (no NaN or inf)")
     if probs.size and (probs.min() < -_TOLERANCE or probs.max() > 1.0 + _TOLERANCE):
         raise ValueError("probabilities must lie in [0, 1]")
+    scene_shape = score_model.trained_on.get("scene_shape") if score_model is not None else None
+    if scene_shape is not None and tuple(scene_shape) != probs.shape:
+        raise ValueError(
+            f"the score model was trained on {tuple(scene_shape)} scenes, got {probs.shape}: "
+            "its features are in pixels, so retrain it for this scene size"
+        )
 
     binary = (probs > config.semantic_threshold).astype(np.uint8)
     if not binary.any():

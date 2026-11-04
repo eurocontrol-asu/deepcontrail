@@ -53,6 +53,28 @@ also works as input; growth and probability weighting then change nothing.
   consensus settings. Touching, nearly parallel contrails also merge.
 - The COCO mAP keeps at most 100 detections per sample (a warning says when a sample has more).
 
+## With a pretrained DeepContrail model
+
+A pretrained bundle of `deepcontrail-segmentation` may carry the instance step tuned for its
+model: `instance_pipeline.yaml` and a `score_model.json` trained on that model's predictions.
+`load_instance_step` reads them from the bundle's folder (the defaults when they are absent) and
+refuses a score model made with the other test-time-augmentation setting:
+
+```python
+from deepcontrail.instance import load_instance_step, to_coco_results
+from deepcontrail.segmentation import load_pretrained, predict
+
+model = load_pretrained("eurocontrol-asu/deepcontrail-segmentation")
+step = load_instance_step(model.directory, tta=model.config.tta)
+probabilities = predict(model, composite, tta=model.config.tta)
+masks, scores = step(probabilities)
+results = to_coco_results(masks, scores, image_id="scene_1")  # JSON-ready, needs [map]
+```
+
+A score model records what it was trained on (`ScoreModel.trained_on`: semantic model, TTA,
+scene size, scikit-learn and package versions); the pipeline refuses it on scenes of another size,
+since its features are in pixels. `save_instance_step` writes the two files into a bundle folder.
+
 ## Annotations and results
 
 The annotation tools need only `instance_masks`: each annotator's mask, the agreement map, the
