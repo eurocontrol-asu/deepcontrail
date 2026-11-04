@@ -34,6 +34,7 @@ from deepcontrail.core.contract import (
     read_band_manifest,
     read_dataset_info,
 )
+from deepcontrail.core.readers import instance_mask_problem
 from deepcontrail.core.splits import is_sequence_stem
 
 if TYPE_CHECKING:
@@ -302,19 +303,11 @@ def _annotator_problem(mask: np.ndarray) -> str | None:
     return None
 
 
-def _instance_problem(mask: np.ndarray) -> str | None:
-    if mask.ndim != 4:
-        return f"expected (instances, H, W, annotators), got shape {mask.shape}"
-    if not _values_within(mask, {-1, 0, 1}):
-        return "values must be -1, 0 or 1"
-    return None
-
-
 _LABEL_CHECKS: dict[Label, Callable[[np.ndarray], str | None]] = {
     "semantic": _semantic_problem,
     "probability": _probability_problem,
     "annotator": _annotator_problem,
-    "instance": _instance_problem,
+    "instance": instance_mask_problem,
 }
 
 
