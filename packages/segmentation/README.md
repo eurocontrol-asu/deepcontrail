@@ -8,6 +8,10 @@ module, D4 test-time augmentation, a training entry point, and pretrained models
 It reads datasets in the DeepContrail format (see [`deepcontrail-core`](../core)).
 `import deepcontrail.segmentation` stays light; torch is loaded by the parts that need it.
 
+Unet++ also works with transformer-style encoders such as CAFormer, which have no feature map at
+half the input resolution: `build_model` adds a small convolutional stem for that level (two 3×3
+convolutions, 64 channels), which segmentation-models-pytorch's Unet++ needs and cannot build itself.
+
 ## Pretrained models
 
 A pretrained model is a folder (or Hugging Face Hub repository) with `model.safetensors` and a
