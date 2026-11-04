@@ -210,6 +210,16 @@ def test_predict_rejects_a_composite_that_is_not_three_channels():
         predict(Pretrained(_model(), _config()), np.zeros((16, 16, 10), np.float32))
 
 
+@pytest.mark.parametrize("shape", [(32, 32, 3), (16, 24, 3), (2, 8, 8, 3)])
+def test_predict_rejects_scenes_of_another_size_than_the_training_scenes(shape):
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    composite = np.zeros(shape, dtype=np.float32)
+
+    with pytest.raises(ValueError, match="16 x 16"):
+        predict(Pretrained(_model(), _config()), composite)
+
+
 def test_predict_matches_the_training_pipeline(synthetic_root: Path):
     """Same composite, resize, normalisation and output resize as SegmentationDataset."""
     from deepcontrail.core.false_color import false_color_from_spectral

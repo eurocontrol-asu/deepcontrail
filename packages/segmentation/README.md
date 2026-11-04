@@ -28,8 +28,10 @@ probabilities = predict(model, composite, tta=model.config.tta)
 mask = probabilities > model.config.threshold
 ```
 
-`predict` takes one `(H, W, 3)` composite or a batch `(N, H, W, 3)` and returns probabilities at
-the input's resolution. It applies exactly the training preprocessing (resize, normalisation);
+`predict` takes one `(H, W, 3)` composite or a batch `(N, H, W, 3)` of scenes the size the model
+was trained on (`config.native_size`, 256 for the reference model) and returns probabilities at
+that resolution; other sizes are refused, as resizing them would change the pixel scale (tiling is
+not supported yet). It applies exactly the training preprocessing (resize, normalisation);
 `pixel_shift=` aligns inputs that follow another label convention (0.5 for Kaggle data with a
 `20250305` model).
 

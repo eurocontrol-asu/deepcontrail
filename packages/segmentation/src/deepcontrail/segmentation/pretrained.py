@@ -61,8 +61,8 @@ class PretrainedConfig(BaseModel):
     image_size
         Side length the composite is resized to before the network.
     native_size
-        Native mask resolution of the training data (informational: predictions are
-        returned at the size of the input composite).
+        Side length of the training scenes (and their masks); ``predict`` accepts only
+        scenes of this size.
     threshold
         Probability above which a pixel is contrail.
     tta
@@ -206,7 +206,8 @@ def predict(
         A model from ``load_pretrained``.
     composite
         ``(H, W, 3)`` or ``(N, H, W, 3)`` float array in ``[0, 1]``, built from the
-        bands with ``pretrained.config.false_color``.
+        bands with ``pretrained.config.false_color``. ``H`` and ``W`` must equal
+        ``pretrained.config.native_size``, the size of the scenes the model was trained on.
     tta
         Average the 8 D4 transforms (see ``pretrained.config.tta``).
     pixel_shift
@@ -219,11 +220,25 @@ def predict(
     -------
     np.ndarray
         Float32 probabilities, ``(H, W)`` or ``(N, H, W)``, at the input's resolution.
+
+    Raises
+    ------
+    ValueError
+        If the composite is not 3-channel, or its scenes are not ``native_size`` square:
+        resizing another size to the network's input would change the pixel scale the model
+        was trained on (larger scenes are not tiled yet).
     """
     single = composite.ndim == 3
     batch = composite[None] if single else composite
     if batch.ndim != 4 or batch.shape[-1] != 3:
         msg = f"expected a (H, W, 3) or (N, H, W, 3) composite, got shape {composite.shape}"
+        raise ValueError(msg)
+    size = pretrained.config.native_size
+    if batch.shape[1:3] != (size, size):
+        msg = (
+            f"the model was trained on {size} x {size} scenes, got {batch.shape[1]} x "
+            f"{batch.shape[2]}: other sizes would change the pixel scale (tiling is not supported)"
+        )
         raise ValueError(msg)
 
     network = _AtInputSize(pretrained.model, (batch.shape[1], batch.shape[2])).eval()
