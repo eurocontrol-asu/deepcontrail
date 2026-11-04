@@ -1,7 +1,8 @@
 # deepcontrail-opencontrails
 
-Converts the raw [OpenContrails](https://storage.googleapis.com/goes_contrails_dataset) GOES-16
-TFRecords into the [DeepContrail dataset format](../../packages/core). It is one producer of
+Converts the raw [OpenContrails](https://sites.research.google/gr/contrails/public-datasets/) GOES-16
+TFRecords (bucket [`goes_contrails_dataset`](https://storage.cloud.google.com/goes_contrails_dataset))
+into the [DeepContrail dataset format](../../packages/core). It is one producer of
 that format, not part of the library, and it needs TensorFlow.
 
 ```bash
