@@ -7,6 +7,7 @@ one mask and one score per contrail. Torch-free; scikit-learn is needed only to 
 
 from importlib.metadata import version
 
+from deepcontrail.instance.bundle import InstanceStep, load_instance_step, save_instance_step
 from deepcontrail.instance.config import InstancePipelineConfig, MannsteinConfig
 from deepcontrail.instance.io import (
     instance_masks_from_annotators,
@@ -29,6 +30,7 @@ __version__ = version("deepcontrail-instance")
 __all__ = [
     "FEATURES",
     "InstancePipelineConfig",
+    "InstanceStep",
     "MannsteinConfig",
     "ScoreModel",
     "__version__",
@@ -38,8 +40,10 @@ __all__ = [
     "instance_features",
     "instance_masks_from_annotators",
     "instance_masks_from_label_image",
+    "load_instance_step",
     "match_quality",
     "probability_weighted_scores",
+    "save_instance_step",
     "to_coco_results",
     "training_data",
 ]

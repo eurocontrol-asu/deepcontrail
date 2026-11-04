@@ -15,6 +15,7 @@ Usage
     uv run python packages/instance/scripts/train_score_model.py --root <dataset_root>
         --pred-dir <folder of validation probability maps>
         --pipeline-config packages/instance/configs/instance_pipeline.yaml
+        --semantic-model <repo id or run name> --tta
         --workers 16 --output-dir <dir>
 
 Outputs: ``score_model.json`` (load with ``ScoreModel.from_json``; pass it to
@@ -100,6 +101,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--workers", type=int, default=default_workers(), help="Worker processes (default: ≤ 8)."
     )
+    parser.add_argument(
+        "--semantic-model", default=None, help="Model that made the maps (recorded in the file)."
+    )
+    parser.add_argument("--semantic-revision", default=None, help="Its revision (recorded).")
+    parser.add_argument(
+        "--tta",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Whether the maps were made with TTA (recorded; checked when the model is loaded).",
+    )
     parser.add_argument("--output-dir", required=True, help="score_model.json, summary.json.")
     return parser.parse_args(argv)
 
@@ -126,7 +137,16 @@ def main(args: argparse.Namespace) -> dict[str, Any]:
         [match_quality(m, g) for (masks, _), g in zip(detections, gts, strict=True) for m in masks]
     )
     logger.info("Training on %d contrails from %d scenes", len(x), len(search_stems))
-    model = ScoreModel.fit(x, y, config)
+    shapes = {p.shape for p in probs}
+    if len(shapes) != 1:
+        raise ValueError(f"all probability maps must share one size, got {sorted(shapes)}")
+    trained_on = {
+        "semantic_model": args.semantic_model,
+        "semantic_revision": args.semantic_revision,
+        "tta": args.tta,
+        "scene_shape": list(shapes.pop()),
+    }
+    model = ScoreModel.fit(x, y, config, {k: v for k, v in trained_on.items() if v is not None})
     model.to_json(out / "score_model.json")
 
     probs, gts = load_predictions(args.pred_dir, args.root, holdout_stems, args.split)

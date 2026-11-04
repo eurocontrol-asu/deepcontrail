@@ -111,3 +111,25 @@ def test_main_on_a_small_dataset_splits_half_and_half(tmp_path: Path) -> None:
     )  # fmt: skip
 
     assert (summary["n_training_scenes"], summary["n_holdout_scenes"]) == (6, 6)
+
+
+@requires_sklearn
+def test_main_records_the_probability_maps_it_was_trained_on(tmp_path: Path) -> None:
+    from instance_scripts.train_score_model import main, parse_args
+
+    root, pred_dir = _make_pred_root(tmp_path, 12)
+    out = tmp_path / "out"
+
+    main(
+        parse_args(
+            ["--root", str(root), "--pred-dir", str(pred_dir), "--workers", "1",
+             "--semantic-model", "org/model", "--semantic-revision", "v1", "--tta",
+             "--output-dir", str(out)]
+        )
+    )  # fmt: skip
+
+    trained_on = ScoreModel.from_json(out / "score_model.json").trained_on
+    assert trained_on["semantic_model"] == "org/model"
+    assert trained_on["semantic_revision"] == "v1"
+    assert trained_on["tta"] is True
+    assert trained_on["scene_shape"] == [H, W], "features are in pixels of these scenes"

@@ -34,7 +34,9 @@ jobs:
           version: "latest"
       - run: uv python install 3.11
       - run: uv sync --locked
-      - run: uv run --no-sync pytest tests
+      # Workspace checks, plus the segmentation scripts' tests: export_pretrained.py ships the
+      # instance step, which needs both packages (the segmentation job skips those tests).
+      - run: uv run --no-sync pytest tests packages/segmentation/tests/scripts
 
   package:
     name: ${{ matrix.package }} ${{ matrix.extras }}

@@ -33,6 +33,10 @@ the input's resolution. It applies exactly the training preprocessing (resize, n
 `pixel_shift=` aligns inputs that follow another label convention (0.5 for Kaggle data with a
 `20250305` model).
 
+A bundle may also carry the instance step tuned for its model (`instance_pipeline.yaml`,
+`score_model.json`): `deepcontrail.instance.load_instance_step(model.directory)` reads it, and
+`scripts/export_pretrained.py --instance-pipeline ... --score-model ...` adds it.
+
 ## Training
 
 Lightning's `Trainer` runs the training; the entry point builds it from an experiment YAML

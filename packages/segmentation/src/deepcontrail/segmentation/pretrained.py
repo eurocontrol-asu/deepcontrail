@@ -7,6 +7,10 @@ A pretrained bundle is a folder with two files:
   (band keys of the training data), normalisation, input size, decision threshold
   and whether D4 test-time augmentation is recommended.
 
+It may also carry the instance step tuned for this model, ``instance_pipeline.yaml`` and
+``score_model.json``; they are fetched with the bundle and read by ``deepcontrail.instance``
+from ``Pretrained.directory``.
+
 Example::
 
     from deepcontrail.core import false_color_from_spectral, read_band_manifest
@@ -39,6 +43,8 @@ from deepcontrail.segmentation.training.tta import tta_predict
 
 WEIGHTS_FILE = "model.safetensors"
 CONFIG_FILE = "config.json"
+INSTANCE_FILES = ("instance_pipeline.yaml", "score_model.json")
+"""Optional files of a bundle: the instance step tuned for this model (deepcontrail.instance)."""
 
 
 class PretrainedConfig(BaseModel):
@@ -83,10 +89,15 @@ class PretrainedConfig(BaseModel):
 
 @dataclasses.dataclass
 class Pretrained:
-    """A segmentation network in eval mode with the config it must be run with."""
+    """A segmentation network in eval mode with the config it must be run with.
+
+    ``directory`` is the folder the bundle was loaded from (the local download for a Hub
+    repository), where its optional files are.
+    """
 
     model: torch.nn.Module
     config: PretrainedConfig
+    directory: Path | None = None
 
     @property
     def device(self) -> torch.device:
@@ -129,7 +140,9 @@ def load_pretrained(
 
         directory = Path(
             huggingface_hub.snapshot_download(
-                repo_id=str(source), revision=revision, allow_patterns=[WEIGHTS_FILE, CONFIG_FILE]
+                repo_id=str(source),
+                revision=revision,
+                allow_patterns=[WEIGHTS_FILE, CONFIG_FILE, *INSTANCE_FILES],
             )
         )
     for name in (WEIGHTS_FILE, CONFIG_FILE):
@@ -141,7 +154,7 @@ def load_pretrained(
     # The architecture alone: the weights come from model.safetensors.
     model = build_model(config.model.model_copy(update={"encoder_weights": None}))
     load_model(model, str(directory / WEIGHTS_FILE), strict=True)
-    return Pretrained(model.to(device).eval(), config)
+    return Pretrained(model.to(device).eval(), config, directory)
 
 
 class _AtInputSize(torch.nn.Module):

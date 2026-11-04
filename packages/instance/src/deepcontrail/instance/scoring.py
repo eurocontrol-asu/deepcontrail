@@ -15,7 +15,8 @@ exported to plain JSON, so using a model needs numpy only and loading a file run
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -214,12 +215,19 @@ class ScoreModel:
         The pipeline config whose detections the model was trained on.
     features
         Feature names, checked on load against :data:`FEATURES`.
+    trained_on
+        What the model is valid for, since its features depend on the probability maps:
+        ``semantic_model`` (and ``semantic_revision``), ``tta``, ``scene_shape`` ``[H, W]``,
+        plus the ``scikit_learn_version`` and ``deepcontrail_instance_version`` that fitted it.
+        ``scene_shape`` is checked by the pipeline, ``tta`` by :func:`load_instance_step`.
+        Empty for files written before this record existed.
     """
 
     baseline: float
     trees: tuple[dict[str, np.ndarray], ...]
     pipeline_config: InstancePipelineConfig
     features: tuple[str, ...] = FEATURES
+    trained_on: dict[str, Any] = field(default_factory=dict)
 
     FORMAT_VERSION: ClassVar[int] = 1
     """Version of the JSON layout; bump it when the features or the tree format change."""
@@ -235,9 +243,17 @@ class ScoreModel:
 
     @classmethod
     def fit(
-        cls, x: np.ndarray, y: np.ndarray, pipeline_config: InstancePipelineConfig
+        cls,
+        x: np.ndarray,
+        y: np.ndarray,
+        pipeline_config: InstancePipelineConfig,
+        trained_on: dict[str, Any] | None = None,
     ) -> ScoreModel:
-        """Fit the trees on features ``x`` and labels ``y`` (fixed, seeded settings)."""
+        """Fit the trees on features ``x`` and labels ``y`` (fixed, seeded settings).
+
+        ``trained_on`` describes the probability maps behind ``x`` (see the class attributes);
+        the scikit-learn and package versions are added to it.
+        """
         try:
             # The [scores] extra; resolvable only where it is installed.
             import sklearn.ensemble  # pyright: ignore[reportMissingImports]
@@ -256,7 +272,12 @@ class ScoreModel:
             tree["value"] = np.asarray(nodes["value"], dtype=float)
             trees.append(tree)
         baseline = float(np.ravel(estimator._baseline_prediction)[0])
-        return cls(baseline, tuple(trees), pipeline_config)
+        record = {
+            **(trained_on or {}),
+            "scikit_learn_version": sklearn.__version__,
+            "deepcontrail_instance_version": version("deepcontrail-instance"),
+        }
+        return cls(baseline, tuple(trees), pipeline_config, trained_on=record)
 
     def predict(self, x: np.ndarray) -> np.ndarray:
         """Predict the match quality of each row of ``x``, clipped to ``[0, 1]``.
@@ -294,6 +315,7 @@ class ScoreModel:
             "features": list(self.features),
             "baseline": self.baseline,
             "pipeline_config": self.pipeline_config.model_dump(),
+            "trained_on": self.trained_on,
             "trees": [{k: v.tolist() for k, v in tree.items()} for tree in self.trees],
         }
         Path(path).write_text(json.dumps(data))
@@ -317,4 +339,10 @@ class ScoreModel:
             raise ValueError("score model features differ from this library's FEATURES")
         trees = tuple({k: np.asarray(v) for k, v in tree.items()} for tree in data["trees"])
         config = InstancePipelineConfig.from_dict(data["pipeline_config"])
-        return cls(float(data["baseline"]), trees, config, tuple(data["features"]))
+        return cls(
+            float(data["baseline"]),
+            trees,
+            config,
+            tuple(data["features"]),
+            trained_on=dict(data.get("trained_on", {})),
+        )
