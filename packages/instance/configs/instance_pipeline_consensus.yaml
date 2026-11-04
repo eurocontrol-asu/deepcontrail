@@ -1,0 +1,33 @@
+# Instance pipeline settings for contrails agreed by most annotators (consensus instances).
+# Same as InstancePipelineConfig.consensus() (pinned by a test).
+# Same steps as configs/instance_pipeline.yaml, but no growth: growth widens contrails toward how
+# single annotators draw them, which does not help when the target is the consensus.
+#
+# Tuning (2026-10-31): scripts/optimize_pipeline.py --objective consensus, 100 trials on the reference
+# semantic model's validation-split predictions; on the 1,009 holdout scenes no searched config beat
+# these starting settings (consensus mAP 0.425 vs 0.423 for the search's best).
+# Re-checked 2026-11-04 after the direction-independent straightness (100 new trials, same scenes):
+# 0.442 here vs 0.444 for the search's best (within the 0.005 noise margin), so kept. Line filter off.
+format_version: 1
+mannstein:
+  line_filter: false
+  num_kernels: 27
+  kernel_size: 15
+  sigma1: 1.6281154034079715
+  sigma_delta: 0.6895797586480001
+  response_threshold: 0.00012114447935536606
+  min_pixels: 10
+  min_length: 3.6267323822860877
+  min_r_score: 0.05470144383145452
+  lookback: 53
+  alignment_threshold: 2.663708517028666
+  fit_avg_size: 3
+  filter_avg_size: 2
+  iou_threshold: 0.41435493420805575
+  score_saturation: 18.325171813375093
+pipeline:
+  semantic_threshold: 0.5
+  grow_threshold: 0.4
+  grow_steps: 0
+  grow_connectivity: 8
+  probability_scores: true

@@ -6,7 +6,11 @@ name = "deepcontrail-workspace"
 version = "0.1.0"
 description = "DeepContrail development workspace (not published)."
 requires-python = ">=3.11"
-dependencies = ["deepcontrail-core", "deepcontrail-segmentation"]
+dependencies = [
+    "deepcontrail-core",
+    "deepcontrail-segmentation",
+    "deepcontrail-instance[map,scores]",
+]
 
 [dependency-groups]
 dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.1", "pyright>=1.1"]
@@ -26,6 +30,7 @@ constraint-dependencies = ["lightning-utilities==0.11.8", "torchmetrics==1.0.3"]
 [tool.uv.sources]
 deepcontrail-core = { workspace = true }
 deepcontrail-segmentation = { workspace = true }
+deepcontrail-instance = { workspace = true }
 deepcontrail-opencontrails = { workspace = true }
 
 [tool.uv.workspace]
@@ -77,7 +82,12 @@ convention = "numpy"
 "**/tests/**" = ["E501", "ANN001", "ANN201", "D103", "D104"]
 
 [tool.pyright]
-include = ["packages/core/src", "packages/segmentation/src", "tools/opencontrails/src"]
+include = [
+    "packages/core/src",
+    "packages/segmentation/src",
+    "packages/instance/src",
+    "tools/opencontrails/src",
+]
 # old_references/ is colleague reference code, not ours — keep it out of type-checking.
 exclude = ["old_references"]
 pythonVersion = "3.11"
@@ -88,6 +98,7 @@ testpaths = [
     "tests",
     "packages/core/tests",
     "packages/segmentation/tests",
+    "packages/instance/tests",
     "tools/opencontrails/tests",
 ]
 # importlib mode: several packages have a tests/test_config.py.

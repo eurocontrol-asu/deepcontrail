@@ -52,6 +52,13 @@ jobs:
           - package: deepcontrail-segmentation
             path: packages/segmentation
             extras: --extra mlflow
+          # instance has no torch; without extras its job proves the base package needs none of
+          # them (tests that need one skip), and the job below runs every test with both.
+          - package: deepcontrail-instance
+            path: packages/instance
+          - package: deepcontrail-instance
+            path: packages/instance
+            extras: --extra map --extra scores
           - package: deepcontrail-opencontrails
             path: tools/opencontrails
     steps:
