@@ -51,8 +51,13 @@ also works as input; growth and probability weighting then change nothing.
   scenes it never trained on; tuning needs instance annotations.
 - Two contrails crossing at a small angle come out as one: at 10° always, at 20° with the
   consensus settings. Touching, nearly parallel contrails also merge.
+- The COCO mAP keeps at most 100 detections per sample (a warning says when a sample has more).
 
 ## Annotations and results
+
+The annotation tools need only `instance_masks`: each annotator's mask, the agreement map, the
+consensus mask and the consensus contrails (drawn by more than half of the annotators) are derived
+from it by `deepcontrail.instance.labels`, for any number of annotators, one included.
 
 Instance annotations use the `instance_masks/<split>/<id>.npy` format of the
 [DeepContrail dataset format](../core): an `(N, H, W, A)` int8 array (1 = pixel of contrail n
@@ -89,6 +94,58 @@ from deepcontrail.instance import (
 config = InstancePipelineConfig.from_yaml("configs/instance_pipeline.yaml")
 model = ScoreModel.from_json("score_model.json")
 masks, scores = detect_instances_from_probabilities(probs, config, score_model=model)
+```
+
+## Evaluation
+
+`deepcontrail.instance.metrics.evaluate_annotator_samples` (needs `[map]`) scores detections
+against each annotator's contrails as a separate ground truth: one sample per (scene, annotator)
+pair. The headline is the COCO segmentation mAP averaged over IoU 0.25–0.75, pooled over all
+samples; precision, recall and F1 are at IoU 0.5. Samples where the annotator drew no contrail are
+skipped by default; `include_empty=True` keeps them, so every detection on them counts as false,
+which is closer to real use.
+
+Results on the OpenContrails 2025 test split (1,879 scenes, 2,700 annotator samples with at least
+one contrail), from the probabilities of DeepContrail's reference semantic model (D4 TTA). Every
+setting was chosen on validation scenes; the test split was only scored. The consensus columns
+score each scene once against its consensus contrails.
+
+| Settings | mAP | mAP, with empty | Precision (with empty) | Recall | F1 (with empty) | Consensus mAP | Consensus mAP, all scenes |
+|---|---|---|---|---|---|---|---|
+| `configs/instance_pipeline.yaml` (defaults) | 0.272 | 0.267 | 0.516 (0.489) | 0.382 | 0.439 (0.429) | 0.418 | 0.409 |
+| `configs/instance_pipeline_consensus.yaml` (no growth) | 0.250 | 0.246 | 0.499 (0.474) | 0.346 | 0.408 (0.400) | 0.434 | 0.426 |
+| defaults + learned scores | 0.277 | 0.270 | 0.516 (0.489) | 0.382 | 0.439 (0.429) | 0.428 | 0.415 |
+| consensus settings + learned scores | 0.256 | 0.250 | 0.499 (0.474) | 0.346 | 0.408 (0.400) | 0.445 | 0.433 |
+
+On each annotator's own mask instead of a prediction, the instance step alone reaches mAP 0.921
+(`configs/mannstein_annotator_masks.yaml`). Most errors therefore come from the semantic step and
+from contrail shape: the AP is 0.51 at IoU 0.25 but 0.02 at IoU 0.75. Annotators also disagree
+strongly on individual contrails: one annotator scored against the others reaches F1 ≈ 0.35 on
+validation scenes.
+
+## Scripts (repository only)
+
+Command-line tools in [`scripts/`](scripts), run from the repository root. They read only
+`instance_masks/<split>/` from a dataset, plus one `<id>.npy` probability map per scene for a
+semantic model's predictions.
+
+- **`evaluate_instances.py`**: the evaluation above, on predictions (`--pred-dir`), on the
+  consensus mask (`--use-gt-semantic`) or on each annotator's mask (`--use-annotator-semantic`);
+  `--score-model`, `--include-empty`, `--consensus-gt`.
+- **`train_score_model.py`**: trains a `ScoreModel` (needs `[scores]`).
+- **`optimize_pipeline.py`** and **`optimize_mannstein.py`**: Optuna searches of the pipeline and
+  Mannstein settings (optuna is in the repository's `experiments` group); they never read the
+  test split.
+
+Tuning for your own semantic model: predict the scenes it never trained on (for example its
+validation split), search the pipeline settings on them (`optimize_pipeline.py`), train a score
+model on the same predictions (`train_score_model.py`), then score the test split once
+(`evaluate_instances.py`).
+
+```bash
+uv run python packages/instance/scripts/train_score_model.py --root <dataset_root> \
+    --pred-dir <validation probability maps> \
+    --pipeline-config packages/instance/configs/instance_pipeline.yaml --output-dir <dir>
 ```
 
 ## References and acknowledgements

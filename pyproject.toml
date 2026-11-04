@@ -15,7 +15,7 @@ dependencies = [
 [dependency-groups]
 dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.1", "pyright>=1.1"]
 # Imported only by the training/evaluation scripts, never by the library.
-experiments = ["mlflow==3.17.0", "python-dotenv>=1.0", "matplotlib>=3.7"]
+experiments = ["mlflow==3.17.0", "python-dotenv>=1.0", "matplotlib>=3.7", "optuna>=4.0"]
 # TensorFlow for the OpenContrails converter; opt-in with `uv sync --group convert`.
 convert = ["deepcontrail-opencontrails"]
 
