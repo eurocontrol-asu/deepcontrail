@@ -135,9 +135,9 @@ def _instance_files(tmp_path: Path, *, tta: bool | None) -> tuple[Path, Path]:
 
 
 def test_export_ships_the_instance_step_in_the_bundle(tmp_path: Path, synthetic_root: Path):
+    pipeline, score = _instance_files(tmp_path, tta=True)  # skips without deepcontrail-instance
     from deepcontrail.instance import load_instance_step
 
-    pipeline, score = _instance_files(tmp_path, tta=True)
     ckpt, config, _ = _checkpoint(tmp_path, synthetic_root)
     out = tmp_path / "bundle"
 
