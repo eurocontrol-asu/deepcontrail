@@ -36,7 +36,8 @@ Repository = "https://github.com/eurocontrol-asu/deepcontrail"
 "Bug Tracker" = "https://github.com/eurocontrol-asu/deepcontrail/issues"
 
 [dependency-groups]
-dev = ["pytest>=7.4", "pyright>=1.1"]
+# optuna: only the tuning scripts run it (deepcontrail.instance.tuning imports it for types only).
+dev = ["pytest>=7.4", "pyright>=1.1", "optuna>=4.0"]
 
 [tool.uv.sources]
 deepcontrail-core = { workspace = true }
