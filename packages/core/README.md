@@ -72,6 +72,10 @@ they differ.
 Read both with `read_band_manifest(root)` and `read_dataset_info(root)`; a missing or invalid file
 raises `DatasetContractError` naming the file.
 
+Instance masks are read with `deepcontrail.core.readers.load_instance_masks(path)`, which raises
+`ValueError` on an array that is not in the format above; `extract_all_annotator_instances(raw)`
+turns one into each annotator's list of boolean contrail masks.
+
 ## Composites
 
 A composite is three channels built from named bands, each one band or the difference of two,
