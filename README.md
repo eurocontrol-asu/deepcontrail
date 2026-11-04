@@ -27,6 +27,7 @@ packages that share the `deepcontrail` namespace:
 |---|---|---|
 | [`deepcontrail-core`](packages/core) | `deepcontrail.core` | Torch-free foundations: the dataset format and its validation, false-colour composites, train/val/fold splits, Dice/IoU |
 | [`deepcontrail-segmentation`](packages/segmentation) | `deepcontrail.segmentation` | Semantic segmentation: dataset, models, losses, training (`train`), pretrained models (`load_pretrained`, `predict`) |
+| [`deepcontrail-instance`](packages/instance) | `deepcontrail.instance` | Instance segmentation (in progress): splits a segmentation map into individual contrails (Mannstein pipeline, learned scores); torch-free |
 | [`deepcontrail-opencontrails`](tools/opencontrails) | `deepcontrail.opencontrails` | Converter from the OpenContrails TFRecords to the dataset format (a tool, not part of the library) |
 
 ## Results: semantic segmentation
