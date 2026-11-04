@@ -37,7 +37,37 @@ def build_model(config: ModelConfig) -> nn.Module:
     """
     arch_cls = getattr(smp, config.architecture)
     kwargs = _build_smp_kwargs(config, arch_cls)
-    return arch_cls(**kwargs)  # type: ignore[no-any-return]
+    model = arch_cls(**kwargs)
+    if arch_cls is smp.UnetPlusPlus and model.encoder.out_channels[1] == 0:
+        _add_half_scale_stem(model, kwargs)
+    return model  # type: ignore[no-any-return]
+
+
+def _add_half_scale_stem(model: smp.UnetPlusPlus, kwargs: dict[str, Any]) -> None:
+    """Give a Unet++ whose encoder starts at 1/4 scale a conv stem at 1/2 scale.
+
+    Without it the nested decoder nodes at 1/2 scale have 0 channels and the model cannot run
+    (transformer-style encoders such as CAFormer). The decoder is rebuilt with the same options.
+    """
+    from segmentation_models_pytorch.decoders.unetplusplus.decoder import UnetPlusPlusDecoder
+
+    from deepcontrail.segmentation.models.stem import HalfScaleStemEncoder
+
+    defaults = {
+        name: p.default
+        for name, p in inspect.signature(smp.UnetPlusPlus.__init__).parameters.items()
+        if p.default is not inspect.Parameter.empty
+    }
+    options = defaults | kwargs
+    model.encoder = HalfScaleStemEncoder(model.encoder)
+    model.decoder = UnetPlusPlusDecoder(
+        encoder_channels=model.encoder.out_channels,
+        decoder_channels=options["decoder_channels"],
+        n_blocks=options["encoder_depth"],
+        use_norm=options["decoder_use_norm"],
+        attention_type=options["decoder_attention_type"],
+        interpolation_mode=options["decoder_interpolation"],
+    )
 
 
 def _build_smp_kwargs(config: ModelConfig, arch_cls: type[Any]) -> dict[str, Any]:
