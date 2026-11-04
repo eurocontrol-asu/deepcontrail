@@ -125,6 +125,41 @@ def test_load_pretrained_from_the_hub_downloads_the_bundle(
     assert loaded.config.image_size == 32
 
 
+def test_load_pretrained_exposes_the_bundle_folder(tmp_path: Path):
+    from deepcontrail.segmentation.pretrained import load_pretrained, save_pretrained
+
+    save_pretrained(_model(), _config(), tmp_path)
+
+    loaded = load_pretrained(tmp_path)
+
+    assert loaded.directory == tmp_path, "optional files of the bundle are read from this folder"
+
+
+def test_load_pretrained_from_the_hub_also_fetches_the_optional_instance_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import huggingface_hub
+
+    from deepcontrail.segmentation.pretrained import load_pretrained, save_pretrained
+
+    save_pretrained(_model(), _config(), tmp_path)
+    calls: list[dict] = []
+
+    def fake_snapshot_download(**kwargs: object) -> str:
+        calls.append(kwargs)
+        return str(tmp_path)
+
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", fake_snapshot_download)
+
+    loaded = load_pretrained("eurocontrol-asu/some-model")
+
+    patterns = set(calls[0]["allow_patterns"])
+    assert {"instance_pipeline.yaml", "score_model.json"} <= patterns, (
+        "a bundle may carry the instance step; downloading only the network would drop it"
+    )
+    assert loaded.directory == tmp_path
+
+
 def test_load_pretrained_missing_bundle_file_is_a_clear_error(tmp_path: Path):
     from deepcontrail.segmentation.pretrained import load_pretrained, save_pretrained
 

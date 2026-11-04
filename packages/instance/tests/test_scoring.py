@@ -224,3 +224,34 @@ def test_score_model_fit_without_scikit_learn_names_the_extra(monkeypatch) -> No
 
     with pytest.raises(ImportError, match=r"deepcontrail-instance\[scores\]"):
         ScoreModel.fit(x, y, _CONFIG)
+
+
+@requires_sklearn
+def test_score_model_records_what_it_was_trained_on(tmp_path: Path) -> None:
+    x, y = _training_set()
+    path = tmp_path / "score_model.json"
+
+    ScoreModel.fit(x, y, _CONFIG, trained_on={"tta": True, "scene_shape": [64, 64]}).to_json(path)
+    trained_on = ScoreModel.from_json(path).trained_on
+
+    assert trained_on["tta"] is True
+    assert trained_on["scene_shape"] == [64, 64]
+    assert trained_on["scikit_learn_version"], "the fitted trees depend on scikit-learn's version"
+    assert trained_on["deepcontrail_instance_version"], "and on the features of this version"
+
+
+def test_score_model_file_without_a_record_still_loads(tmp_path: Path) -> None:
+    path = tmp_path / "score_model.json"
+    ScoreModel(0.5, (), _CONFIG).to_json(path)
+    data = json.loads(path.read_text())
+    del data["trained_on"]
+    path.write_text(json.dumps(data))
+
+    assert ScoreModel.from_json(path).trained_on == {}, "files written before the record load"
+
+
+def test_pipeline_rejects_a_score_model_trained_on_another_scene_size() -> None:
+    model = ScoreModel(0.5, (), _CONFIG, trained_on={"scene_shape": [32, 32]})
+
+    with pytest.raises(ValueError, match="scene"):
+        detect_instances_from_probabilities(np.zeros((_S, _S), dtype=np.float32), _CONFIG, model)
