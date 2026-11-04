@@ -122,8 +122,9 @@ uv run deepcontrail-convert-opencontrails \
 uv run deepcontrail-validate /path/to/dataset --deep
 ```
 
-The raw TFRecords are on the public bucket `https://storage.googleapis.com/goes_contrails_dataset`
-(export `20250305/`).
+The raw TFRecords are published by Google Research on the
+[OpenContrails page](https://sites.research.google/gr/contrails/public-datasets/), in the bucket
+[`goes_contrails_dataset`](https://storage.cloud.google.com/goes_contrails_dataset) (export `20250305/`).
 
 ### Data notes
 
