@@ -17,12 +17,15 @@ convolutions, 64 channels), which segmentation-models-pytorch's Unet++ needs and
 A pretrained model is a folder (or Hugging Face Hub repository) with `model.safetensors` and a
 `config.json` holding everything needed to run it: architecture, composite recipe by band key,
 normalisation, input size, decision threshold and whether test-time augmentation is recommended.
+The reference model is published as
+[`eurocontrol-asu/deepcontrail-segmentation`](https://huggingface.co/eurocontrol-asu/deepcontrail-segmentation);
+`load_pretrained` also takes a local folder.
 
 ```python
 from deepcontrail.core import false_color_from_spectral, read_band_manifest
 from deepcontrail.segmentation import load_pretrained, predict
 
-model = load_pretrained("path/to/bundle")  # or "org/repo" on the Hub, with revision="..."
+model = load_pretrained("eurocontrol-asu/deepcontrail-segmentation", revision="v0.1.0")
 composite = false_color_from_spectral(bands, model.config.false_color, read_band_manifest(root))
 probabilities = predict(model, composite, tta=model.config.tta)
 mask = probabilities > model.config.threshold

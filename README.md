@@ -34,6 +34,8 @@ packages that share the `deepcontrail` namespace:
 Reference model: UPerNet with a CAFormer-B36 encoder at 512 px, trained 40 epochs on the
 OpenContrails `20250305` export with
 [`packages/segmentation/configs/experiment.yaml`](packages/segmentation/configs/experiment.yaml).
+Its weights are on the Hugging Face Hub as
+[`eurocontrol-asu/deepcontrail-segmentation`](https://huggingface.co/eurocontrol-asu/deepcontrail-segmentation).
 Global Dice on the held-out test split (1,879 scenes):
 
 | Inference | Threshold | Test Dice |
@@ -74,19 +76,23 @@ pip install \
 
 ## Quickstart
 
-### Predict with a pretrained model
+### Predict with the pretrained model
 
 ```python
 import numpy as np
 from deepcontrail.core import false_color_from_spectral, read_band_manifest
 from deepcontrail.segmentation import load_pretrained, predict
 
-model = load_pretrained("path/to/bundle")  # a local folder or a Hugging Face Hub repo id
+model = load_pretrained("eurocontrol-asu/deepcontrail-segmentation", revision="v0.1.0")
 bands = np.load(f"{root}/spectral_bands/test/{record_id}.npy")
 composite = false_color_from_spectral(bands, model.config.false_color, read_band_manifest(root))
 probabilities = predict(model, composite, tta=True)  # (H, W), float32 in [0, 1]
 mask = probabilities > model.config.threshold
 ```
+
+`load_pretrained` also takes a local folder. The
+[model card](https://huggingface.co/eurocontrol-asu/deepcontrail-segmentation) describes the
+training, the scores and the limits.
 
 ### Train
 
@@ -145,4 +151,6 @@ environment with only that package installed.
 
 ## License
 
-Licensed under the [European Union Public Licence v1.2 (EUPL-1.2)](LICENSE).
+The code is licensed under the [European Union Public Licence v1.2 (EUPL-1.2)](LICENSE). The
+pretrained weights are released under the Apache License 2.0; see their
+[model card](https://huggingface.co/eurocontrol-asu/deepcontrail-segmentation).
