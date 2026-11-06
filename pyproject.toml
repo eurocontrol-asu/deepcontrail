@@ -43,8 +43,6 @@ members = ["packages/*", "tools/*"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-# old_references/ is colleague reference code, not ours — keep it out of linting.
-extend-exclude = ["old_references"]
 
 [tool.ruff.lint]
 select = [
@@ -60,16 +58,16 @@ select = [
     "PTH",    # flake8-use-pathlib
     "PT",     # flake8-pytest-style
     "TC",     # flake8-type-checking
-    "NPY",    # numpy-asyncify / numpy 2.x compatibility
+    "NPY",    # NumPy-specific rules (incl. NumPy 2 deprecations)
     "RUF",    # ruff-specific rules
 ]
 ignore = [
-    # NumPy-style docstrings: summary on the first line, Args:/Returns: blocks.
+    # NumPy-style docstrings: summary on the first line, Parameters/Returns sections.
     "D203",  # one blank line before class docstring
     "D204",  # one blank line before method docstring
     "D213",  # multi-line summary on the second line (numpy wants the first line -> D212)
     "D402",  # first line should not be the function's signature
-    "D417",  # missing argument descriptions (numpy documents params in the Args: block)
+    "D417",  # missing argument descriptions (parameters are documented in the Parameters section)
 ]
 
 [tool.ruff.lint.isort]
@@ -88,8 +86,6 @@ include = [
     "packages/instance/src",
     "tools/opencontrails/src",
 ]
-# old_references/ is colleague reference code, not ours — keep it out of type-checking.
-exclude = ["old_references"]
 pythonVersion = "3.11"
 typeCheckingMode = "basic"
 

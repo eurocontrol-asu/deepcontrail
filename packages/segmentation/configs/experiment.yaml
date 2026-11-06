@@ -2,9 +2,10 @@
 #
 # Reference model: UPerNet + CAFormer-B36 at 512 px on the OpenContrails 20250305 export,
 # standard ash RGB built at load time from spectral_bands/.
-# Results of this exact configuration (MLflow run 56806bb1, single seed):
-#   test Dice 0.6856 (val-chosen threshold), 0.6875 @0.5; D4 TTA 0.6889, 0.6942 @0.5
-#   Kaggle hidden test (TTA, threshold 0.5): private 0.6914 / public 0.6994
+# Results of this configuration (test split, 1,879 scenes, global Dice): the released model
+# eurocontrol-asu/deepcontrail-segmentation v0.1.0 scores 0.6892 single pass and 0.6960 with
+# D4 test-time augmentation (threshold 0.5); four trainings with the same seed scored
+# 0.6916-0.6960 with TTA (GPU training is not bit-for-bit reproducible).
 #
 # Key choices:
 # - false_color: standard ash RGB, G = band 14 - band 11 (data_11um - cloud_top).
@@ -15,10 +16,11 @@
 # - 40 epochs: validation Dice plateaus after epoch ~28.
 #
 # Splits: train/ is split at load time (val_fraction 0.1, seed 42); test/ (1,879) is the
-# holdout. Val and test configs are derived in scripts/train.py (no augmentation).
+# holdout. Val and test configs are derived by load_configs
+# (deepcontrail.segmentation.training), without augmentation.
 
 data:
-  root: /data/aheffar/projects/contrails/goes_contrails_dataset/20250305
+  root: /path/to/dataset  # replace, or pass --data-root
   split: train
   mask_type: probability
   false_color:
