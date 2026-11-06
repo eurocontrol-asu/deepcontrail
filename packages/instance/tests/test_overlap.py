@@ -57,3 +57,7 @@ def test_duplicate_removal_keeps_all_non_overlapping_regions():
     kept = remove_duplicates([a, b], iou_threshold=0.25)
 
     assert len(kept) == 2
+
+
+def test_duplicate_removal_of_no_candidates_returns_nothing():
+    assert remove_duplicates([], iou_threshold=0.25) == []

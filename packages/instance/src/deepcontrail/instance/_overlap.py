@@ -33,8 +33,6 @@ def region_iou(
     if shared == 0:
         return 0.0
     union = int(index_a.size) + int(index_b.size) - int(shared)
-    if union == 0:
-        return 0.0
     return shared / union
 
 

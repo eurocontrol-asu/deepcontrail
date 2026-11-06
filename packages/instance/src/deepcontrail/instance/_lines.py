@@ -39,7 +39,9 @@ def line_orientations(num_kernels: int) -> np.ndarray:
 def _balance(diff: np.ndarray) -> np.ndarray:
     """Scale a zero-sum kernel so its positive lobe sums to +1 and its negative lobe to -1.
 
-    A kernel with no negative (or no positive) weights is returned unchanged.
+    Each weight is divided by the sum of its own lobe: positives by the positive total, the rest
+    by the (positive) magnitude of the negative total. A kernel with no negative (or no positive)
+    weights is returned unchanged.
 
     Parameters
     ----------
@@ -51,11 +53,12 @@ def _balance(diff: np.ndarray) -> np.ndarray:
     np.ndarray
         Rescaled kernel, same shape as ``diff``.
     """
-    pos_sum = float(np.sum(np.where(diff > 0.0, diff, 0.0)))
-    neg_sum = float(-np.sum(np.where(diff <= 0.0, diff, 0.0)))
-    if pos_sum == 0.0 or neg_sum == 0.0:
+    positive_total = float(np.sum(np.where(diff > 0.0, diff, 0.0)))
+    negative_total = float(np.sum(np.where(diff < 0.0, -diff, 0.0)))
+    if positive_total == 0.0 or negative_total == 0.0:
         return diff
-    return np.where(diff > 0.0, diff / pos_sum, diff / neg_sum)
+    normaliser = np.where(diff > 0.0, positive_total, negative_total)
+    return diff / normaliser
 
 
 def _kernel_cells(size: int) -> tuple[np.ndarray, np.ndarray]:

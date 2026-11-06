@@ -16,16 +16,15 @@ import numpy as np
 def _ols(x: np.ndarray, y: np.ndarray) -> tuple[float, float, float]:
     """Closed-form ordinary least squares fit returning (R², slope, intercept).
 
-    Reproduces scikit-learn ``LinearRegression`` exactly, including its
-    degenerate cases: when the input variance is zero the slope is ``0.0`` and
-    the intercept is the mean of ``y``; when the total sum of squares is zero
-    the squared R is ``1.0`` if the residual sum of squares is zero, else
-    ``0.0``.
+    Reproduces scikit-learn ``LinearRegression`` exactly, including its degenerate cases:
+    when the independent variable has no spread the slope is ``0.0`` and the intercept is the
+    mean of ``y``; when ``y`` has no spread the total sum of squares is zero and the squared R
+    is ``1.0``.
 
-    Results agree with scikit-learn to rounding error, so a comparison exactly at a
-    threshold can go either way: with a whole-number ``alignment_threshold`` (e.g. 2.0) a
-    pixel exactly that far from the fitted line may be accepted by one and rejected by the
-    other. Non-integer thresholds avoid such ties.
+    Results agree with scikit-learn to rounding error, so a comparison exactly at a threshold
+    can go either way: with a whole-number ``alignment_threshold`` (e.g. 2.0) a pixel exactly
+    that far from the fitted line may be accepted by one and rejected by the other.
+    Non-integer thresholds avoid such ties.
 
     Parameters
     ----------
@@ -55,7 +54,7 @@ def _ols(x: np.ndarray, y: np.ndarray) -> tuple[float, float, float]:
     residuals = y_arr - (slope * x_arr + intercept)
     rss = float((residuals * residuals).sum())
     tss = float((dy * dy).sum())
-    r_squared = (1.0 if rss == 0.0 else 0.0) if tss == 0.0 else 1.0 - rss / tss
+    r_squared = 1.0 if tss == 0.0 else 1.0 - rss / tss
     return r_squared, slope, intercept
 
 
@@ -76,6 +75,41 @@ def linear_fit(xs: np.ndarray, ys: np.ndarray) -> tuple[float, float, float]:
         squares.
     """
     return _ols(np.asarray(xs, dtype=float), np.asarray(ys, dtype=float))
+
+
+def _dominant_fit(
+    sum_cross: int, sum_dep: int, sum_indep: int, sum_indep_sq: int, n: int
+) -> tuple[float, float]:
+    """Least-squares slope and intercept of ``dep`` on ``indep`` from exact integer sums.
+
+    The sums are over the whole region: ``sum_cross`` is Σ(dep·indep), ``sum_dep`` is Σ(dep),
+    ``sum_indep`` is Σ(indep) and ``sum_indep_sq`` is Σ(indep²). With no spread in the
+    independent variable the slope is ``0.0`` and the intercept is the mean of the dependent
+    variable.
+
+    Parameters
+    ----------
+    sum_cross
+        Sum of the products of the dependent and independent coordinates.
+    sum_dep
+        Sum of the dependent coordinates.
+    sum_indep
+        Sum of the independent coordinates.
+    sum_indep_sq
+        Sum of the squares of the independent coordinates.
+    n
+        Number of coordinates summed.
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(slope, intercept)``.
+    """
+    denom = n * sum_indep_sq - sum_indep * sum_indep
+    if denom == 0:
+        return 0.0, sum_dep / n
+    slope = (n * sum_cross - sum_indep * sum_dep) / denom
+    return slope, (sum_dep - slope * sum_indep) / n
 
 
 def straightness(rows: np.ndarray, cols: np.ndarray) -> float:
@@ -119,9 +153,9 @@ def is_long_and_straight(
     """Keep a region only if it is straight enough and long enough.
 
     Compares the region's :func:`straightness` with ``min_r_score²`` (so ``min_r_score`` reads
-    like a correlation threshold). The length is measured between the means of the
-    ``avg_size`` extreme coordinates, projected on a line fitted along the dominant axis, and
-    compared with ``min_length``.
+    like a correlation threshold). The length runs between the means of the ``avg_size`` extreme
+    coordinates on each axis, projected onto a line fitted along the more-spread axis from the
+    exact integer sums of the whole region, and is compared with ``min_length``.
 
     Parameters
     ----------
@@ -143,27 +177,45 @@ def is_long_and_straight(
     """
     rows_arr = np.asarray(rows, dtype=float)
     cols_arr = np.asarray(cols, dtype=float)
+    n = len(rows_arr)
 
-    if len(rows_arr) < avg_size * 2:
+    if n < avg_size * 2:
         return False
 
-    sorted_rows = np.argsort(rows_arr)
-    y1 = float(np.mean(rows_arr[sorted_rows][:avg_size]))
-    y2 = float(np.mean(rows_arr[sorted_rows][-avg_size:]))
-    sorted_cols = np.argsort(cols_arr)
-    x1 = float(np.mean(cols_arr[sorted_cols][:avg_size]))
-    x2 = float(np.mean(cols_arr[sorted_cols][-avg_size:]))
+    # Endpoint means: the avg_size smallest and largest coordinates on each axis. The
+    # coordinates are integers, so partitioning for the extremes and averaging gives the same
+    # values as a full sort would.
+    r_lo, r_hi = _axis_endpoints(rows_arr, n, avg_size)
+    c_lo, c_hi = _axis_endpoints(cols_arr, n, avg_size)
 
-    if abs(x1 - x2) > abs(y1 - y2):
-        _, slope, intercept = linear_fit(xs=cols_arr, ys=rows_arr)
-        y1, y2 = x1 * slope + intercept, x2 * slope + intercept
+    # Exact integer sums of the whole region for the dominant-axis fit.
+    r_int = rows_arr.astype(np.int64)
+    c_int = cols_arr.astype(np.int64)
+    sum_r = int(r_int.sum())
+    sum_c = int(c_int.sum())
+    sum_r2 = int((r_int * r_int).sum())
+    sum_c2 = int((c_int * c_int).sum())
+    sum_rc = int((r_int * c_int).sum())
+
+    if abs(c_lo - c_hi) > abs(r_lo - r_hi):
+        # Columns spread more: predict rows from columns.
+        slope, intercept = _dominant_fit(sum_rc, sum_r, sum_c, sum_c2, n)
+        r_lo, r_hi = c_lo * slope + intercept, c_hi * slope + intercept
     else:
-        _, slope, intercept = linear_fit(xs=rows_arr, ys=cols_arr)
-        x1, x2 = y1 * slope + intercept, y2 * slope + intercept
+        # Rows spread more: predict columns from rows.
+        slope, intercept = _dominant_fit(sum_rc, sum_c, sum_r, sum_r2, n)
+        c_lo, c_hi = r_lo * slope + intercept, r_hi * slope + intercept
 
-    pixel_length = float(np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2))
-    straight = straightness(rows_arr, cols_arr)
-    return bool(straight > np.square(min_r_score) and pixel_length > min_length)
+    length = float(np.hypot(c_lo - c_hi, r_lo - r_hi))
+    linearity = straightness(rows_arr, cols_arr)
+    return bool(linearity > np.square(min_r_score) and length > min_length)
+
+
+def _axis_endpoints(values: np.ndarray, n: int, avg_size: int) -> tuple[float, float]:
+    """Means of the ``avg_size`` smallest and largest coordinates along one axis."""
+    lo = np.partition(values, avg_size - 1)[:avg_size]
+    hi = np.partition(values, n - avg_size)[n - avg_size :]
+    return float(lo.mean()), float(hi.mean())
 
 
 def candidate_score(

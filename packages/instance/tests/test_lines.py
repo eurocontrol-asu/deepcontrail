@@ -7,6 +7,7 @@ import pytest
 from scipy.signal import oaconvolve
 
 from deepcontrail.instance._lines import (
+    _balance,
     build_kernels,
     detect_line_pixels,
     line_orientations,
@@ -120,3 +121,31 @@ def test_line_detection_returns_empty_for_an_empty_mask():
 
     assert detected.shape == (0, 0)
     assert detected.dtype == bool
+
+
+def test_balance_scales_each_lobe_to_plus_and_minus_one():
+    kernel = build_kernels(num_kernels=6, kernel_size=11, sigma1=1.4, sigma_delta=0.5)[0]
+    balanced = _balance(kernel)
+
+    assert float(np.sum(np.where(balanced > 0.0, balanced, 0.0))) == pytest.approx(1.0)
+    assert float(np.sum(np.where(balanced <= 0.0, balanced, 0.0))) == pytest.approx(-1.0)
+
+
+def test_balance_divides_positives_and_negatives_by_their_own_lobe_sum():
+    diff = np.array([[0.5, -0.5], [0.5, -0.5]])  # positive total 1.0, negative total 1.0
+
+    balanced = _balance(diff)
+
+    assert balanced.tolist() == [[0.5, -0.5], [0.5, -0.5]]
+
+
+def test_balance_returns_a_kernel_unchanged_when_it_has_no_negative_weights():
+    diff = np.array([[1.0, 2.0], [3.0, 4.0]])  # no negatives -> negative total 0
+
+    assert np.array_equal(_balance(diff), diff)
+
+
+def test_balance_returns_a_kernel_unchanged_when_it_has_no_positive_weights():
+    diff = np.array([[-1.0, -2.0], [-3.0, -4.0]])  # no positives -> positive total 0
+
+    assert np.array_equal(_balance(diff), diff)
