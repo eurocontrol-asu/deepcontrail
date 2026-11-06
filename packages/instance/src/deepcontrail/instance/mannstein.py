@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from deepcontrail.instance._dedup import dedup_greedy
-from deepcontrail.instance._geometry import candidate_score
-from deepcontrail.instance._kernels import detect_lines
-from deepcontrail.instance._segmentation import segment_contrails
+from deepcontrail.instance._growing import grow_regions
+from deepcontrail.instance._lines import detect_line_pixels
+from deepcontrail.instance._overlap import remove_duplicates
+from deepcontrail.instance._shape import candidate_score
 from deepcontrail.instance.config import MannsteinConfig
 
 
@@ -22,7 +22,7 @@ def _run_pipeline(
 ) -> tuple[list[tuple[np.ndarray, np.ndarray]], list[float]]:
     """Optionally line-filter, then segment, score and deduplicate into ``(contrails, scores)``."""
     if config.line_filter:
-        mask = detect_lines(
+        mask = detect_line_pixels(
             semantic_mask.astype(np.float32),
             config.num_kernels,
             config.kernel_size,
@@ -33,7 +33,7 @@ def _run_pipeline(
     else:
         mask = semantic_mask > 0
 
-    candidates = segment_contrails(
+    candidates = grow_regions(
         mask,
         config.min_pixels,
         config.min_length,
@@ -42,7 +42,7 @@ def _run_pipeline(
         config.alignment_threshold,
         config.fit_avg_size if config.filter_avg_size is None else config.filter_avg_size,
     )
-    survivors = dedup_greedy(candidates, config.iou_threshold)
+    survivors = remove_duplicates(candidates, config.iou_threshold)
     return survivors, [
         candidate_score(rows, cols, config.score_saturation, config.fit_avg_size)
         for rows, cols in survivors

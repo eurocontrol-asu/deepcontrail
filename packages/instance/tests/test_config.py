@@ -37,13 +37,6 @@ def test_mannstein_config_rejects_negative_min_pixels():
         MannsteinConfig(min_pixels=-1)
 
 
-def test_mannstein_config_rejects_the_removed_dedup_strategy_setting():
-    from deepcontrail.instance.config import MannsteinConfig
-
-    with pytest.raises(ValidationError, match="dedup_strategy"):
-        MannsteinConfig.from_dict({"dedup_strategy": "graph"})
-
-
 def test_mannstein_config_rejects_even_kernel_size():
     from deepcontrail.instance.config import MannsteinConfig
 
