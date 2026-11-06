@@ -46,6 +46,15 @@ def test_line_orientations_are_evenly_spaced_below_180():
     assert np.all(np.diff(orientations) == pytest.approx(22.5))
 
 
+def test_build_kernels_returns_a_read_only_shared_array():
+    kernels = build_kernels(num_kernels=6, kernel_size=15, sigma1=1.6, sigma_delta=0.7)
+
+    with pytest.raises(ValueError, match="read-only"):
+        kernels[0, 0, 0] = 1.0
+    again = build_kernels(num_kernels=6, kernel_size=15, sigma1=1.6, sigma_delta=0.7)
+    assert again is kernels, "the kernels are built once and cached"
+
+
 def test_build_kernels_shape_matches_configuration():
     kernels = build_kernels(num_kernels=6, kernel_size=15, sigma1=1.6, sigma_delta=0.7)
 

@@ -1,8 +1,8 @@
-"""Least-squares line fit and the shape tests a growing region must pass.
+"""The shape tests a growing region must pass: straightness, length and quality score.
 
 Private module (leading underscore); not exported from ``deepcontrail.instance``.
 
-The fit and the direction-independent straightness follow the Mannstein-style detection of
+The direction-independent straightness and the length test follow the Mannstein-style detection of
 Mannstein, Meyer & Wendling (1999), "Operational detection of contrails from NOAA-AVHRR
 data", Int. J. Remote Sensing 20(8), 1641-1660, doi:10.1080/014311699212650: a candidate
 region is kept only when it is both straight and long.
@@ -11,70 +11,6 @@ region is kept only when it is both straight and long.
 from __future__ import annotations
 
 import numpy as np
-
-
-def _ols(x: np.ndarray, y: np.ndarray) -> tuple[float, float, float]:
-    """Closed-form ordinary least squares fit returning (R², slope, intercept).
-
-    Reproduces scikit-learn ``LinearRegression`` exactly, including its degenerate cases:
-    when the independent variable has no spread the slope is ``0.0`` and the intercept is the
-    mean of ``y``; when ``y`` has no spread the total sum of squares is zero and the squared R
-    is ``1.0``.
-
-    Results agree with scikit-learn to rounding error, so a comparison exactly at a threshold
-    can go either way: with a whole-number ``alignment_threshold`` (e.g. 2.0) a pixel exactly
-    that far from the fitted line may be accepted by one and rejected by the other.
-    Non-integer thresholds avoid such ties.
-
-    Parameters
-    ----------
-    x
-        Independent-variable coordinates.
-    y
-        Dependent-variable coordinates.
-
-    Returns
-    -------
-    tuple[float, float, float]
-        ``(r_squared, slope, intercept)``.
-    """
-    x_arr = np.asarray(x, dtype=float)
-    y_arr = np.asarray(y, dtype=float)
-    x_mean = float(x_arr.mean())
-    y_mean = float(y_arr.mean())
-    dx = x_arr - x_mean
-    dy = y_arr - y_mean
-    denom = float((dx * dx).sum())
-    if denom == 0.0:
-        slope = 0.0
-        intercept = y_mean
-    else:
-        slope = float((dx * dy).sum() / denom)
-        intercept = y_mean - slope * x_mean
-    residuals = y_arr - (slope * x_arr + intercept)
-    rss = float((residuals * residuals).sum())
-    tss = float((dy * dy).sum())
-    r_squared = 1.0 if tss == 0.0 else 1.0 - rss / tss
-    return r_squared, slope, intercept
-
-
-def linear_fit(xs: np.ndarray, ys: np.ndarray) -> tuple[float, float, float]:
-    """Fit a linear regression and return (R², slope, intercept).
-
-    Parameters
-    ----------
-    xs
-        Independent-variable coordinates.
-    ys
-        Dependent-variable coordinates.
-
-    Returns
-    -------
-    tuple[float, float, float]
-        ``(r_squared, slope, intercept)`` from closed-form ordinary least
-        squares.
-    """
-    return _ols(np.asarray(xs, dtype=float), np.asarray(ys, dtype=float))
 
 
 def _dominant_fit(

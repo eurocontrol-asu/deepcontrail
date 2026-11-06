@@ -69,10 +69,29 @@ def _kernel_cells(size: int) -> tuple[np.ndarray, np.ndarray]:
 
 
 @lru_cache(maxsize=16)
-def _kernels(num_kernels: int, kernel_size: int, sigma1: float, sigma_delta: float) -> np.ndarray:
-    """All oriented kernels for a configuration, stacked as ``(num_kernels, size, size)``.
+def build_kernels(
+    num_kernels: int, kernel_size: int, sigma1: float, sigma_delta: float
+) -> np.ndarray:
+    """Return the oriented line kernels of a configuration, shape ``(num_kernels, size, size)``.
 
-    Built once per configuration and reused across scenes.
+    Built once per configuration and cached, so the same array is shared by every call; it is
+    returned read-only so no caller can change the kernels of later calls.
+
+    Parameters
+    ----------
+    num_kernels
+        Number of evenly spaced orientations.
+    kernel_size
+        Kernel spatial size in pixels.
+    sigma1
+        Inner Gaussian sigma in pixels.
+    sigma_delta
+        Outer minus inner Gaussian sigma, in pixels.
+
+    Returns
+    -------
+    np.ndarray
+        Read-only array of balanced difference-of-Gaussians kernels.
     """
     angles = np.radians(line_orientations(num_kernels))
     cos = np.cos(angles)[:, None, None]
@@ -88,14 +107,9 @@ def _kernels(num_kernels: int, kernel_size: int, sigma1: float, sigma_delta: flo
     gaussian_a = norm_a * np.exp(-((signed / sigma_a) ** 2) / 2.0)
     gaussian_b = norm_b * np.exp(-((signed / sigma_b) ** 2) / 2.0)
     diff = gaussian_a - gaussian_b
-    return np.stack([_balance(d) for d in diff])
-
-
-def build_kernels(
-    num_kernels: int, kernel_size: int, sigma1: float, sigma_delta: float
-) -> np.ndarray:
-    """Return the stacked oriented kernels ``(num_kernels, size, size)`` for a configuration."""
-    return _kernels(num_kernels, kernel_size, sigma1, sigma_delta)
+    kernels = np.stack([_balance(d) for d in diff])
+    kernels.setflags(write=False)
+    return kernels
 
 
 def detect_line_pixels(
@@ -135,7 +149,7 @@ def detect_line_pixels(
     if mask.size == 0:
         return np.zeros(mask.shape, dtype=bool)
 
-    kernels = _kernels(num_kernels, kernel_size, sigma1, sigma_delta)
+    kernels = build_kernels(num_kernels, kernel_size, sigma1, sigma_delta)
     above = mask > threshold
     detected = np.zeros(mask.shape, dtype=bool)
     for kernel in kernels:
