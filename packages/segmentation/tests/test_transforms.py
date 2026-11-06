@@ -205,3 +205,55 @@ def test_build_augmentation_all_extras_build_and_run():
     # Spatial extras (shift/rotate, mask co-transform) still keep the mask binary.
     assert set(np.unique(result["mask"]).tolist()) <= {0, 1}
     assert result["image"].shape == (48, 48, 3)
+
+
+def _d4_variant(out: np.ndarray, ref: np.ndarray) -> str:
+    """Name of the flip/rotation of ``ref`` that ``out`` is, or ``"other"``."""
+    for k in range(4):
+        if np.array_equal(out, np.rot90(ref, k)):
+            return f"rot{90 * k}"
+        if np.array_equal(out, np.rot90(ref[:, ::-1], k)):
+            return f"mirror+rot{90 * k}"
+    return "other"
+
+
+def test_build_augmentation_seeded_yields_all_eight_flip_rotation_variants():
+    from deepcontrail.segmentation.config import AugmentationConfig
+    from deepcontrail.segmentation.transforms import build_augmentation
+
+    cfg = AugmentationConfig(horizontal_flip=0.5, vertical_flip=0.5, random_rotate_90=0.5)
+    image = np.arange(64, dtype=np.float32).reshape(8, 8)  # no symmetry: each variant is unique
+    stacked = np.stack([image] * 3, axis=-1)
+    mask = np.zeros((8, 8), dtype=np.uint8)
+    transform = build_augmentation(cfg, seed=42)
+
+    seen = {
+        _d4_variant(transform(image=stacked, mask=mask)["image"][..., 0], image) for _ in range(400)
+    }
+
+    assert seen == {f"{m}rot{a}" for m in ("", "mirror+") for a in (0, 90, 180, 270)}, (
+        f"the two flips must fire independently, so mirrored scenes appear: saw {sorted(seen)}"
+    )
+
+
+def test_seed_augmentation_same_seed_repeats_and_other_seed_differs():
+    from deepcontrail.segmentation.config import AugmentationConfig
+    from deepcontrail.segmentation.transforms import build_augmentation, seed_augmentation
+
+    cfg = AugmentationConfig(horizontal_flip=0.5, vertical_flip=0.5, random_rotate_90=0.5)
+    image = np.stack([np.arange(64, dtype=np.float32).reshape(8, 8)] * 3, axis=-1)
+    mask = np.zeros((8, 8), dtype=np.uint8)
+
+    def stream(seed: int) -> list[np.ndarray]:
+        transform = build_augmentation(cfg, seed=0)
+        seed_augmentation(transform, seed)
+        return [transform(image=image, mask=mask)["image"] for _ in range(20)]
+
+    first, again, other = stream(123), stream(123), stream(124)
+
+    assert all(np.array_equal(a, b) for a, b in zip(first, again, strict=True)), (
+        "the same seed must replay the same augmentations"
+    )
+    assert not all(np.array_equal(a, b) for a, b in zip(first, other, strict=True)), (
+        "another seed must give another augmentation stream"
+    )

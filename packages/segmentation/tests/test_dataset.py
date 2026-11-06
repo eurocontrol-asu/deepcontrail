@@ -911,3 +911,52 @@ def test_init_does_not_warn_when_no_shift_is_recommended(synthetic_root: Path):
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         SegmentationDataset(cfg)
+
+
+def test_dataloader_workers_draw_different_augmentations(tmp_path: Path):
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("albumentations")
+    from torch.utils.data import DataLoader
+
+    from deepcontrail.segmentation.config import AugmentationConfig, SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    from .conftest import write_bands, write_mask, write_metadata
+
+    write_metadata(tmp_path)
+    rng = np.random.RandomState(0)
+    for i in range(16):
+        write_bands(tmp_path / "spectral_bands" / "train" / f"s{i:02d}.npy", rng)
+        write_mask(
+            tmp_path / "semantic_masks" / "train" / f"s{i:02d}.png", np.zeros((16, 16), np.uint8)
+        )
+    base = {"false_color": RECIPE, "root": str(tmp_path), "split": "train"}
+    plain = SegmentationDataset(SegmentationDataConfig(**base, image_size=_SYNTH_SIZE))
+    augmented = SegmentationDataset(
+        SegmentationDataConfig(
+            **base,
+            image_size=_SYNTH_SIZE,
+            augmentation=AugmentationConfig(
+                horizontal_flip=0.5, vertical_flip=0.5, random_rotate_90=0.5
+            ),
+        )
+    )
+
+    def variant(out, ref) -> str:
+        for k in range(4):
+            if torch.equal(out, torch.rot90(ref, k, dims=(1, 2))):
+                return f"rot{90 * k}"
+            if torch.equal(out, torch.rot90(torch.flip(ref, dims=(2,)), k, dims=(1, 2))):
+                return f"mirror+rot{90 * k}"
+        return "other"
+
+    torch.manual_seed(0)
+    loader = DataLoader(augmented, batch_size=1, shuffle=False, num_workers=2)  # type: ignore[arg-type]
+
+    ops = [variant(image[0], plain[i][0]) for i, (image, _) in enumerate(loader)]
+
+    # With batch_size=1 and two workers, even indices come from worker 0 and odd from worker 1.
+    assert "other" not in ops, f"every output is a flip/rotation of its scene: {ops}"
+    assert ops[0::2] != ops[1::2], (
+        f"each worker must draw its own augmentations, not replay the other's: {ops}"
+    )
