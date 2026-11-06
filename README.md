@@ -61,7 +61,7 @@ From a clone (the packages are not on PyPI yet):
 ```bash
 git clone https://github.com/eurocontrol-asu/deepcontrail.git
 cd deepcontrail
-uv sync                    # core + segmentation, with the dev tools and the training scripts' dependencies
+uv sync                    # all packages, the dev tools and the training scripts' dependencies
 uv sync --group convert    # + the OpenContrails converter (TensorFlow)
 ```
 
@@ -74,6 +74,15 @@ pip install \
 ```
 
 `deepcontrail-segmentation[mlflow]` adds the optional MLflow logger.
+
+For instance segmentation, install core with it in the same command (pip does not read the
+workspace sources, so `deepcontrail-core` must be given explicitly):
+
+```bash
+pip install \
+    "deepcontrail-core @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/core" \
+    "deepcontrail-instance[map,scores] @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/instance"
+```
 
 ## Quickstart
 

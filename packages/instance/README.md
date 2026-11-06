@@ -9,8 +9,12 @@ It needs only numpy, scipy, pydantic and PyYAML (no torch) and never imports
 `[map]` (pycocotools) to save detections as COCO results, and `[scores]` (scikit-learn) to train a
 score model.
 
+Install `deepcontrail-core` in the same command: pip does not read the workspace sources.
+
 ```bash
-pip install "deepcontrail-instance[map,scores] @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/instance"
+pip install \
+    "deepcontrail-core @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/core" \
+    "deepcontrail-instance[map,scores] @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/instance"
 ```
 
 ## Usage
@@ -24,8 +28,8 @@ masks, scores = detect_instances_from_probabilities(probs)
 # masks: one boolean (H, W) mask per contrail; scores: confidence in [0, 1]
 ```
 
-The pipeline thresholds the map (at 0.465), splits the mask into straight contrails with the
-Mannstein algorithm, grows each contrail by one pixel into neighbours with probability above
+The pipeline thresholds the map (at 0.465), splits the mask into straight contrails with a
+Mannstein-style detection, grows each contrail by one pixel into neighbours with probability above
 0.371 (annotators draw contrails wider than the thresholded mask), and weights each score by the
 contrail's mean probability. Its settings live in `InstancePipelineConfig`; the defaults equal
 [`configs/instance_pipeline.yaml`](configs/instance_pipeline.yaml), and
@@ -176,6 +180,5 @@ The line filter and the size, length and straightness tests follow Mannstein, Me
 (1999), "Operational detection of contrails from NOAA-AVHRR data", *International Journal of
 Remote Sensing* 20(8), 1641–1660, [doi:10.1080/014311699212650](https://doi.org/10.1080/014311699212650).
 
-The step that separates crossing contrails (region growing that follows each contrail's direction)
-is adapted from the PIE project at ISAE-SUPAERO, carried out with SII Research and EUROCONTROL by
-J. Jault, A. Berrada-Gomez, A. Tonon, A. Maurette, T. Muffang and N. Grimmer.
+The direction-following region growing and the related shape tests build on ideas from a
+student project (PIE) at ISAE-SUPAERO, carried out with EUROCONTROL.
