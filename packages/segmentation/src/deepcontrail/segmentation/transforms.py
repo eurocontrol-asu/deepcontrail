@@ -18,7 +18,10 @@ structures such as contrails. Two separate builders expose those stages:
 
 from __future__ import annotations
 
+import random
+
 import albumentations as A
+import numpy as np
 
 from deepcontrail.segmentation.config import AugmentationConfig  # noqa: TC001
 
@@ -40,7 +43,7 @@ def build_augmentation(config: AugmentationConfig, seed: int) -> A.Compose:
     config
         Probabilities (and transform parameters) for each augmentation.
     seed
-        RNG seed passed to ``A.Compose`` for reproducible augmentation.
+        Seed of the random generators the transforms share (see :func:`seed_augmentation`).
 
     Returns
     -------
@@ -66,7 +69,27 @@ def build_augmentation(config: AugmentationConfig, seed: int) -> A.Compose:
         transforms.append(A.GaussianBlur(blur_limit=config.blur_limit, p=config.gaussian_blur))
     if config.brightness_contrast > 0:
         transforms.append(A.RandomBrightnessContrast(p=config.brightness_contrast))
-    return A.Compose(transforms, seed=seed)  # type: ignore[arg-type]
+    compose = A.Compose(transforms)  # type: ignore[arg-type]
+    seed_augmentation(compose, seed)
+    return compose
+
+
+def seed_augmentation(compose: A.Compose, seed: int) -> None:
+    """Seed an augmentation pipeline with one random stream shared by all its transforms.
+
+    ``A.Compose(..., seed=seed)`` gives every transform its own generator with the *same* seed,
+    so transforms with the same probability fire together: both flips always coincide (a 180°
+    rotation) and mirrored scenes never appear. Sharing one numpy and one Python generator makes
+    the transforms draw independently while staying reproducible.
+
+    Parameters
+    ----------
+    compose
+        Pipeline to seed, in place.
+    seed
+        Seed of the shared generators; any non-negative integer.
+    """
+    compose.set_random_state(np.random.default_rng(seed), random.Random(seed))
 
 
 def build_image_resize(image_size: int) -> A.Resize:

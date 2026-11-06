@@ -72,6 +72,29 @@ class SegmentationDataset:
         self.stems = self._discover_stems()
         self.native_size = self._native_size()
         self._aug_transform, self._resize_transform = self._build_transform()
+        # DataLoader worker the augmentation was last reseeded for (None: main process).
+        self._augmentation_worker: int | None = None
+
+    def _reseed_augmentation_in_worker(self) -> None:
+        """Give each DataLoader worker its own augmentation stream.
+
+        Every worker starts with a copy of the dataset, generators included, so without this
+        all workers would draw the same augmentations. The first item a worker loads reseeds the
+        copy from PyTorch's per-worker seed, which is reproducible under a fixed global seed and
+        changes each epoch unless the workers persist. The main process keeps the
+        configuration's seed.
+        """
+        try:
+            from torch.utils.data import get_worker_info
+        except ImportError:  # without torch there are no DataLoader workers
+            return
+        info = get_worker_info()
+        if info is None or info.id == self._augmentation_worker:
+            return
+        from deepcontrail.segmentation.transforms import seed_augmentation
+
+        seed_augmentation(self._aug_transform, info.seed)  # type: ignore[arg-type]
+        self._augmentation_worker = info.id
 
     def _warn_on_pixel_shift_mismatch(self) -> None:
         """Warn when ``pixel_shift`` differs from the dataset's recommendation."""
@@ -230,6 +253,7 @@ class SegmentationDataset:
         # Augmentation runs at native resolution on BOTH image and mask so they
         # stay aligned and the mask is never upscaled by interpolation.
         if self._aug_transform is not None:
+            self._reseed_augmentation_in_worker()
             transformed = self._aug_transform(image=image, mask=mask)
             image = transformed["image"]
             mask = transformed["mask"]
