@@ -1,8 +1,12 @@
-"""Top-level Mannstein instance-segmentation pipeline.
+"""Top-level Mannstein-style instance-segmentation pipeline.
 
 Public entry point that threads the private line-filter, segmentation, scoring and
 deduplication modules together into ``detect_instances`` (binary mask in; masks and scores
 out). Probability maps go through ``detect_instances_from_probabilities``.
+
+The detection criteria follow Mannstein, Meyer & Wendling (1999), "Operational detection of
+contrails from NOAA-AVHRR data", Int. J. Remote Sensing 20(8), 1641-1660,
+doi:10.1080/014311699212650.
 """
 
 from __future__ import annotations

@@ -82,3 +82,33 @@ def test_pyright_checks_every_package_source_tree():
     assert include == expected, (
         "pyright must list each package's src/ explicitly: glob patterns matched no files"
     )
+
+
+@pytest.mark.parametrize("member", MEMBERS, ids=lambda m: m.name)
+def test_member_ships_a_py_typed_marker(member: Path):
+    module = _project(member)["tool"]["uv"]["build-backend"]["module-name"]
+    package_dir = member / "src" / Path(*module.split("."))
+
+    assert (package_dir / "py.typed").is_file(), (
+        "PEP 561: without py.typed, users' type checkers ignore the package's annotations"
+    )
+
+
+def test_tracked_configs_hold_no_machine_specific_paths():
+    configs = [
+        p
+        for p in ROOT.rglob("*.yaml")
+        if not any(
+            part.startswith(".") or part in {"node_modules"} for part in p.relative_to(ROOT).parts
+        )
+        and "/tests/" not in str(p)
+    ]
+
+    offending = [
+        str(p.relative_to(ROOT))
+        for p in configs
+        if any(marker in p.read_text(encoding="utf-8") for marker in ("/data/", "/home/"))
+    ]
+
+    assert configs, "the repository ships example configs"
+    assert offending == [], f"configs must not point at one machine's paths: {offending}"
