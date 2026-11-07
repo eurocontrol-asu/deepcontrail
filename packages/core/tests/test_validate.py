@@ -353,3 +353,75 @@ def test_cli_exits_non_zero_and_lists_issues(tmp_path: Path, capsys: pytest.Capt
 
     assert code == 1
     assert "semantic_masks/train/12.png" in capsys.readouterr().out
+
+
+def test_validate_dataset_reports_an_id_present_in_both_splits(tmp_path: Path):
+    root = _make_root(tmp_path)
+    # Copy train scene "11" to test with the same id
+    (root / "spectral_bands" / "test" / "11.npy").write_bytes(
+        (root / "spectral_bands" / "train" / "11.npy").read_bytes()
+    )
+    for label_dir in ("semantic_masks", "probability_masks", "annotator_masks", "instance_masks"):
+        ext = ".png" if label_dir == "semantic_masks" else ".npy"
+        src = root / label_dir / "train" / f"11{ext}"
+        if src.exists():
+            (root / label_dir / "test" / f"11{ext}").write_bytes(src.read_bytes())
+    _write_metadata(
+        root, {"train": 2, "test": 2}, ["semantic", "probability", "annotator", "instance"]
+    )
+
+    report = _validate(root)
+
+    assert "duplicate-id" in _rules(report), (
+        "id present in both train/ and test/ is train/test leakage"
+    )
+    issues = [i for i in report.issues if i.rule == "duplicate-id"]  # type: ignore[attr-defined]
+    assert len(issues) == 1
+    assert "11" in issues[0].message
+
+
+def test_validate_dataset_reports_a_labelled_id_with_the_reserved_suffix(tmp_path: Path):
+    root = _make_root(tmp_path)
+    # Create a labelled scene with reserved suffix _a1
+    rng = np.random.RandomState(0)
+    stem = "scene_a1"
+    split = "train"
+    bands = rng.uniform(230, 300, (*SIZE, len(KEYS))).astype(np.float32)
+    np.save(root / "spectral_bands" / split / f"{stem}.npy", bands)
+    mask = rng.choice([0, 255], size=SIZE).astype(np.uint8)
+    Image.fromarray(mask, mode="L").save(root / "semantic_masks" / split / f"{stem}.png")
+    _write_metadata(root, {"train": 3, "test": 1}, ["semantic"])
+
+    report = _validate(root)
+
+    assert "reserved-suffix" in _rules(report), (
+        "ids ending in _a<k>/_b<k> are reserved for context frames"
+    )
+    # Should NOT report orphan-label for this file
+    orphan_issues = [i for i in report.issues if i.rule == "orphan-label" and stem in i.path]  # type: ignore[attr-defined]
+    assert len(orphan_issues) == 0, "should report reserved-suffix, not orphan-label"
+    reserved_issues = [i for i in report.issues if i.rule == "reserved-suffix"]  # type: ignore[attr-defined]
+    assert len(reserved_issues) >= 1
+    assert (
+        stem in reserved_issues[0].message
+        or "_a" in reserved_issues[0].message
+        or "_b" in reserved_issues[0].message
+    )
+
+
+def test_validate_dataset_reports_metadata_that_is_not_utf8(tmp_path: Path):
+    root = _make_root(tmp_path)
+    # Write a dataset_info.json with non-UTF-8 bytes (Latin-1 encoded café)
+    (root / "metadata" / "dataset_info.json").write_bytes(
+        b'{"format_version": 1, "source": "caf\xe9", "records": {"train": 2, "test": 1}, "labels": ["semantic"], "recommended_pixel_shift": 0.0}'
+    )
+
+    report = _validate(root)
+
+    assert "metadata" in _rules(report), "non-UTF-8 metadata should be reported as a metadata issue"
+    issue = next(i for i in report.issues if i.rule == "metadata")  # type: ignore[attr-defined]
+    assert (
+        "UTF-8" in issue.message
+        or "utf-8" in issue.message
+        or "UnicodeDecodeError" in issue.message
+    )

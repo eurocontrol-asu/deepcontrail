@@ -84,6 +84,6 @@ class DatasetConfig(BaseModel):
     @classmethod
     def from_yaml(cls, path: str | Path) -> Self:
         """Load a config from the ``data:`` section of a YAML file."""
-        with Path(path).open() as f:
+        with Path(path).open(encoding="utf-8") as f:
             raw = yaml.safe_load(f)
         return cls.model_validate(raw["data"])

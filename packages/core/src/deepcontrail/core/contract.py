@@ -150,7 +150,10 @@ def _read(root: str | Path, relative: str, schema: type[_Schema]) -> _Schema:
         msg = f"{path}: missing; every dataset root needs {relative} (DeepContrail format v1)"
         raise DatasetContractError(msg)
     try:
-        payload = json.loads(path.read_text())
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except UnicodeDecodeError as exc:
+        msg = f"{path}: must be UTF-8 encoded ({exc})"
+        raise DatasetContractError(msg) from exc
     except json.JSONDecodeError as exc:
         msg = f"{path}: not valid JSON ({exc})"
         raise DatasetContractError(msg) from exc

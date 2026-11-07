@@ -29,10 +29,13 @@ the [converter](../../tools/opencontrails) does.
   the sorted ids are shuffled with the seed and the first `val_fraction` go to validation (or
   k-fold with `fold` / `num_folds`). Training runs record the exact lists and their fingerprints.
 - **Ids** are unique across splits. Unlabelled neighbouring time steps of a scene may be stored
-  as `<id>_b<k>.npy` / `<id>_a<k>.npy` (k steps before / after); they need no labels.
+  as `<id>_b<k>.npy` / `<id>_a<k>.npy` (k steps before / after); they need no labels. Labelled
+  scene ids must not end in `_a<k>` or `_b<k>` (reserved for context frames).
 - **Labels** are only required for the task at hand: `semantic` for segmentation, `instance`
   for instance segmentation. Every label kind declared in `dataset_info.json` must cover every
   labelled scene, at the size of its spectral array.
+
+All JSON and text files (`bands.json`, `dataset_info.json`, `splits_*.txt`) must be UTF-8 encoded.
 
 ### `spectral_bands/bands.json`
 

@@ -140,6 +140,15 @@ def validate_dataset(
         issues.append(Issue(DATASET_INFO_PATH, "task-labels", msg))
 
     scenes_by_split = {split: _labelled_scenes(root, split) for split in SPLITS}
+
+    # Check for duplicate ids across splits (train/test leakage)
+    train_ids = set(scenes_by_split.get("train", []))
+    test_ids = set(scenes_by_split.get("test", []))
+    duplicates = sorted(train_ids & test_ids)
+    for dup_id in duplicates:
+        msg = f"id {dup_id!r} is present in both train/ and test/ (train/test leakage)"
+        issues.append(Issue(f"spectral_bands/*/{dup_id}.npy", "duplicate-id", msg))
+
     for split, scenes in scenes_by_split.items():
         issues += _check_split_files(root, split, scenes, info)
 
@@ -182,11 +191,19 @@ def _check_split_files(root: Path, split: str, scenes: list[str], info: DatasetI
                 msg = f"labelled scene {stem} has no {label} label"
                 issues.append(Issue(f"{directory}/{split}/{stem}{ext}", "missing-label", msg))
         for stem in sorted(present - scene_set):
-            msg = f"no spectral_bands/{split}/{stem}.npy for this {label} label"
-            issues.append(Issue(f"{directory}/{split}/{stem}{ext}", "orphan-label", msg))
+            # Check if the label has a reserved suffix (context-frame suffix on a labelled file)
+            if is_sequence_stem(stem):
+                msg = (
+                    "ids ending in _a<k> or _b<k> are reserved for context frames; "
+                    "rename this scene"
+                )
+                issues.append(Issue(f"{directory}/{split}/{stem}{ext}", "reserved-suffix", msg))
+            else:
+                msg = f"no spectral_bands/{split}/{stem}.npy for this {label} label"
+                issues.append(Issue(f"{directory}/{split}/{stem}{ext}", "orphan-label", msg))
 
     split_list = root / f"splits_{split}.txt"
-    if split_list.is_file() and sorted(split_list.read_text().split()) != scenes:
+    if split_list.is_file() and sorted(split_list.read_text(encoding="utf-8").split()) != scenes:
         msg = f"does not list the {len(scenes)} labelled scenes of spectral_bands/{split}/"
         issues.append(Issue(split_list.name, "split-list", msg))
     return issues
