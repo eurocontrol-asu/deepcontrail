@@ -519,3 +519,26 @@ def test_metadata_only_without_split_lists_fails_clearly(tmp_path: Path):
 
     with pytest.raises(FileNotFoundError, match=r"splits_test\.txt"):
         main(["--metadata-only", "--output-dir", str(root)])
+
+
+def test_format_from_disk_keeps_the_declared_temporal_value(tmp_path: Path):
+    import json
+
+    from deepcontrail.opencontrails.convert import _format_from_disk
+
+    root = _converted_root(tmp_path)
+    # A single-frame record whose id merely looks like a context frame of record 11.
+    np.save(tmp_path / "spectral_bands" / "train" / "11_a1.npy", np.zeros((2, 2, 10), np.float32))
+    info = {
+        "format_version": 1,
+        "source": "OpenContrails GOES-16 ABI TFRecords",
+        "records": {"train": 2, "test": 1},
+        "labels": ["semantic", "probability", "instance"],
+        "recommended_pixel_shift": 0.0,
+        "temporal": False,
+    }
+    (root / "metadata" / "dataset_info.json").write_text(json.dumps(info), encoding="utf-8")
+
+    fmt = _format_from_disk(root)
+
+    assert fmt.is_temporal is False, "a declared temporal value is kept, not guessed from names"

@@ -183,3 +183,44 @@ def test_dice_coefficient_on_numpy_arrays_does_not_import_torch():
     assert result.stdout.strip() == "False", (
         "metrics on numpy input must work where torch is not installed (deepcontrail-core)"
     )
+
+
+def test_dice_coefficient_rejects_masks_with_values_other_than_0_and_1():
+    from deepcontrail.core.metrics import dice_coefficient
+
+    pred = np.array([0, 1, 255, 0])  # on-disk {0, 255} instead of binary {0, 1}
+    target = np.array([0, 1, 1, 0])
+
+    with pytest.raises(ValueError, match=r"0.*1"):
+        dice_coefficient(pred, target)
+
+
+def test_dice_coefficient_rejects_inputs_of_different_sizes():
+    from deepcontrail.core.metrics import dice_coefficient
+
+    pred = np.array([0, 1, 1])
+    target = np.array([0, 1, 1, 0])
+
+    with pytest.raises(ValueError, match=r"elements"):
+        dice_coefficient(pred, target)
+
+
+def test_iou_score_rejects_masks_with_values_other_than_0_and_1():
+    from deepcontrail.core.metrics import iou_score
+
+    pred = np.array([0, 1, 128, 0])
+    target = np.array([0, 1, 1, 0])
+
+    with pytest.raises(ValueError, match=r"0.*1"):
+        iou_score(pred, target)
+
+
+def test_dice_coefficient_accepts_boolean_masks():
+    from deepcontrail.core.metrics import dice_coefficient
+
+    pred = np.array([True, True, False, False])
+    target = np.array([True, True, False, False])
+
+    score = dice_coefficient(pred, target)
+
+    assert score == pytest.approx(1.0, abs=1e-5), "boolean masks are valid binary {0, 1}"

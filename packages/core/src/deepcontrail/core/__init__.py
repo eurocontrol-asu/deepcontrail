@@ -19,7 +19,7 @@ from deepcontrail.core.false_color import (
     load_spectral_false_color,
 )
 from deepcontrail.core.metrics import dice_coefficient, iou_score
-from deepcontrail.core.splits import is_sequence_stem, partition_stems, split_fingerprint
+from deepcontrail.core.splits import context_frames, partition_stems, split_fingerprint
 from deepcontrail.core.validate import Issue, ValidationReport, validate_dataset
 
 __version__ = version("deepcontrail-core")
@@ -36,10 +36,10 @@ __all__ = [
     "ValidationReport",
     "__version__",
     "check_false_color",
+    "context_frames",
     "dice_coefficient",
     "false_color_from_spectral",
     "iou_score",
-    "is_sequence_stem",
     "load_spectral_false_color",
     "partition_stems",
     "read_band_manifest",

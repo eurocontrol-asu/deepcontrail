@@ -35,7 +35,7 @@ from deepcontrail.core.contract import (
     read_dataset_info,
 )
 from deepcontrail.core.readers import instance_mask_problem
-from deepcontrail.core.splits import is_sequence_stem
+from deepcontrail.core.splits import context_frames
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -139,7 +139,16 @@ def validate_dataset(
         msg = f"task {task!r} needs labels {missing}; dataset declares {list(info.labels)}"
         issues.append(Issue(DATASET_INFO_PATH, "task-labels", msg))
 
-    scenes_by_split = {split: _labelled_scenes(root, split) for split in SPLITS}
+    scenes_by_split = {split: _labelled_scenes(root, split, info.temporal) for split in SPLITS}
+
+    # Check for duplicate ids across splits (train/test leakage)
+    train_ids = set(scenes_by_split.get("train", []))
+    test_ids = set(scenes_by_split.get("test", []))
+    duplicates = sorted(train_ids & test_ids)
+    for dup_id in duplicates:
+        msg = f"id {dup_id!r} is present in both train/ and test/ (train/test leakage)"
+        issues.append(Issue(f"spectral_bands/*/{dup_id}.npy", "duplicate-id", msg))
+
     for split, scenes in scenes_by_split.items():
         issues += _check_split_files(root, split, scenes, info)
 
@@ -160,10 +169,10 @@ def _read_metadata(
         return None
 
 
-def _labelled_scenes(root: Path, split: str) -> list[str]:
-    """Stems of ``spectral_bands/{split}/*.npy``, context frames excluded."""
-    paths = (root / "spectral_bands" / split).glob("*.npy")
-    return sorted(p.stem for p in paths if not is_sequence_stem(p.stem))
+def _labelled_scenes(root: Path, split: str, temporal: bool | None) -> list[str]:
+    """Stems of ``spectral_bands/{split}/*.npy``, the declared context frames excluded."""
+    stems = [p.stem for p in (root / "spectral_bands" / split).glob("*.npy")]
+    return sorted(set(stems) - context_frames(stems, temporal=temporal))
 
 
 def _check_split_files(root: Path, split: str, scenes: list[str], info: DatasetInfo) -> list[Issue]:
@@ -186,7 +195,7 @@ def _check_split_files(root: Path, split: str, scenes: list[str], info: DatasetI
             issues.append(Issue(f"{directory}/{split}/{stem}{ext}", "orphan-label", msg))
 
     split_list = root / f"splits_{split}.txt"
-    if split_list.is_file() and sorted(split_list.read_text().split()) != scenes:
+    if split_list.is_file() and sorted(split_list.read_text(encoding="utf-8").split()) != scenes:
         msg = f"does not list the {len(scenes)} labelled scenes of spectral_bands/{split}/"
         issues.append(Issue(split_list.name, "split-list", msg))
     return issues

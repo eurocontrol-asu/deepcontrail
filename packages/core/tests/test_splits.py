@@ -95,18 +95,30 @@ def test_partition_stems_fold_takes_precedence_over_val_fraction():
     assert val == stems[0::3], "val_fraction must be ignored when fold is set"
 
 
-@pytest.mark.parametrize("stem", ["123_b4", "123_a1", "x_a10"])
-def test_is_sequence_stem_flags_context_frames(stem: str):
-    from deepcontrail.core.splits import is_sequence_stem
+@pytest.mark.parametrize("temporal", [False, None])
+def test_context_frames_are_none_unless_the_dataset_declares_them(temporal):
+    from deepcontrail.core.splits import context_frames
 
-    assert is_sequence_stem(stem), f"{stem} is a context frame"
+    frames = context_frames(["tile_a1", "site_b2", "123", "123_b4"], temporal=temporal)
+
+    assert frames == set(), "without declared context frames every id is a scene, as named"
 
 
-@pytest.mark.parametrize("stem", ["123", "train_000001", "a_b", "123_c1"])
-def test_is_sequence_stem_accepts_labelled_stems(stem: str):
-    from deepcontrail.core.splits import is_sequence_stem
+def test_context_frames_of_a_temporal_dataset_are_suffixed_neighbours_of_a_scene():
+    from deepcontrail.core.splits import context_frames
 
-    assert not is_sequence_stem(stem), f"{stem} is a labelled scene"
+    frames = context_frames(["123", "123_b4", "123_b1", "123_a1", "x_a10", "x"], temporal=True)
+
+    assert frames == {"123_b4", "123_b1", "123_a1", "x_a10"}
+
+
+@pytest.mark.parametrize("stem", ["tile_a1", "a_b", "123_c1", "train_000001"])
+def test_context_frames_need_their_scene(stem):
+    from deepcontrail.core.splits import context_frames
+
+    frames = context_frames([stem], temporal=True)
+
+    assert frames == set(), f"{stem} has no scene it could be a context frame of, so it is a scene"
 
 
 def test_split_fingerprint_ignores_order():
