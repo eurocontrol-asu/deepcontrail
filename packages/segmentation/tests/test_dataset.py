@@ -87,11 +87,68 @@ def test_init_raises_on_missing_mask(synthetic_root_missing_mask: Path):
         SegmentationDataset(cfg)
 
 
+def _declare_temporal(root: Path, temporal: bool) -> None:
+    """Set ``temporal`` in the dataset's ``metadata/dataset_info.json``."""
+    import json
+
+    path = root / "metadata" / "dataset_info.json"
+    info = json.loads(path.read_text(encoding="utf-8"))
+    info["temporal"] = temporal
+    path.write_text(json.dumps(info), encoding="utf-8")
+
+
+def _add_scene(root: Path, stem: str, *, with_mask: bool) -> None:
+    from .conftest import write_bands, write_mask
+
+    write_bands(root / "spectral_bands" / "train" / f"{stem}.npy", np.random.RandomState(3))
+    if with_mask:
+        mask = np.zeros((_SYNTH_SIZE, _SYNTH_SIZE), np.uint8)
+        write_mask(root / "semantic_masks" / "train" / f"{stem}.png", mask)
+
+
+def test_init_loads_suffix_like_ids_when_no_context_frames_are_declared(synthetic_root: Path):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    for stem in ("tile_a1", "site_b2"):
+        _add_scene(synthetic_root, stem, with_mask=True)
+
+    stems = [
+        stem
+        for split in ("train", "val")
+        for stem in SegmentationDataset(
+            SegmentationDataConfig(false_color=RECIPE, root=str(synthetic_root), split=split)
+        ).stems
+    ]
+
+    assert {"tile_a1", "site_b2"} <= set(stems), (
+        f"single-frame data may use any id, _a1/_b2 endings included: {stems}"
+    )
+
+
+@pytest.mark.parametrize("temporal", [False, True])
+def test_init_reports_a_missing_mask_for_an_id_that_is_no_context_frame(
+    synthetic_root: Path, temporal: bool
+):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    _declare_temporal(synthetic_root, temporal)
+    _add_scene(synthetic_root, "tile_a1", with_mask=False)  # no scene "tile": never a context frame
+
+    with pytest.raises(ValueError, match="tile_a1"):
+        SegmentationDataset(
+            SegmentationDataConfig(false_color=RECIPE, root=str(synthetic_root), split="train")
+        )
+
+
 def test_init_skips_sequence_files_without_masks(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
     from deepcontrail.segmentation.dataset import SegmentationDataset
 
-    # Context frames of train_000001 (no masks) next to the labelled scenes.
+    # Context frames of train_000001 (no masks) next to the labelled scenes, in a dataset
+    # that declares context frames.
+    _declare_temporal(synthetic_root, True)
     for stem in ["train_000001_a1", "train_000001_a2", "train_000001_b1"]:
         frame = np.zeros((_SYNTH_SIZE, _SYNTH_SIZE, 3), dtype=np.float32)
         np.save(synthetic_root / "spectral_bands" / "train" / f"{stem}.npy", frame)

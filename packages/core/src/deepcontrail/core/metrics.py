@@ -26,27 +26,48 @@ def _to_numpy(x: object) -> np.ndarray:
     return np.asarray(x, dtype=np.float32).ravel()
 
 
+def _check_binary_pair(pred: np.ndarray, target: np.ndarray) -> None:
+    """Raise ``ValueError`` unless both masks have the same size and hold only 0 and 1."""
+    if pred.size != target.size:
+        msg = f"inputs must have the same number of elements; got {pred.size} and {target.size}"
+        raise ValueError(msg)
+    for name, values in (("pred", pred), ("target", target)):
+        # Elementwise test: no sort, so cheap on whole validation sets.
+        if not ((values == 0) | (values == 1)).all():
+            bad = values[(values != 0) & (values != 1)]
+            msg = f"{name} must contain only 0 and 1, got e.g. {bad[:5].tolist()}"
+            raise ValueError(msg)
+
+
 def dice_coefficient(pred: ArrayLike, target: ArrayLike, smooth: float = 1e-6) -> float:
     """Compute the Dice coefficient between binary masks.
 
     Parameters
     ----------
     pred
-        Predicted binary mask (values in {0, 1}). Any shape.
+        Predicted binary mask (values in {0, 1}, boolean accepted). Any shape.
     target
-        Ground-truth binary mask (values in {0, 1}). Same number of elements
-        as ``pred``.
+        Ground-truth binary mask (values in {0, 1}, boolean accepted). Same number
+        of elements as ``pred``.
     smooth
         Smoothing constant to avoid division by zero.
 
     Returns
     -------
     float
-        Dice coefficient in [0, 1]. Returns 1.0 when both masks are empty
-        (all zeros).
+        Dice coefficient in [0, 1], pooled over all elements (one global score,
+        not a per-image mean). Returns 1.0 when both masks are empty (all zeros).
+
+    Raises
+    ------
+    ValueError
+        If ``pred`` and ``target`` have different numbers of elements, or if either
+        contains values outside {0, 1}.
     """
     pred_flat = _to_numpy(pred)
     target_flat = _to_numpy(target)
+
+    _check_binary_pair(pred_flat, target_flat)
 
     if pred_flat.sum() == 0 and target_flat.sum() == 0:
         return 1.0
@@ -61,19 +82,28 @@ def iou_score(pred: ArrayLike, target: ArrayLike, smooth: float = 1e-6) -> float
     Parameters
     ----------
     pred
-        Predicted binary mask (values in {0, 1}).
+        Predicted binary mask (values in {0, 1}, boolean accepted).
     target
-        Ground-truth binary mask (values in {0, 1}).
+        Ground-truth binary mask (values in {0, 1}, boolean accepted).
     smooth
         Smoothing constant.
 
     Returns
     -------
     float
-        IoU score in [0, 1]. Returns 1.0 when both masks are empty.
+        IoU score in [0, 1], pooled over all elements (one global score, not a
+        per-image mean). Returns 1.0 when both masks are empty (all zeros).
+
+    Raises
+    ------
+    ValueError
+        If ``pred`` and ``target`` have different numbers of elements, or if either
+        contains values outside {0, 1}.
     """
     pred_flat = _to_numpy(pred)
     target_flat = _to_numpy(target)
+
+    _check_binary_pair(pred_flat, target_flat)
 
     if pred_flat.sum() == 0 and target_flat.sum() == 0:
         return 1.0

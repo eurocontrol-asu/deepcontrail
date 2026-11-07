@@ -4,16 +4,46 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
-_SEQUENCE_SUFFIX = re.compile(r"_[ab]\d+$")
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+# ``<scene>_b<k>`` / ``<scene>_a<k>``: frame k steps before / after a scene, in temporal datasets.
+_CONTEXT_FRAME = re.compile(r"(?P<scene>.+)_[ab]\d+")
 
 
-def is_sequence_stem(stem: str) -> bool:
-    """Return True if the stem has a temporal sequence suffix (e.g. ``_a1``, ``_b3``)."""
-    return _SEQUENCE_SUFFIX.search(stem) is not None
+def context_frames(stems: Iterable[str], *, temporal: bool | None) -> set[str]:
+    """Return the stems that are context frames rather than scenes.
+
+    Context frames exist only in datasets that declare them (``temporal: true`` in
+    ``metadata/dataset_info.json``). There, a stem is a context frame when it is
+    ``<scene>_b<k>`` or ``<scene>_a<k>`` for a scene present among ``stems``; any other stem
+    is a scene. Otherwise every stem is a scene and its id is used as written, so ids such
+    as ``tile_a1`` are ordinary scenes.
+
+    Parameters
+    ----------
+    stems
+        File stems of one split (``spectral_bands/<split>/*.npy``).
+    temporal
+        The dataset's ``temporal`` field; ``None`` (not declared) means no context frames.
+
+    Returns
+    -------
+    set[str]
+        The stems that are context frames.
+    """
+    if not temporal:
+        return set()
+    present = set(stems)
+    return {
+        stem
+        for stem in present
+        if (match := _CONTEXT_FRAME.fullmatch(stem)) and match["scene"] in present
+    }
 
 
 def partition_stems(

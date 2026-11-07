@@ -199,6 +199,38 @@ def test_shift_image_float32_zero_is_identity():
     np.testing.assert_array_equal(result, image, err_msg="zero shift must be identity for float32")
 
 
+def test_shift_image_by_one_pixel_moves_content_right_and_down():
+    from deepcontrail.core.readers import shift_image
+
+    # Single bright pixel at (2, 2) in a float image
+    image = np.zeros((5, 5, 3), dtype=np.float32)
+    image[2, 2, :] = 1.0
+
+    result = shift_image(image, 1.0)
+
+    # After shifting by 1 pixel right and down, the bright pixel should move to (3, 3)
+    assert result[3, 3, 0] > 0.9, "shift of 1.0 moves content right and down by 1 pixel"
+    assert result[2, 2, 0] < 0.1, "original position should be near zero after shift"
+
+
+def test_shift_image_by_half_a_pixel_spreads_a_quarter_into_four_pixels():
+    from deepcontrail.core.readers import shift_image
+
+    # Single bright pixel at (2, 2) in a float image
+    image = np.zeros((5, 5, 3), dtype=np.float32)
+    image[2, 2, 0] = 1.0
+
+    result = shift_image(image, 0.5)
+
+    # After shifting by 0.5 pixels right and down, the intensity spreads into four pixels
+    # Bilinear interpolation: 0.25 into each of (2,2), (2,3), (3,2), (3,3)
+    assert 0.2 < result[2, 2, 0] < 0.3, "quarter of intensity at (2,2)"
+    assert 0.2 < result[2, 3, 0] < 0.3, "quarter of intensity at (2,3)"
+    assert 0.2 < result[3, 2, 0] < 0.3, "quarter of intensity at (3,2)"
+    assert 0.2 < result[3, 3, 0] < 0.3, "quarter of intensity at (3,3)"
+    assert result[1, 1, 0] < 0.01, "no intensity should leak to (1,1)"
+
+
 def test_to_numpy_accepts_float32_image():
     from deepcontrail.core.readers import to_numpy
 

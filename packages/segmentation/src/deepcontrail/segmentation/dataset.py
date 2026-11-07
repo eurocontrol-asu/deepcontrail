@@ -23,7 +23,7 @@ from deepcontrail.core.readers import (
     to_numpy,
     validate_binary_mask,
 )
-from deepcontrail.core.splits import is_sequence_stem, partition_stems
+from deepcontrail.core.splits import context_frames, partition_stems
 from deepcontrail.segmentation.tensors import to_tensors, to_tensors_soft
 
 if TYPE_CHECKING:
@@ -141,21 +141,22 @@ class SegmentationDataset:
     def _scan_stems(self, image_dir: Path, mask_dir: Path) -> list[str]:
         """Scan ``image_dir`` for paired images/masks, return sorted stems.
 
-        Checks that each image has a matching mask file.  For deeper
-        validation (corruption, sizes, mask values), run
-        ``deepcontrail-validate <root> --deep`` on the dataset root.
+        Checks that each image has a matching mask file; only the context frames of a dataset
+        that declares them (``temporal: true``) may have none. For deeper validation
+        (corruption, sizes, mask values), run ``deepcontrail-validate <root> --deep`` on the
+        dataset root.
         """
         mask_ext = ".npy" if self.config.mask_type == "probability" else ".png"
-        image_paths = sorted(image_dir.glob("*.npy"))
+        image_stems = [p.stem for p in sorted(image_dir.glob("*.npy"))]
+        context = context_frames(image_stems, temporal=read_dataset_info(self._root).temporal)
         stems: list[str] = []
         missing: list[str] = []
 
-        for img_path in image_paths:
-            stem = img_path.stem
+        for stem in image_stems:
             mask_path = mask_dir / f"{stem}{mask_ext}"
             if mask_path.exists():
                 stems.append(stem)
-            elif not is_sequence_stem(stem):
+            elif stem not in context:
                 missing.append(f"{stem}: no mask (expected {mask_path})")
 
         if missing:

@@ -127,8 +127,11 @@ class DatasetInfo(BaseModel):
     recommended_pixel_shift
         Shift in pixels (right and down) that aligns the images with the masks;
         ``0.0`` when they are aligned, ``None`` when unknown.
-    temporal, export, naming, pixel_shift_note
-        Informational.
+    temporal
+        Whether the dataset stores context frames, ``<id>_b<k>`` / ``<id>_a<k>`` next to scene
+        ``<id>`` (see :func:`deepcontrail.core.splits.context_frames`); ``None`` means no.
+    export, naming, pixel_shift_note
+        Provenance notes for people; not read by the library.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -150,7 +153,10 @@ def _read(root: str | Path, relative: str, schema: type[_Schema]) -> _Schema:
         msg = f"{path}: missing; every dataset root needs {relative} (DeepContrail format v1)"
         raise DatasetContractError(msg)
     try:
-        payload = json.loads(path.read_text())
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except UnicodeDecodeError as exc:
+        msg = f"{path}: must be UTF-8 encoded ({exc})"
+        raise DatasetContractError(msg) from exc
     except json.JSONDecodeError as exc:
         msg = f"{path}: not valid JSON ({exc})"
         raise DatasetContractError(msg) from exc
