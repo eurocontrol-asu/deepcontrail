@@ -28,9 +28,12 @@ the [converter](../../tools/opencontrails) does.
 - **Splits.** `test/` is a holdout. The validation set is drawn from `train/` at load time:
   the sorted ids are shuffled with the seed and the first `val_fraction` go to validation (or
   k-fold with `fold` / `num_folds`). Training runs record the exact lists and their fingerprints.
-- **Ids** are unique across splits. Unlabelled neighbouring time steps of a scene may be stored
-  as `<id>_b<k>.npy` / `<id>_a<k>.npy` (k steps before / after); they need no labels. Labelled
-  scene ids must not end in `_a<k>` or `_b<k>` (reserved for context frames).
+- **Ids** are unique across splits and used as written: any file name is a valid id.
+- **Context frames** (unlabelled neighbouring time steps of a scene) exist only in a dataset
+  that declares `"temporal": true` in `dataset_info.json`. There, `<id>_b<k>.npy` /
+  `<id>_a<k>.npy` (k steps before / after scene `<id>`, which must exist) are context frames
+  and need no labels. In any other dataset every file is a scene, so an id such as `tile_a1`
+  is an ordinary scene.
 - **Labels** are only required for the task at hand: `semantic` for segmentation, `instance`
   for instance segmentation. Every label kind declared in `dataset_info.json` must cover every
   labelled scene, at the size of its spectral array.
@@ -71,6 +74,13 @@ sensor declares its own keys (for example `ir_105`, `ir_123` for MTG FCI).
 `recommended_pixel_shift` is the shift (pixels, right and down) that aligns the images with the
 masks, or `null` if unknown. The data config's `pixel_shift` should use it; a dataset warns when
 they differ.
+
+Optional fields:
+- `temporal` (`true`/`false`): whether the dataset stores context frames (see **Context
+  frames** above). Absent means `false`.
+- `export`, `naming`, `pixel_shift_note`: provenance notes for people (for OpenContrails: the
+  export date, how files are named, why the shift is what it is); the library does not read
+  them.
 
 Read both with `read_band_manifest(root)` and `read_dataset_info(root)`; a missing or invalid file
 raises `DatasetContractError` naming the file.

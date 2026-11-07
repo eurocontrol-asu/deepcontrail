@@ -65,15 +65,17 @@ from deepcontrail.core.contract import (
     DATASET_INFO_PATH,
     BandChannel,
     BandManifest,
+    DatasetContractError,
     DatasetInfo,
     Label,
+    read_dataset_info,
 )
 from deepcontrail.core.false_color import (
     FalseColorChannel,
     FalseColorConfig,
     false_color_from_spectral,
 )
-from deepcontrail.core.splits import is_sequence_stem
+from deepcontrail.core.splits import context_frames
 from deepcontrail.opencontrails.bands import SPECTRAL_BAND_INFO, SPECTRAL_BAND_KEYS
 
 if TYPE_CHECKING:
@@ -498,12 +500,26 @@ def _labels_on_disk(output_dir: Path) -> tuple[Label, ...]:
 
 
 def _format_from_disk(output_dir: Path) -> FormatInfo:
-    """Detect the export flavour from an already converted dataset (no TFRecords needed)."""
-    is_temporal = any(
-        is_sequence_stem(path.stem)
-        for split in _SPLITS
-        for path in (output_dir / "spectral_bands" / split).glob("*.npy")
-    )
+    """Detect the export flavour from an already converted dataset (no TFRecords needed).
+
+    A ``temporal`` value already declared in ``metadata/dataset_info.json`` is kept. Only a
+    dataset without valid metadata (e.g. converted before format v1) is inspected: it is
+    temporal when some file is a context frame (``<id>_b<k>`` / ``<id>_a<k>``) of a record.
+    """
+    try:
+        declared = read_dataset_info(output_dir).temporal
+    except DatasetContractError:
+        declared = None
+    if declared is not None:
+        is_temporal = declared
+    else:
+        is_temporal = any(
+            context_frames(
+                [p.stem for p in (output_dir / "spectral_bands" / split).glob("*.npy")],
+                temporal=True,
+            )
+            for split in _SPLITS
+        )
     return FormatInfo(
         is_temporal=is_temporal, has_instance_masks="instance" in _labels_on_disk(output_dir)
     )

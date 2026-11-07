@@ -127,8 +127,11 @@ class DatasetInfo(BaseModel):
     recommended_pixel_shift
         Shift in pixels (right and down) that aligns the images with the masks;
         ``0.0`` when they are aligned, ``None`` when unknown.
-    temporal, export, naming, pixel_shift_note
-        Informational.
+    temporal
+        Whether the dataset stores context frames, ``<id>_b<k>`` / ``<id>_a<k>`` next to scene
+        ``<id>`` (see :func:`deepcontrail.core.splits.context_frames`); ``None`` means no.
+    export, naming, pixel_shift_note
+        Provenance notes for people; not read by the library.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

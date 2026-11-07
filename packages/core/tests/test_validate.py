@@ -16,7 +16,9 @@ KEYS = ("ir_87", "ir_105", "ir_123")
 SIZE = (8, 8)
 
 
-def _write_metadata(root: Path, records: dict[str, int], labels: list[str]) -> None:
+def _write_metadata(
+    root: Path, records: dict[str, int], labels: list[str], temporal: bool | None = None
+) -> None:
     (root / "spectral_bands").mkdir(parents=True, exist_ok=True)
     (root / "spectral_bands" / "bands.json").write_text(
         json.dumps(
@@ -37,13 +39,14 @@ def _write_metadata(root: Path, records: dict[str, int], labels: list[str]) -> N
                 "records": records,
                 "labels": labels,
                 "recommended_pixel_shift": 0.0,
+                **({} if temporal is None else {"temporal": temporal}),
             }
         )
     )
 
 
 def _make_root(root: Path) -> Path:
-    """Build a valid dataset: 2 train + 1 test scenes, every label kind, one context frame."""
+    """Build a valid temporal dataset: 2 train + 1 test scenes, every label kind, one context frame."""
     rng = np.random.RandomState(0)
     stems = {"train": ["11", "12"], "test": ["21"]}
     for split, ids in stems.items():
@@ -71,9 +74,32 @@ def _make_root(root: Path) -> Path:
     # A context frame: spectral bands only, no labels.
     np.save(root / "spectral_bands" / "train" / "11_b1.npy", np.zeros((*SIZE, 3), np.float32))
     _write_metadata(
-        root, {"train": 2, "test": 1}, ["semantic", "probability", "annotator", "instance"]
+        root,
+        {"train": 2, "test": 1},
+        ["semantic", "probability", "annotator", "instance"],
+        temporal=True,
     )
     return root
+
+
+def _add_labelled_scene(root: Path, split: str, stem: str) -> None:
+    """Add one scene with every label kind (same layout as ``_make_root``)."""
+    rng = np.random.RandomState(1)
+    np.save(
+        root / "spectral_bands" / split / f"{stem}.npy",
+        rng.uniform(230, 300, (*SIZE, len(KEYS))).astype(np.float32),
+    )
+    mask = rng.choice([0, 255], size=SIZE).astype(np.uint8)
+    Image.fromarray(mask, mode="L").save(root / "semantic_masks" / split / f"{stem}.png")
+    np.save(root / "probability_masks" / split / f"{stem}.npy", (mask / 255.0).astype(np.float32))
+    annot = np.stack([mask > 0, mask > 0], axis=-1).astype(np.uint8)
+    np.save(root / "annotator_masks" / split / f"{stem}.npy", annot)
+    inst = np.full((1, *SIZE, 2), -1, dtype=np.int8)
+    inst[0, ..., 0] = (mask > 0).astype(np.int8)
+    np.save(root / "instance_masks" / split / f"{stem}.npy", inst)
+    split_list = root / f"splits_{split}.txt"
+    stems = sorted([*split_list.read_text().split(), stem])
+    split_list.write_text("".join(f"{s}\n" for s in stems))
 
 
 def _rules(report: object) -> set[str]:
@@ -380,32 +406,53 @@ def test_validate_dataset_reports_an_id_present_in_both_splits(tmp_path: Path):
     assert "11" in issues[0].message
 
 
-def test_validate_dataset_reports_a_labelled_id_with_the_reserved_suffix(tmp_path: Path):
+def test_validate_dataset_accepts_suffix_like_ids_when_no_context_frames_are_declared(
+    tmp_path: Path,
+):
     root = _make_root(tmp_path)
-    # Create a labelled scene with reserved suffix _a1
-    rng = np.random.RandomState(0)
-    stem = "scene_a1"
-    split = "train"
-    bands = rng.uniform(230, 300, (*SIZE, len(KEYS))).astype(np.float32)
-    np.save(root / "spectral_bands" / split / f"{stem}.npy", bands)
-    mask = rng.choice([0, 255], size=SIZE).astype(np.uint8)
-    Image.fromarray(mask, mode="L").save(root / "semantic_masks" / split / f"{stem}.png")
-    _write_metadata(root, {"train": 3, "test": 1}, ["semantic"])
+    (root / "spectral_bands" / "train" / "11_b1.npy").unlink()
+    for stem in ("tile_a1", "site_b2", "11_a1"):
+        _add_labelled_scene(root, "train", stem)
+    _write_metadata(
+        root,
+        {"train": 5, "test": 1},
+        ["semantic", "probability", "annotator", "instance"],
+        temporal=False,
+    )
+
+    report = _validate(root, deep=True)
+
+    assert report.ok, (  # type: ignore[attr-defined]
+        f"single-frame data may use any id, _a1/_b2 endings included: {report.issues}"  # type: ignore[attr-defined]
+    )
+
+
+def test_validate_dataset_counts_a_suffix_like_id_without_its_scene_as_a_scene(tmp_path: Path):
+    root = _make_root(tmp_path)
+    _add_labelled_scene(root, "train", "tile_a1")  # there is no scene "tile"
+    _write_metadata(
+        root,
+        {"train": 3, "test": 1},
+        ["semantic", "probability", "annotator", "instance"],
+        temporal=True,
+    )
+
+    report = _validate(root, deep=True)
+
+    assert report.ok, f"tile_a1 is not a context frame of any scene: {report.issues}"  # type: ignore[attr-defined]
+
+
+def test_validate_dataset_treats_an_undeclared_context_frame_as_a_scene(tmp_path: Path):
+    root = _make_root(tmp_path)
+    _write_metadata(
+        root, {"train": 2, "test": 1}, ["semantic", "probability", "annotator", "instance"]
+    )  # temporal not declared
 
     report = _validate(root)
 
-    assert "reserved-suffix" in _rules(report), (
-        "ids ending in _a<k>/_b<k> are reserved for context frames"
-    )
-    # Should NOT report orphan-label for this file
-    orphan_issues = [i for i in report.issues if i.rule == "orphan-label" and stem in i.path]  # type: ignore[attr-defined]
-    assert len(orphan_issues) == 0, "should report reserved-suffix, not orphan-label"
-    reserved_issues = [i for i in report.issues if i.rule == "reserved-suffix"]  # type: ignore[attr-defined]
-    assert len(reserved_issues) >= 1
-    assert (
-        stem in reserved_issues[0].message
-        or "_a" in reserved_issues[0].message
-        or "_b" in reserved_issues[0].message
+    flagged = [i for i in report.issues if "11_b1" in i.path]  # type: ignore[attr-defined]
+    assert {i.rule for i in flagged} == {"missing-label"}, (
+        "without temporal: true, 11_b1 is a scene, so its missing labels must be reported"
     )
 
 
