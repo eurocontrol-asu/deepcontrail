@@ -6,19 +6,24 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 # Every job installs exactly one package (plus its dev group) from the lock, so a package
 # that imports something it does not declare fails here. `--locked` fails the job when
 # uv.lock does not match the pyproject files instead of re-resolving silently.
+# core and instance are also tested on Python 3.12 and 3.13, and segmentation on 3.13,
+# because the packages declare support for 3.11-3.13.
 
 jobs:
   lint:
     name: Lint & format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
-          version: "latest"
+          version: "0.13.7"
       - run: uv python install 3.11
       - run: uv sync --locked --only-group dev
       - run: uv run --no-sync ruff check .
@@ -28,10 +33,10 @@ jobs:
     name: Workspace checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
-          version: "latest"
+          version: "0.13.7"
       - run: uv python install 3.11
       - run: uv sync --locked
       # Workspace checks, plus the segmentation scripts' tests: export_pretrained.py ships the
@@ -39,7 +44,7 @@ jobs:
       - run: uv run --no-sync pytest tests packages/segmentation/tests/scripts
 
   package:
-    name: ${{ matrix.package }} ${{ matrix.extras }}
+    name: ${{ matrix.package }} ${{ matrix.extras }} (py${{ matrix.python }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -48,28 +53,51 @@ jobs:
           # core has no torch: its job proves `import deepcontrail.core` needs none.
           - package: deepcontrail-core
             path: packages/core
+            python: "3.11"
+          - package: deepcontrail-core
+            path: packages/core
+            python: "3.12"
+          - package: deepcontrail-core
+            path: packages/core
+            python: "3.13"
           - package: deepcontrail-segmentation
             path: packages/segmentation
+            python: "3.11"
           # Same package with its optional mlflow logger; the job above proves it works without.
           - package: deepcontrail-segmentation
             path: packages/segmentation
             extras: --extra mlflow
+            python: "3.11"
+          - package: deepcontrail-segmentation
+            path: packages/segmentation
+            python: "3.13"
           # instance has no torch; without extras its job proves the base package needs none of
           # them (tests that need one skip), and the job below runs every test with both.
           - package: deepcontrail-instance
             path: packages/instance
+            python: "3.11"
           - package: deepcontrail-instance
             path: packages/instance
             extras: --extra map --extra scores
+            python: "3.11"
+          - package: deepcontrail-instance
+            path: packages/instance
+            extras: --extra map --extra scores
+            python: "3.12"
+          - package: deepcontrail-instance
+            path: packages/instance
+            extras: --extra map --extra scores
+            python: "3.13"
           - package: deepcontrail-opencontrails
             path: tools/opencontrails
+            python: "3.11"
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
-          version: "latest"
-      - run: uv python install 3.11
-      - run: uv sync --locked --package ${{ matrix.package }} ${{ matrix.extras }}
+          version: "0.13.7"
+      - run: uv python install ${{ matrix.python }}
+      - run: uv sync --locked --python ${{ matrix.python }} --package ${{ matrix.package }} ${{ matrix.extras }}
       - run: uv run --no-sync pyright ${{ matrix.path }}/src
       - run: uv run --no-sync pytest ${{ matrix.path }}/tests
 
@@ -77,10 +105,10 @@ jobs:
     name: Build wheels
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
-          version: "latest"
+          version: "0.13.7"
       - run: uv build --all-packages
       # A deepcontrail/__init__.py in any wheel would shadow the other namespace packages.
       - run: |
