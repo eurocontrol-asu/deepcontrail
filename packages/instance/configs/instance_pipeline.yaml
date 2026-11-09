@@ -3,9 +3,10 @@
 # Mannstein, grow each contrail grow_steps px into pixels with probability > grow_threshold,
 # weight scores by mean probability. Identical to InstancePipelineConfig() (pinned by a test).
 #
-# Tuning (2026-10-31): scripts/optimize_pipeline.py, 100 trials on the reference semantic model's
-# validation-split predictions (1,000 search scenes), objective = pooled per-annotator mAP over
-# IoU 0.25-0.75; confirmed on 1,009 holdout scenes: mAP 0.248 (previous defaults) -> 0.269.
+# Tuning (2026-10-31): scripts/optimize_pipeline.py, 100 trials on the validation-split
+# predictions of the earlier reference model, UPerNet (1,000 search scenes), objective = pooled
+# per-annotator mAP over IoU 0.25-0.75; confirmed on 1,009 holdout scenes: mAP 0.248 (previous
+# defaults) -> 0.269.
 # Re-checked 2026-11-04 after the direction-independent straightness (100 new trials, same scenes):
 # holdout 0.274 here vs 0.277 for the search's best (within the 0.005 noise margin), so kept. The line
 # filter is off: at these settings it kept every pixel.

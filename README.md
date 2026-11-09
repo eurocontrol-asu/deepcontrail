@@ -32,27 +32,31 @@ packages that share the `deepcontrail` namespace:
 
 ## Results: semantic segmentation
 
-Reference model: UPerNet with a CAFormer-B36 encoder at 512 px, trained 40 epochs on the
+Reference model: Unet++ with a CAFormer-B36 encoder at 512 px, trained 40 epochs on the
 OpenContrails `20250305` export with
 [`packages/segmentation/configs/experiment.yaml`](packages/segmentation/configs/experiment.yaml).
+CAFormer has no feature map at half the input resolution, which Unet++ needs: `build_model` adds a
+small convolutional stem for that level (see [`packages/segmentation`](packages/segmentation)).
 Its weights are on the Hugging Face Hub as
 [`eurocontrol-asu/deepcontrail-segmentation`](https://huggingface.co/eurocontrol-asu/deepcontrail-segmentation).
 Global Dice on the held-out test split (1,879 scenes):
 
 | Inference | Threshold | Test Dice |
 |---|---|---|
-| Single pass | 0.5 | 0.6892 |
-| Single pass | tuned on validation | 0.6913 |
-| D4 test-time augmentation (8×) | 0.5 | **0.6960** |
-| D4 test-time augmentation (8×) | tuned on validation | 0.6936 |
+| Single pass | 0.5 | 0.6890 |
+| Single pass | tuned on validation | 0.6870 |
+| D4 test-time augmentation (8×) | 0.5 | **0.6974** |
+| D4 test-time augmentation (8×) | tuned on validation | 0.6937 |
 
-GPU training is not bit-for-bit deterministic: four trainings of this configuration with the
-same seed and data scored 0.6916–0.6960 (TTA, threshold 0.5).
+GPU training is not bit-for-bit deterministic, so compare architectures over several runs (TTA,
+threshold 0.5, same recipe). Before the augmentation fix of #47, when the two flips always fired
+together, two Unet++ trainings scored 0.6992 and 0.6995 and four UPerNet trainings 0.6916–0.6960.
+With the fix, Unet++ scored 0.6974 (the model above) and UPerNet 0.6912.
 
-An earlier run of the same configuration scored **0.6914 private / 0.6994 public** on the hidden
-test set of the Kaggle *Google Research – Identify Contrails to Reduce Global Warming*
-competition (TTA, threshold 0.5). Kaggle's labels follow the older `20230419` export, which
-differs from `20250305` (see [Data notes](#data-notes)).
+An earlier Unet++ training (before the augmentation fix) scored **0.6979 private / 0.6816 public**
+on the hidden test set of the Kaggle *Google Research – Identify Contrails to Reduce Global
+Warming* competition (TTA, threshold 0.5). Kaggle's labels follow the older `20230419` export,
+which differs from `20250305` (see [Data notes](#data-notes)).
 
 ## Installation
 

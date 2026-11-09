@@ -9,10 +9,10 @@ Usage
 ::
 
     uv run python packages/segmentation/scripts/export_pretrained.py \
-        --checkpoint /path/to/run/best-val_dice=0.6963.ckpt \
+        --checkpoint /path/to/run/best-val_dice=0.6978.ckpt \
         --config packages/segmentation/configs/experiment.yaml \
         --output-dir /path/to/bundle \
-        --metric test_dice_tta_at_0.5=0.6960 --metric test_dice_at_0.5=0.6892 \
+        --metric test_dice_tta_at_0.5=0.6974 --metric test_dice_at_0.5=0.6890 \
         --instance-pipeline packages/instance/configs/instance_pipeline.yaml \
         --score-model /path/to/score_model.json
 
