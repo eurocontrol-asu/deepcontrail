@@ -54,6 +54,7 @@ import dataclasses
 import fnmatch
 import functools
 import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -633,7 +634,15 @@ def _print_summary(output_dir: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Convert the TFRecord shards to the filesystem layout and return 0."""
+    """Convert the TFRecord shards to the filesystem layout.
+
+    Returns
+    -------
+    int
+        0 on success; 2 when ``--tfrecord-dir`` is not a directory or holds no matching
+        shards. In the latter case ``--output-dir`` is left untouched, so a failed run
+        never leaves a half-made dataset behind.
+    """
     args = _parse_args(argv)
     output_dir = Path(args.output_dir)
 
@@ -645,16 +654,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     tf_dir = Path(args.tfrecord_dir)
-    _prepare_output_dir(output_dir)
-
+    if not tf_dir.is_dir():
+        print(f"error: --tfrecord-dir {tf_dir} is not a directory", file=sys.stderr)
+        return 2
     shards_by_split = {
         "train": _list_shards(tf_dir, "train.tfrecords", args.file_glob),
         "test": _list_shards(tf_dir, "validation.tfrecords", args.file_glob),
     }
     all_shards = shards_by_split["train"] + shards_by_split["test"]
     if not all_shards:
-        print("No shards found.")
-        return 0
+        print(f"error: no TFRecord shards in {tf_dir} (glob {args.file_glob!r})", file=sys.stderr)
+        return 2
+    _prepare_output_dir(output_dir)
 
     fmt = _probe_format(all_shards)
     label = "temporal (multi-frame)" if fmt.is_temporal else "single-frame"
