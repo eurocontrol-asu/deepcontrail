@@ -50,6 +50,24 @@ _CONFIG = InstancePipelineConfig(
 )
 
 
+def _tree() -> dict[str, np.ndarray]:
+    """Build a minimal valid tree: the root (node 0) branches to two leaves (nodes 1 and 2)."""
+    return {
+        "feature_idx": np.array([0, 0, 0]),
+        "num_threshold": np.array([0.5, 0.0, 0.0]),
+        "missing_go_to_left": np.array([True, False, False]),
+        "left": np.array([1, 0, 0]),
+        "right": np.array([2, 0, 0]),
+        "is_leaf": np.array([False, True, True]),
+        "value": np.array([0.0, 0.1, -0.1]),
+    }
+
+
+def _tree_model() -> ScoreModel:
+    """Build a one-tree score model without needing scikit-learn, to exercise from_json."""
+    return ScoreModel(0.5, (_tree(),), _CONFIG)
+
+
 # --- features and labels ---
 
 
@@ -67,6 +85,21 @@ def test_instance_features_describe_size_shape_and_probability() -> None:
     assert named["ring_mean_prob"] == pytest.approx(0.1), "pixels just around the contrail"
     assert named["pipeline_score"] == pytest.approx(0.6)
     assert named["n_scene_instances"] == 1
+
+
+def test_instance_features_treats_integer_masks_like_boolean_masks() -> None:
+    mask_u = _line(10).astype(np.uint8)
+    other_u = _line(30).astype(np.uint8)
+    probs = np.where(mask_u | other_u, 0.8, 0.0).astype(np.float32)
+
+    feats_u = instance_features(mask_u, probs, score=0.5, scene_masks=[mask_u, other_u])
+    mask_b, other_b = mask_u.astype(bool), other_u.astype(bool)
+    feats_b = instance_features(mask_b, probs, score=0.5, scene_masks=[mask_b, other_b])
+
+    np.testing.assert_allclose(
+        feats_u, feats_b, err_msg="a 0/1 int mask must select the same pixels as a bool mask"
+    )
+    assert dict(zip(FEATURES, feats_u, strict=True))["mean_prob"] == pytest.approx(0.8)
 
 
 def test_match_quality_is_mean_best_iou_over_annotators_who_drew() -> None:
@@ -248,6 +281,68 @@ def test_score_model_file_without_a_record_still_loads(tmp_path: Path) -> None:
     path.write_text(json.dumps(data))
 
     assert ScoreModel.from_json(path).trained_on == {}, "files written before the record load"
+
+
+# --- from_json rejects a malformed tree (a downloaded model may be corrupt) ---
+
+
+def test_score_model_from_json_rejects_a_tree_whose_child_points_to_itself(tmp_path: Path) -> None:
+    path = tmp_path / "score_model.json"
+    _tree_model().to_json(path)
+    data = json.loads(path.read_text())
+    data["trees"][0]["left"][0] = (
+        0  # the root's left child is the root: predict() would loop forever
+    )
+    path.write_text(json.dumps(data))
+
+    with pytest.raises(ValueError, match="tree 0"):
+        ScoreModel.from_json(path)
+
+
+def test_score_model_from_json_rejects_a_negative_feature_index(tmp_path: Path) -> None:
+    path = tmp_path / "score_model.json"
+    _tree_model().to_json(path)
+    data = json.loads(path.read_text())
+    data["trees"][0]["feature_idx"][0] = -1  # a negative index would read the last feature silently
+    path.write_text(json.dumps(data))
+
+    with pytest.raises(ValueError, match="tree 0"):
+        ScoreModel.from_json(path)
+
+
+def test_score_model_from_json_rejects_tree_arrays_of_different_lengths(tmp_path: Path) -> None:
+    path = tmp_path / "score_model.json"
+    _tree_model().to_json(path)
+    data = json.loads(path.read_text())
+    data["trees"][0]["value"] = data["trees"][0]["value"][:-1]  # ragged: would fail mid-prediction
+    path.write_text(json.dumps(data))
+
+    with pytest.raises(ValueError, match="tree 0"):
+        ScoreModel.from_json(path)
+
+
+def test_score_model_from_json_rejects_a_non_finite_leaf_value(tmp_path: Path) -> None:
+    path = tmp_path / "score_model.json"
+    _tree_model().to_json(path)
+    data = json.loads(path.read_text())
+    data["trees"][0]["value"][1] = float("nan")
+    path.write_text(json.dumps(data))
+
+    with pytest.raises(ValueError, match="tree 0"):
+        ScoreModel.from_json(path)
+
+
+def test_score_model_from_json_accepts_a_model_written_by_to_json(tmp_path: Path) -> None:
+    model = _tree_model()
+    path = tmp_path / "score_model.json"
+    x = np.random.default_rng(0).random((5, len(FEATURES)))
+
+    model.to_json(path)
+    loaded = ScoreModel.from_json(path)
+
+    np.testing.assert_array_equal(
+        loaded.predict(x), model.predict(x), "a well-formed model loads and predicts unchanged"
+    )
 
 
 def test_pipeline_rejects_a_score_model_trained_on_another_scene_size() -> None:
