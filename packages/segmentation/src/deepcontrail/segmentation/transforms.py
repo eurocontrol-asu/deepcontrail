@@ -18,10 +18,16 @@ structures such as contrails. Two separate builders expose those stages:
 
 from __future__ import annotations
 
+import os
 import random
 
-import albumentations as A
 import numpy as np
+
+# albumentations checks PyPI for a newer version when it is imported; a library must not make
+# network calls on its own. A value the user set explicitly is kept.
+os.environ.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
+
+import albumentations as A
 
 from deepcontrail.segmentation.config import AugmentationConfig  # noqa: TC001
 

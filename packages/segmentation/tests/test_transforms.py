@@ -257,3 +257,44 @@ def test_seed_augmentation_same_seed_repeats_and_other_seed_differs():
     assert not all(np.array_equal(a, b) for a, b in zip(first, other, strict=True)), (
         "another seed must give another augmentation stream"
     )
+
+
+def _import_and_print_flag(env: dict[str, str]) -> str:
+    """Import transforms in a fresh process and print ``NO_ALBUMENTATIONS_UPDATE``."""
+    import subprocess
+    import sys
+
+    script = (
+        "import os; import deepcontrail.segmentation.transforms; "
+        "print(os.environ['NO_ALBUMENTATIONS_UPDATE'])"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    )
+    return result.stdout.strip()
+
+
+def test_importing_transforms_disables_the_albumentations_update_check():
+    import os
+
+    env = os.environ.copy()
+    env.pop("NO_ALBUMENTATIONS_UPDATE", None)
+
+    flag = _import_and_print_flag(env)
+
+    assert flag == "1", "importing transforms must disable the albumentations update check"
+
+
+def test_importing_transforms_keeps_an_explicit_update_setting():
+    import os
+
+    env = os.environ.copy()
+    env["NO_ALBUMENTATIONS_UPDATE"] = "0"
+
+    flag = _import_and_print_flag(env)
+
+    assert flag == "0", "a value the user set explicitly must be kept"

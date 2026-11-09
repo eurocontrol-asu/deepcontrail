@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 from PIL import Image
+
+# albumentations checks PyPI for a newer version when it is imported; conftest loads before the
+# tests that import it, so a library must not make a network call on import. An explicit value is
+# kept.
+os.environ.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
 
 if TYPE_CHECKING:
     from pathlib import Path
