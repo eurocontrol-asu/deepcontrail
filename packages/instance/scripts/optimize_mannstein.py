@@ -33,13 +33,13 @@ from typing import TYPE_CHECKING, Any
 
 import optuna
 
-from deepcontrail.instance.config import MannsteinConfig
-from deepcontrail.instance.evaluation import (
+from deepcontrail.instance._evaluation import (
     default_workers,
     evaluate_annotator_masks,
     select_annotator_samples,
 )
-from deepcontrail.instance.tuning import mannstein_trial_params, suggest_mannstein_config
+from deepcontrail.instance._tuning import mannstein_trial_params, suggest_mannstein_config
+from deepcontrail.instance.config import MannsteinConfig
 
 if TYPE_CHECKING:
     from optuna.trial import BaseTrial

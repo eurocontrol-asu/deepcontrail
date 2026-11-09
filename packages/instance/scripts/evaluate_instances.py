@@ -62,7 +62,7 @@ import numpy as np
 
 from deepcontrail.core.readers import load_instance_masks
 from deepcontrail.instance import InstancePipelineConfig, MannsteinConfig, ScoreModel
-from deepcontrail.instance.evaluation import (
+from deepcontrail.instance._evaluation import (
     Sample,
     build_samples,
     check_size,

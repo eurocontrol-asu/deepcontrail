@@ -43,14 +43,14 @@ import optuna
 
 from deepcontrail.core.readers import load_instance_masks
 from deepcontrail.instance import InstancePipelineConfig, MannsteinConfig
-from deepcontrail.instance.evaluation import (
+from deepcontrail.instance._evaluation import (
     default_workers,
     evaluate_pipeline,
     load_predictions,
     split_scenes,
 )
+from deepcontrail.instance._tuning import pipeline_trial_params, suggest_pipeline_config
 from deepcontrail.instance.labels import consensus_instances
-from deepcontrail.instance.tuning import pipeline_trial_params, suggest_pipeline_config
 
 if TYPE_CHECKING:
     from optuna.trial import BaseTrial
