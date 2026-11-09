@@ -23,10 +23,10 @@ class NormalizeConfig(BaseModel):
     resulting ``mean``/``std`` here to match the encoder's expectations.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    mean: tuple[float, ...] = (0.485, 0.456, 0.406)
-    std: tuple[float, ...] = (0.229, 0.224, 0.225)
+    mean: tuple[float, float, float] = (0.485, 0.456, 0.406)
+    std: tuple[float, float, float] = (0.229, 0.224, 0.225)
 
 
 class AugmentationConfig(BaseModel):
@@ -39,7 +39,7 @@ class AugmentationConfig(BaseModel):
     co-transforms the mask for the spatial ones.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     # Spatial — applied to both image and mask.
     horizontal_flip: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
@@ -81,6 +81,10 @@ class SegmentationDataConfig(DatasetConfig):
     normalize
         Channel-wise normalization statistics.
     """
+
+    # Unlike the shared core DatasetConfig, the segmentation data section is complete here, so a
+    # misspelt key is an error instead of a silently ignored setting.
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     mask_type: Literal["binary", "probability"] = "binary"
     image_size: Annotated[int, Field(gt=0)] = 256

@@ -268,6 +268,7 @@ def prepare_training(
         warmup_epochs=training_cfg.warmup_epochs,
         scheduler_interval=training_cfg.scheduler_interval,
         steps_per_epoch=len(train_loader),
+        optimizer=training_cfg.optimizer,
     )
 
     name = run_name or default_run_name(model_cfg)
