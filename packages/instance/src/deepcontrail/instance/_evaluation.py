@@ -1,5 +1,8 @@
 """Building blocks of the instance evaluation and tuning scripts.
 
+Private module (leading underscore): it serves the repository scripts in ``scripts/`` and is
+not part of the public API, so it may change between releases.
+
 Annotator samples, scene lists and splits, loading predictions, running the detection in
 parallel, and scoring it per annotator sample (pooled COCO mAP over IoU 0.25-0.75, see
 ``deepcontrail.instance.metrics``). The scripts in ``scripts/`` are thin command-line

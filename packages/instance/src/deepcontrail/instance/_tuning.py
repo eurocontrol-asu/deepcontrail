@@ -1,5 +1,8 @@
 """Search spaces of the instance tuning scripts (Optuna trials).
 
+Private module (leading underscore): it serves the repository scripts in ``scripts/`` and is
+not part of the public API, so it may change between releases.
+
 Each ``suggest_*`` function builds a config from a trial; each ``*_trial_params`` function turns
 a config back into the trial parameters, so known configs can be enqueued as starting trials.
 Optuna is only needed by the caller: nothing here imports it.

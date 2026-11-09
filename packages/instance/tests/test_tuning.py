@@ -1,4 +1,4 @@
-"""Tests for deepcontrail.instance.tuning (search spaces of the tuning scripts)."""
+"""Tests for deepcontrail.instance._tuning (search spaces of the tuning scripts)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from deepcontrail.instance import InstancePipelineConfig, MannsteinConfig
 
 
 def test_suggest_mannstein_config_search_space_is_pinned() -> None:
-    from deepcontrail.instance.tuning import suggest_mannstein_config
+    from deepcontrail.instance._tuning import suggest_mannstein_config
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     trial = optuna.create_study(sampler=optuna.samplers.RandomSampler(seed=0)).ask()
@@ -32,7 +32,7 @@ def test_suggest_mannstein_config_search_space_is_pinned() -> None:
 
 
 def test_mannstein_trial_params_roundtrip_keeps_behaviour() -> None:
-    from deepcontrail.instance.tuning import mannstein_trial_params, suggest_mannstein_config
+    from deepcontrail.instance._tuning import mannstein_trial_params, suggest_mannstein_config
 
     explicit = MannsteinConfig(fit_avg_size=5, filter_avg_size=3, min_pixels=12)
     implicit = MannsteinConfig(fit_avg_size=4, filter_avg_size=None)
@@ -49,7 +49,7 @@ def test_mannstein_trial_params_roundtrip_keeps_behaviour() -> None:
 
 
 def test_mannstein_trial_params_holds_only_searched_settings() -> None:
-    from deepcontrail.instance.tuning import mannstein_trial_params
+    from deepcontrail.instance._tuning import mannstein_trial_params
 
     params = mannstein_trial_params(MannsteinConfig(line_filter=True))
 
@@ -58,7 +58,7 @@ def test_mannstein_trial_params_holds_only_searched_settings() -> None:
 
 
 def test_suggest_pipeline_config_bounds_give_valid_configs() -> None:
-    from deepcontrail.instance.tuning import suggest_pipeline_config
+    from deepcontrail.instance._tuning import suggest_pipeline_config
 
     for bound in ("low", "high"):
         params = MannsteinConfig().model_dump()
@@ -82,7 +82,7 @@ def test_suggest_pipeline_config_bounds_give_valid_configs() -> None:
 
 
 def test_pipeline_search_space_ranges_are_pinned() -> None:
-    from deepcontrail.instance.tuning import suggest_pipeline_config
+    from deepcontrail.instance._tuning import suggest_pipeline_config
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     trial = optuna.create_study(sampler=optuna.samplers.RandomSampler(seed=0)).ask()
@@ -102,7 +102,7 @@ def test_pipeline_search_space_ranges_are_pinned() -> None:
 
 
 def test_pipeline_trial_params_roundtrip_through_suggest() -> None:
-    from deepcontrail.instance.tuning import pipeline_trial_params, suggest_pipeline_config
+    from deepcontrail.instance._tuning import pipeline_trial_params, suggest_pipeline_config
 
     config = InstancePipelineConfig(
         semantic_threshold=0.45,

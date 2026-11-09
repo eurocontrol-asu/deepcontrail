@@ -39,7 +39,7 @@ from deepcontrail.instance import (
     ScoreModel,
     match_quality,
 )
-from deepcontrail.instance.evaluation import (
+from deepcontrail.instance._evaluation import (
     default_workers,
     detect_all,
     evaluate_pipeline,
