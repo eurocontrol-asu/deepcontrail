@@ -521,6 +521,33 @@ def test_metadata_only_without_split_lists_fails_clearly(tmp_path: Path):
         main(["--metadata-only", "--output-dir", str(root)])
 
 
+def test_main_with_a_missing_tfrecord_dir_fails_and_creates_nothing(tmp_path: Path):
+    from deepcontrail.opencontrails.convert import main
+
+    code = main(
+        ["--tfrecord-dir", str(tmp_path / "missing"), "--output-dir", str(tmp_path / "out")]
+    )
+
+    assert code == 2, "a missing input folder is an error, not a successful empty conversion"
+    assert not (tmp_path / "out").exists(), (
+        "--output-dir must not be created before the input folder is validated"
+    )
+
+
+def test_main_without_matching_shards_fails_and_creates_nothing(tmp_path: Path):
+    from deepcontrail.opencontrails.convert import main
+
+    tf_dir = tmp_path / "tfrecords"
+    tf_dir.mkdir()
+
+    code = main(["--tfrecord-dir", str(tf_dir), "--output-dir", str(tmp_path / "out")])
+
+    assert code == 2, "a folder with no matching shards is an error, not an empty conversion"
+    assert not (tmp_path / "out").exists(), (
+        "--output-dir must not be created before the shards are found"
+    )
+
+
 def test_format_from_disk_keeps_the_declared_temporal_value(tmp_path: Path):
     import json
 
