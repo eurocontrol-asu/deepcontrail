@@ -4,7 +4,9 @@ Instance segmentation of contrails, part of
 [DeepContrail](https://github.com/eurocontrol-asu/deepcontrail): it splits a contrail
 segmentation map into individual contrails, one mask and one score each.
 
-It needs only numpy, scipy, pydantic and PyYAML (no torch) and never imports
+**Status: preview.** The API may still change in the next releases.
+
+It needs only `deepcontrail-core`, numpy, scipy, pydantic and PyYAML (no torch) and never imports
 `deepcontrail.segmentation`: any model's probability map works as input. Two optional extras:
 `[map]` (pycocotools) to save detections as COCO results, and `[scores]` (scikit-learn) to train a
 score model.
@@ -45,7 +47,9 @@ settings: on these masks it kept every pixel and took most of the run time.
 
 **Input.** A `(H, W)` map of probabilities in [0, 1] (after the sigmoid, not logits), on the same
 pixel grid as the masks it is compared with. NaN or infinite values are rejected. A binary mask
-also works as input; growth and probability weighting then change nothing.
+also works as input: probability weighting then changes nothing, but growth can still add mask
+pixels that no contrail took. For a plain binary mask, `detect_instances(mask)` runs the
+Mannstein-style step alone.
 
 **Known limits.**
 - All settings are in pixels, tuned on GOES-16 / OpenContrails scenes (about 2 km per pixel,
@@ -119,8 +123,8 @@ from deepcontrail.instance import (
     detect_instances_from_probabilities,
 )
 
-config = InstancePipelineConfig.from_yaml("configs/instance_pipeline.yaml")
-model = ScoreModel.from_json("score_model.json")
+config = InstancePipelineConfig()  # the shipped defaults, = configs/instance_pipeline.yaml
+model = ScoreModel.from_json("score_model.json")  # from a bundle, or train_score_model.py
 masks, scores = detect_instances_from_probabilities(probs, config, score_model=model)
 ```
 

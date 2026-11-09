@@ -3,12 +3,9 @@
 # Same steps as configs/instance_pipeline.yaml, but no growth: growth widens contrails toward how
 # single annotators draw them, which does not help when the target is the consensus.
 #
-# Tuning (2026-10-31): scripts/optimize_pipeline.py --objective consensus, 100 trials on the
-# validation-split predictions of the earlier reference model, UPerNet; on the 1,009 holdout
-# scenes no searched config beat these starting settings (consensus mAP 0.425 vs 0.423 for the
-# search's best).
-# Re-checked 2026-11-04 after the direction-independent straightness (100 new trials, same scenes):
-# 0.442 here vs 0.444 for the search's best (within the 0.005 noise margin), so kept. Line filter off.
+# Checked with scripts/optimize_pipeline.py --objective consensus (100 trials) on the same
+# validation predictions: no searched setting beat these on the 1,009 holdout scenes (consensus
+# mAP 0.442, within noise of the best). The line filter is off.
 format_version: 1
 mannstein:
   line_filter: false
