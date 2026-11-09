@@ -398,3 +398,25 @@ def test_segmentation_data_config_from_yaml_returns_the_subclass(tmp_path: Path)
 
     assert type(cfg) is SegmentationDataConfig
     assert cfg.image_size == 512, "task fields must be read too"
+
+
+def test_data_config_rejects_an_unknown_field():
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+
+    with pytest.raises(ValidationError, match="val_fracton"):
+        SegmentationDataConfig(false_color=RECIPE, root="/tmp/fake", val_fracton=0.2)  # type: ignore[call-arg]
+
+
+def test_augmentation_config_rejects_an_unknown_field():
+    from deepcontrail.segmentation.config import AugmentationConfig
+
+    with pytest.raises(ValidationError, match="hflip"):
+        AugmentationConfig(hflip=0.0)  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("values", [[0.5], [0.1, 0.2, 0.3, 0.4]])
+def test_normalize_config_rejects_a_mean_without_three_channels(values):
+    from deepcontrail.segmentation.config import NormalizeConfig
+
+    with pytest.raises(ValidationError):
+        NormalizeConfig(mean=values)

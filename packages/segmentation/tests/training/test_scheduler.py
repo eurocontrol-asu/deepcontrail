@@ -215,3 +215,35 @@ def test_warmup_epoch_interval_uses_epoch_units() -> None:
     assert abs(lrs[3] - 1e-3) < 1e-3 * 0.05, (
         f"At epoch 3 (end of warmup), LR should be near peak, got {lrs[3]}"
     )
+
+
+def test_configure_optimizers_uses_the_configured_optimizer() -> None:
+    import torch
+
+    adam = SegmentationModule(
+        model=nn.Conv2d(3, 1, 1),
+        loss_fn=nn.BCEWithLogitsLoss(),
+        lr=1e-3,
+        weight_decay=0.01,
+        scheduler="CosineAnnealingLR",
+        epochs=10,
+        native_size=16,
+        optimizer="Adam",
+    )
+
+    optimizer = adam.configure_optimizers()["optimizer"]
+
+    assert type(optimizer) is torch.optim.Adam, "optimizer: Adam must not silently become AdamW"
+    assert optimizer.param_groups[0]["weight_decay"] == 0.01
+
+
+def test_configure_optimizers_defaults_to_adamw() -> None:
+    import torch
+
+    module = _dummy_module()
+
+    optimizer = module.configure_optimizers()["optimizer"]
+
+    assert type(optimizer) is torch.optim.AdamW, (
+        "AdamW is the default (identical to Adam at weight decay 0)"
+    )

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from deepcontrail.segmentation import SegmentationDataConfig
 from deepcontrail.segmentation.losses import LossConfig
@@ -64,9 +64,14 @@ class TrainingConfig(BaseModel):
     lr
         Learning rate for the optimizer.
     optimizer
-        Optimizer name (``"AdamW"`` or ``"Adam"``).
+        ``"AdamW"`` (decoupled weight decay) or ``"Adam"`` (weight decay as an L2 penalty). The
+        two are identical when ``weight_decay`` is 0.
     scheduler
-        Learning rate scheduler name.
+        Learning rate schedule; ``"CosineAnnealingLR"`` is the one implemented.
+    warmup_epochs
+        Epochs of linear warm-up before the cosine decay; fewer than ``epochs``.
+    scheduler_interval
+        Whether the schedule advances every ``"epoch"`` or every optimizer ``"step"``.
     weight_decay
         Weight decay for the optimizer.
     precision
@@ -78,12 +83,12 @@ class TrainingConfig(BaseModel):
         ``"mlflow"`` (extra ``deepcontrail-segmentation[mlflow]``).
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     epochs: int = Field(default=50, gt=0)
     lr: float = Field(default=1e-4, gt=0)
-    optimizer: str = "AdamW"
-    scheduler: str = "CosineAnnealingLR"
+    optimizer: Literal["AdamW", "Adam"] = "AdamW"
+    scheduler: Literal["CosineAnnealingLR"] = "CosineAnnealingLR"
     warmup_epochs: int = Field(default=0, ge=0)
     scheduler_interval: Literal["epoch", "step"] = "epoch"
     weight_decay: float = Field(default=1e-4, ge=0)
@@ -91,11 +96,23 @@ class TrainingConfig(BaseModel):
     gradient_clip_val: float | None = None
     logger: Literal["csv", "mlflow"] = "csv"
 
+    @model_validator(mode="after")
+    def _check_warmup(self) -> TrainingConfig:
+        """Warm-up must leave epochs for the cosine decay."""
+        if self.warmup_epochs >= self.epochs:
+            msg = (
+                f"warmup_epochs ({self.warmup_epochs}) must be smaller than epochs ({self.epochs})"
+            )
+            raise ValueError(msg)
+        return self
+
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> TrainingConfig:
         """Build from a plain dictionary."""
         return cls.model_validate(d)
 
+
+_SECTIONS = {"data", "model", "loss", "training"}
 
 _OVERRIDES = (
     "data_root",
@@ -143,12 +160,19 @@ def load_configs(
     """
     with Path(config_path).open() as f:
         raw = yaml.safe_load(f)
+    unknown_sections = sorted(set(raw) - _SECTIONS)
+    if unknown_sections:
+        msg = f"{config_path}: unknown sections {unknown_sections}; expected {sorted(_SECTIONS)}"
+        raise ValueError(msg)
     if overrides is None:
         given: dict[str, Any] = {}
     elif isinstance(overrides, Mapping):
         given = dict(overrides)
+        unknown = sorted(set(given) - set(_OVERRIDES))
+        if unknown:
+            raise ValueError(f"unknown overrides {unknown}; expected some of {list(_OVERRIDES)}")
     else:
-        given = vars(overrides)
+        given = vars(overrides)  # a CLI namespace may carry flags that are not overrides
     args = argparse.Namespace(**{k: given.get(k) for k in _OVERRIDES})
 
     data_raw: dict[str, Any] = dict(raw["data"])
