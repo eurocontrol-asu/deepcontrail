@@ -76,6 +76,25 @@ def _eval_config(val_data_cfg: SegmentationDataConfig, split: str) -> Segmentati
     return SegmentationDataConfig.from_dict({**no_aug, "split": "test", "fold": None})
 
 
+def tta_test_threshold(
+    given: float | None, val_tta_metrics: dict[str, float], fallback: float
+) -> float:
+    """Threshold for the test TTA evaluation: the given one, else the one searched on validation."""
+    if given is not None:
+        return given
+    return val_tta_metrics.get("final/val_tta_threshold", fallback)
+
+
+def check_ensemble_threshold(split: str, threshold: float | None) -> None:
+    """Refuse to search the threshold on the test split (it would bias the reported score)."""
+    if split == "test" and threshold is None:
+        msg = (
+            "--threshold is required with --split test: searching it on the test split "
+            "would bias the reported score"
+        )
+        raise SystemExit(msg)
+
+
 # ---------------------------------------------------------------------------
 # Single-model evaluation (backward compatible path)
 # ---------------------------------------------------------------------------
@@ -121,7 +140,9 @@ def _run_single(args: argparse.Namespace) -> None:
     val_tta_metrics: dict[str, float] = {}
     if args.tta:
         logger.info("Evaluating on val set with D4 TTA...")
-        val_tta_metrics = evaluate_global(module, val_loader, device, prefix="val_tta", tta=True)
+        val_tta_metrics = evaluate_global(
+            module, val_loader, device, prefix="val_tta", tta=True, threshold=args.threshold
+        )
 
     test_metrics: dict[str, float] = {}
     test_tta_metrics: dict[str, float] = {}
@@ -138,7 +159,7 @@ def _run_single(args: argparse.Namespace) -> None:
             module, test_loader, device, prefix="test", threshold=test_threshold
         )
         if args.tta:
-            tta_threshold = val_tta_metrics.get("final/val_tta_threshold", test_threshold)
+            tta_threshold = tta_test_threshold(args.threshold, val_tta_metrics, test_threshold)
             logger.info("Evaluating on test set with D4 TTA...")
             test_tta_metrics = evaluate_global(
                 module,
@@ -168,6 +189,7 @@ def _run_single(args: argparse.Namespace) -> None:
 
 def _run_ensemble(args: argparse.Namespace) -> None:
     """Evaluate an ensemble of checkpoints on a single split."""
+    check_ensemble_threshold(args.split, args.threshold)
     config_path = Path(args.config)
     _, val_data_cfg, _, model_cfg, loss_cfg, training_cfg, _seed = load_configs(config_path, args)
 
