@@ -50,9 +50,11 @@ also works as input; growth and probability weighting then change nothing.
 **Known limits.**
 - All settings are in pixels, tuned on GOES-16 / OpenContrails scenes (about 2 km per pixel,
   contrails 1–3 px wide). Other resolutions need re-tuning.
-- The cut (0.465) and the growth (into p > 0.371) suit DeepContrail's reference semantic model,
-  trained on soft labels. For another model, re-tune the pipeline on that model's predictions for
-  scenes it never trained on; tuning needs instance annotations.
+- The cut (0.465) and the growth (into p > 0.371) were tuned on the validation predictions of
+  DeepContrail's earlier reference model (UPerNet + CAFormer-B36, trained on soft labels). They
+  carry over to the current Unet++ model, which scores higher with them on every measure below.
+  For another kind of model, re-tune the pipeline on its predictions for scenes it never trained
+  on; tuning needs instance annotations.
 - Two contrails crossing at a small angle come out as one: at 10° always, at 20° with the
   consensus settings. Touching, nearly parallel contrails also merge.
 - The COCO mAP keeps at most 100 detections per sample (a warning says when a sample has more).
@@ -132,20 +134,21 @@ skipped by default; `include_empty=True` keeps them, so every detection on them 
 which is closer to real use.
 
 Results on the OpenContrails 2025 test split (1,879 scenes, 2,700 annotator samples with at least
-one contrail), from the probabilities of DeepContrail's reference semantic model (D4 TTA). Every
+one contrail), from the probabilities of DeepContrail's reference semantic model (Unet++ +
+CAFormer-B36, D4 TTA); the learned scores were trained on its validation predictions. Every
 setting was chosen on validation scenes; the test split was only scored. The consensus columns
 score each scene once against its consensus contrails.
 
 | Settings | mAP | mAP, with empty | Precision (with empty) | Recall | F1 (with empty) | Consensus mAP | Consensus mAP, all scenes |
 |---|---|---|---|---|---|---|---|
-| `configs/instance_pipeline.yaml` (defaults) | 0.272 | 0.267 | 0.516 (0.489) | 0.382 | 0.439 (0.429) | 0.418 | 0.409 |
-| `configs/instance_pipeline_consensus.yaml` (no growth) | 0.250 | 0.246 | 0.499 (0.474) | 0.346 | 0.408 (0.400) | 0.434 | 0.426 |
-| defaults + learned scores | 0.277 | 0.270 | 0.516 (0.489) | 0.382 | 0.439 (0.429) | 0.428 | 0.415 |
-| consensus settings + learned scores | 0.256 | 0.250 | 0.499 (0.474) | 0.346 | 0.408 (0.400) | 0.445 | 0.433 |
+| `configs/instance_pipeline.yaml` (defaults) | 0.273 | 0.268 | 0.532 (0.504) | 0.387 | 0.448 (0.438) | 0.424 | 0.417 |
+| `configs/instance_pipeline_consensus.yaml` (no growth) | 0.252 | 0.248 | 0.510 (0.485) | 0.350 | 0.415 (0.407) | 0.446 | 0.439 |
+| defaults + learned scores | 0.280 | 0.273 | 0.532 (0.504) | 0.387 | 0.448 (0.438) | 0.435 | 0.424 |
+| consensus settings + learned scores | 0.258 | 0.253 | 0.510 (0.485) | 0.350 | 0.415 (0.407) | 0.459 | 0.450 |
 
 On each annotator's own mask instead of a prediction, the instance step alone reaches mAP 0.921
 (`configs/mannstein_annotator_masks.yaml`). Most errors therefore come from the semantic step and
-from contrail shape: the AP is 0.51 at IoU 0.25 but 0.02 at IoU 0.75. Annotators also disagree
+from contrail shape: the AP is 0.50 at IoU 0.25 but 0.02 at IoU 0.75. Annotators also disagree
 strongly on individual contrails: one annotator scored against the others reaches F1 ≈ 0.35 on
 validation scenes.
 
