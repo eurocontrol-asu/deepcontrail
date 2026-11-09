@@ -125,3 +125,15 @@ def test_probability_weighted_scores_empty_mask_scores_zero():
     probs = np.ones((H, W), dtype=np.float32)
 
     assert probability_weighted_scores([np.zeros((H, W), bool)], probs, [0.7]) == [0.0]
+
+
+def test_probability_weighted_scores_treats_integer_masks_like_boolean_masks() -> None:
+    probs = np.zeros((8, 8), dtype=np.float32)
+    probs[4, 1:7] = 0.8
+    mask = probs > 0.5
+
+    int_result = probability_weighted_scores([mask.astype(np.uint8)], probs, [1.0])
+    bool_result = probability_weighted_scores([mask], probs, [1.0])
+
+    assert int_result == pytest.approx(bool_result)
+    assert bool_result == pytest.approx([0.8]), "six pixels at 0.8, base score 1.0"

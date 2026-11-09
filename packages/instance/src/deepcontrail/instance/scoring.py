@@ -74,9 +74,13 @@ def instance_features(
     np.ndarray
         One value per name in :data:`FEATURES`.
     """
-    ys, xs = np.nonzero(mask)
+    # A 0/1 int mask indexes ``probs`` by position and ``~mask`` is a bitwise not, so compute on a
+    # bool copy. But keep the identity test below on the original objects: a bool copy is no longer
+    # ``is`` the mask in scene_masks, and the contrail would then count as overlapping itself.
+    bool_mask = np.asarray(mask, dtype=bool)
+    ys, xs = np.nonzero(bool_mask)
     n = len(ys)
-    values = probs[mask]
+    values = probs[bool_mask]
     coords = np.stack([ys, xs], axis=1).astype(float)
     centre = coords.mean(axis=0)
     if n >= 2:
@@ -87,15 +91,21 @@ def instance_features(
         angle = float(np.arctan2(eigvecs[0, -1], eigvecs[1, -1]))
     else:
         length, straightness, angle = float(n), 0.0, 0.0
-    ring = binary_dilation(mask, np.ones((3, 3), dtype=bool)) & ~mask
+    ring = binary_dilation(bool_mask, np.ones((3, 3), dtype=bool)) & ~bool_mask
     ring_mean = float(probs[ring].mean()) if ring.any() else 0.0
-    others = [m for m in scene_masks if m is not mask]
+    others = [np.asarray(m, dtype=bool) for m in scene_masks if m is not mask]
     shared = (
-        float(np.logical_and(mask, np.any(np.stack(others), axis=0)).sum() / n) if others else 0.0
+        float(np.logical_and(bool_mask, np.any(np.stack(others), axis=0)).sum() / n)
+        if others
+        else 0.0
     )
-    h, w = mask.shape
+    h, w = bool_mask.shape
     border = min(centre[0], centre[1], h - 1 - centre[0], w - 1 - centre[1]) / max(h, w)
-    union_area = float(np.any(np.stack(list(scene_masks)), axis=0).sum()) if scene_masks else 0.0
+    union_area = (
+        float(np.any(np.stack([np.asarray(m, dtype=bool) for m in scene_masks]), axis=0).sum())
+        if scene_masks
+        else 0.0
+    )
     return np.array(
         [
             n,
@@ -196,6 +206,51 @@ def training_data(
 
 
 _NODE_FIELDS = ("feature_idx", "num_threshold", "missing_go_to_left", "left", "right", "is_leaf")
+
+# The keys to_json writes per tree: _NODE_FIELDS plus the leaf values.
+_TREE_KEYS = (*_NODE_FIELDS, "value")
+
+
+def _check_tree(index: int, tree: dict[str, np.ndarray]) -> None:
+    """Reject a malformed tree before :meth:`ScoreModel.predict` walks it.
+
+    ``predict`` follows ``left``/``right`` and indexes ``feature_idx`` without checking bounds or
+    cycles, so a corrupt file would loop forever (a child pointing at its parent), read the wrong
+    feature (a negative index), or fail mid-prediction (ragged or non-finite arrays). The
+    ``left``/``right``/``feature_idx``/``num_threshold`` of leaves are unchecked scikit-learn
+    placeholders.
+    """
+    expected_keys = set(_TREE_KEYS)
+    if set(tree) != expected_keys:
+        raise ValueError(
+            f"score model tree {index}: keys {sorted(set(tree))} are not {sorted(expected_keys)}"
+        )
+    n = len(tree["value"])
+    lengths = [len(tree[key]) for key in expected_keys]
+    if n < 1 or any(length != n for length in lengths):
+        raise ValueError(
+            f"score model tree {index}: node arrays have lengths {lengths}, expected one >= 1"
+        )
+    is_leaf = tree["is_leaf"].astype(bool)
+    for j in np.nonzero(~is_leaf)[0]:
+        left, right = int(tree["left"][j]), int(tree["right"][j])
+        if not (j < left < n and j < right < n):
+            raise ValueError(
+                f"score model tree {index}: node {j} children {left}, {right} must come after it "
+                f"and within its {n} nodes"
+            )
+        if not (0 <= int(tree["feature_idx"][j]) < len(FEATURES)):
+            raise ValueError(
+                f"score model tree {index}: node {j} feature index {int(tree['feature_idx'][j])} "
+                f"is out of range for {len(FEATURES)} features"
+            )
+        if not np.isfinite(tree["num_threshold"][j]):
+            raise ValueError(
+                f"score model tree {index}: node {j} threshold {float(tree['num_threshold'][j])} "
+                f"is not finite"
+            )
+    if not np.all(np.isfinite(tree["value"])):
+        raise ValueError(f"score model tree {index}: leaf values are not all finite")
 
 
 @dataclass(frozen=True)
@@ -338,6 +393,8 @@ class ScoreModel:
         if tuple(data["features"]) != FEATURES:
             raise ValueError("score model features differ from this library's FEATURES")
         trees = tuple({k: np.asarray(v) for k, v in tree.items()} for tree in data["trees"])
+        for i, tree in enumerate(trees):
+            _check_tree(i, tree)
         config = InstancePipelineConfig.from_dict(data["pipeline_config"])
         return cls(
             float(data["baseline"]),

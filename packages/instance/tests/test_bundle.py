@@ -62,7 +62,12 @@ def test_instance_step_runs_the_pipeline_with_its_score_model(tmp_path: Path):
     assert scores == expected_scores == [0.25, 0.25], "the learned score replaces the pipeline's"
 
 
-def test_load_instance_step_without_instance_files_uses_the_defaults(tmp_path: Path):
+def test_load_instance_step_raises_for_a_missing_folder(tmp_path: Path):
+    with pytest.raises(FileNotFoundError, match="no such bundle folder"):
+        load_instance_step(tmp_path / "does-not-exist")
+
+
+def test_load_instance_step_without_instance_files_returns_the_defaults(tmp_path: Path):
     step = load_instance_step(tmp_path)
 
     assert step == InstanceStep(InstancePipelineConfig(), None), (

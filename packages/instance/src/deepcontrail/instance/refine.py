@@ -111,7 +111,9 @@ def probability_weighted_scores(
     list[float]
         Weighted scores, aligned with ``masks``.
     """
-    return [
-        float(score * probs[mask].mean()) if mask.any() else 0.0
-        for mask, score in zip(masks, scores, strict=True)
-    ]
+    weighted = []
+    for mask, score in zip(masks, scores, strict=True):
+        # A 0/1 int mask indexes ``probs`` by position rather than selecting its True pixels.
+        bool_mask = np.asarray(mask, dtype=bool)
+        weighted.append(float(score * probs[bool_mask].mean()) if bool_mask.any() else 0.0)
+    return weighted
