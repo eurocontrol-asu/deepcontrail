@@ -198,3 +198,31 @@ def test_train_metrics_reset_between_epochs(monkeypatch) -> None:
     logged = _train_epoch(module, [(_logits(_HALF), target)], monkeypatch)
 
     assert logged["train_dice"] == pytest.approx(1.0), "each epoch starts from zero counts"
+
+
+def test_training_step_creates_no_float64_tensor(monkeypatch) -> None:
+    from torch.overrides import TorchFunctionMode
+
+    class _RecordDtypes(TorchFunctionMode):
+        def __init__(self) -> None:
+            super().__init__()
+            self.dtypes: set[torch.dtype] = set()
+
+        def __torch_function__(self, func, types, args=(), kwargs=None) -> object:
+            out = func(*args, **(kwargs or {}))
+            if isinstance(out, torch.Tensor):
+                self.dtypes.add(out.dtype)
+            return out
+
+    module = _bce_module()
+    masks = torch.tensor(_HALF, dtype=torch.long).view(1, 4, 4)
+    monkeypatch.setattr(module, "log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "forward", lambda images: _logits(_HALF))
+    recorder = _RecordDtypes()
+
+    with recorder:
+        module.training_step((torch.zeros(1, 3, 4, 4), masks), 0)
+
+    assert torch.float64 not in recorder.dtypes, (
+        "Apple MPS devices have no float64: a training step must not create float64 tensors"
+    )

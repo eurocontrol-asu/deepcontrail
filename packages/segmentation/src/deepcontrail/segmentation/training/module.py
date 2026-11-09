@@ -101,9 +101,8 @@ class SegmentationModule(pl.LightningModule):
             preds = torch.sigmoid(logits).squeeze(1) > 0.5
             # Soft labels: a pixel is contrail when more than half the annotators marked it.
             targets = masks > 0.5
-            counts = torch.stack([(preds & targets).sum(), preds.sum(), targets.sum()]).to(
-                torch.float64
-            )
+            # Exact integer pixel counts; float64 would fail on devices without it (Apple MPS).
+            counts = torch.stack([(preds & targets).sum(), preds.sum(), targets.sum()])
             self._train_counts = (
                 counts if self._train_counts is None else self._train_counts + counts
             )
