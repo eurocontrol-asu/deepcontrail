@@ -63,11 +63,15 @@ def load_instance_step(directory: str | Path, *, tta: bool | None = None) -> Ins
 
     Raises
     ------
+    FileNotFoundError
+        If ``directory`` does not exist (a typo would otherwise silently drop the learned scores).
     ValueError
         If the score model was trained with other pipeline settings than the bundle's, or with
         the other TTA setting.
     """
     directory = Path(directory)
+    if not directory.is_dir():
+        raise FileNotFoundError(f"{directory}: no such bundle folder")
     pipeline_path = directory / PIPELINE_FILE
     config = (
         InstancePipelineConfig.from_yaml(pipeline_path)
