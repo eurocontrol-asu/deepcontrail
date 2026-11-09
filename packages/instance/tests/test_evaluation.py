@@ -1,4 +1,4 @@
-"""Tests for deepcontrail.instance.evaluation (samples, splits, predictions, scoring)."""
+"""Tests for deepcontrail.instance._evaluation (samples, splits, predictions, scoring)."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def _line_64(row: int, h: int = H, w: int = W) -> np.ndarray:
 
 
 def test_load_prediction_npy_returns_float32_probabilities(tmp_path: Path) -> None:
-    from deepcontrail.instance.evaluation import load_prediction
+    from deepcontrail.instance._evaluation import load_prediction
 
     probs = np.array([[0.2, 0.5], [0.8, 1.0]], dtype=np.float16)
     path = tmp_path / "s.npy"
@@ -45,7 +45,7 @@ def test_load_prediction_npy_returns_float32_probabilities(tmp_path: Path) -> No
 
 
 def test_load_prediction_npy_rejects_out_of_range(tmp_path: Path) -> None:
-    from deepcontrail.instance.evaluation import load_prediction
+    from deepcontrail.instance._evaluation import load_prediction
 
     path = tmp_path / "s.npy"
     np.save(path, np.array([[0.0, 1.5]], dtype=np.float32))
@@ -55,7 +55,7 @@ def test_load_prediction_npy_rejects_out_of_range(tmp_path: Path) -> None:
 
 
 def test_load_prediction_npy_rejects_non_2d(tmp_path: Path) -> None:
-    from deepcontrail.instance.evaluation import load_prediction
+    from deepcontrail.instance._evaluation import load_prediction
 
     path = tmp_path / "s.npy"
     np.save(path, np.zeros((2, 3, 3), dtype=np.float32))
@@ -65,7 +65,7 @@ def test_load_prediction_npy_rejects_non_2d(tmp_path: Path) -> None:
 
 
 def test_load_prediction_png_0_255_and_0_1_become_0_1_floats(tmp_path: Path) -> None:
-    from deepcontrail.instance.evaluation import load_prediction
+    from deepcontrail.instance._evaluation import load_prediction
 
     arr = np.array([[0, 255], [255, 0]], dtype=np.uint8)
     Image.fromarray(arr, mode="L").save(tmp_path / "a.png")
@@ -80,7 +80,7 @@ def test_load_prediction_png_0_255_and_0_1_become_0_1_floats(tmp_path: Path) -> 
 
 
 def test_load_prediction_unknown_suffix_raises(tmp_path: Path) -> None:
-    from deepcontrail.instance.evaluation import load_prediction
+    from deepcontrail.instance._evaluation import load_prediction
 
     path = tmp_path / "s.tif"
     path.write_bytes(b"x")
@@ -109,7 +109,7 @@ def _scene_arrays() -> tuple[np.ndarray, np.ndarray]:
 
 
 def test_build_samples_one_per_annotator_slot_and_never_minus_one() -> None:
-    from deepcontrail.instance.evaluation import build_samples
+    from deepcontrail.instance._evaluation import build_samples
 
     ann, inst = _scene_arrays()
 
@@ -151,7 +151,7 @@ def _make_annotator_root(tmp_path: Path, n_scenes: int) -> Path:
 
 
 def test_select_annotator_samples_split_by_scene_and_non_empty(tmp_path: Path) -> None:
-    from deepcontrail.instance.evaluation import select_annotator_samples
+    from deepcontrail.instance._evaluation import select_annotator_samples
 
     root = _make_annotator_root(tmp_path, 12)
 
@@ -166,7 +166,7 @@ def test_select_annotator_samples_split_by_scene_and_non_empty(tmp_path: Path) -
 
 
 def test_select_annotator_samples_raises_when_not_enough(tmp_path: Path) -> None:
-    from deepcontrail.instance.evaluation import select_annotator_samples
+    from deepcontrail.instance._evaluation import select_annotator_samples
 
     root = _make_annotator_root(tmp_path, 6)
 
@@ -179,7 +179,7 @@ def test_select_annotator_samples_raises_when_not_enough(tmp_path: Path) -> None
 
 @requires_map
 def test_evaluate_annotator_masks_scores_pooled_map(tmp_path: Path) -> None:
-    from deepcontrail.instance.evaluation import evaluate_annotator_masks, select_annotator_samples
+    from deepcontrail.instance._evaluation import evaluate_annotator_masks, select_annotator_samples
 
     root = _make_annotator_root(tmp_path, 12)
     search, _ = select_annotator_samples(root, 3, 3, seed=42)
@@ -206,7 +206,7 @@ def _line_gt(row: int) -> np.ndarray:
 
 @requires_map
 def test_evaluate_pipeline_scores_synthetic_lines() -> None:
-    from deepcontrail.instance.evaluation import evaluate_pipeline
+    from deepcontrail.instance._evaluation import evaluate_pipeline
 
     probs = [_line_probs(20), _line_probs(40)]
     gts = [[[_line_gt(20)]], [[_line_gt(40)]]]
@@ -222,7 +222,7 @@ def test_evaluate_pipeline_scores_synthetic_lines() -> None:
 
 @requires_map
 def test_evaluate_pipeline_scores_each_annotator_as_a_sample() -> None:
-    from deepcontrail.instance.evaluation import evaluate_pipeline
+    from deepcontrail.instance._evaluation import evaluate_pipeline
 
     probs = [_line_probs(20)]
     gts = [[[_line_gt(20)], [], [_line_gt(40)]]]
@@ -237,7 +237,7 @@ def test_evaluate_pipeline_scores_each_annotator_as_a_sample() -> None:
 
 @requires_map
 def test_evaluate_pipeline_all_empty_returns_zero_map() -> None:
-    from deepcontrail.instance.evaluation import evaluate_pipeline
+    from deepcontrail.instance._evaluation import evaluate_pipeline
 
     probs = [np.zeros((H, W), np.float32)]
     gts = [[[_line_gt(20)]]]
@@ -250,7 +250,7 @@ def test_evaluate_pipeline_all_empty_returns_zero_map() -> None:
 
 @requires_map
 def test_evaluate_pipeline_consensus_scores_once_per_scene() -> None:
-    from deepcontrail.instance.evaluation import evaluate_pipeline
+    from deepcontrail.instance._evaluation import evaluate_pipeline
 
     probs = [_line_probs(20), _line_probs(30)]
     gts = [[[_line_gt(20)], [_line_gt(20)], []], [[_line_gt(30)], [], []]]
@@ -267,7 +267,7 @@ def test_evaluate_pipeline_consensus_scores_once_per_scene() -> None:
 
 
 def test_split_scenes_defaults_to_half_and_half_and_is_reproducible():
-    from deepcontrail.instance.evaluation import split_scenes
+    from deepcontrail.instance._evaluation import split_scenes
 
     stems = [f"s{i:02d}" for i in range(11)]
 
@@ -283,7 +283,7 @@ def test_split_scenes_defaults_to_half_and_half_and_is_reproducible():
     ("n", "n_search", "n_holdout"), [(500, 1000, None), (1, None, None), (10, 10, None), (10, 3, 0)]
 )
 def test_split_scenes_refuses_an_empty_holdout(n, n_search, n_holdout):
-    from deepcontrail.instance.evaluation import split_scenes
+    from deepcontrail.instance._evaluation import split_scenes
 
     stems = [f"s{i}" for i in range(n)]
 
@@ -298,7 +298,7 @@ def test_detect_all_runs_in_spawned_worker_processes():
     code = (
         "import multiprocessing, numpy as np\n"
         "from deepcontrail.instance import InstancePipelineConfig, MannsteinConfig\n"
-        "from deepcontrail.instance.evaluation import detect_all\n"
+        "from deepcontrail.instance._evaluation import detect_all\n"
         "if __name__ == '__main__':\n"
         "    multiprocessing.set_start_method('spawn')\n"
         "    probs = []\n"
