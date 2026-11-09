@@ -220,6 +220,57 @@ def test_predict_rejects_scenes_of_another_size_than_the_training_scenes(shape):
         predict(Pretrained(_model(), _config()), composite)
 
 
+def test_predict_rejects_an_integer_composite():
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    with pytest.raises(ValueError, match="float composite"):
+        predict(Pretrained(_model(), _config()), np.zeros((16, 16, 3), np.uint8))
+
+
+def test_predict_rejects_a_composite_with_nan():
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    composite = _composite()
+    composite[0, 0, 0] = np.nan
+
+    with pytest.raises(ValueError, match="NaN"):
+        predict(Pretrained(_model(), _config()), composite)
+
+
+def test_predict_rejects_values_outside_zero_one():
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    composite = _composite()
+    composite[0, 0, 0] = 1.5
+
+    with pytest.raises(ValueError, match="composite values must be in"):
+        predict(Pretrained(_model(), _config()), composite)
+
+
+def test_predict_rejects_an_empty_batch():
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    with pytest.raises(ValueError, match="empty batch"):
+        predict(Pretrained(_model(), _config()), np.zeros((0, 16, 16, 3), np.float32))
+
+
+def test_predict_rejects_a_batch_size_below_one():
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    with pytest.raises(ValueError, match="batch_size"):
+        predict(Pretrained(_model(), _config()), _composite(), batch_size=0)
+
+
+def test_predict_accepts_a_float64_composite_in_range():
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    composite = np.random.RandomState(0).uniform(0, 1, (16, 16, 3)).astype(np.float64)
+
+    probs = predict(Pretrained(_model(), _config()), composite)
+
+    assert probs.shape == (16, 16), "a float64 composite in [0, 1] is a valid single input"
+
+
 def test_predict_matches_the_training_pipeline(synthetic_root: Path):
     """Same composite, resize, normalisation and output resize as SegmentationDataset."""
     from deepcontrail.core.false_color import false_color_from_spectral

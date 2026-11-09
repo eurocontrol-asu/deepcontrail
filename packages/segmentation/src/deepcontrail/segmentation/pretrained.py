@@ -226,7 +226,11 @@ def predict(
     ValueError
         If the composite is not 3-channel, or its scenes are not ``native_size`` square:
         resizing another size to the network's input would change the pixel scale the model
-        was trained on (larger scenes are not tiled yet).
+        was trained on (larger scenes are not tiled yet). Also if the batch is empty,
+        ``batch_size`` is below one, the composite is not a float array (the model expects
+        ``[0, 1]`` floats, as built by ``false_color_from_spectral``), or it holds a NaN,
+        an infinite or an out-of-range value: any of these turns every output NaN or gives
+        meaningless probabilities.
     """
     single = composite.ndim == 3
     batch = composite[None] if single else composite
@@ -240,6 +244,21 @@ def predict(
             f"{batch.shape[2]}: other sizes would change the pixel scale (tiling is not supported)"
         )
         raise ValueError(msg)
+    if len(batch) == 0:
+        raise ValueError("expected at least one composite, got an empty batch")
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be at least 1, got {batch_size}")
+    if not np.issubdtype(batch.dtype, np.floating):
+        msg = (
+            f"expected a float composite in [0, 1] (as built by false_color_from_spectral), "
+            f"got dtype {batch.dtype}"
+        )
+        raise ValueError(msg)
+    if not np.isfinite(batch).all():
+        raise ValueError("the composite contains NaN or infinite values")
+    low, high = float(batch.min()), float(batch.max())
+    if low < 0.0 or high > 1.0:
+        raise ValueError(f"composite values must be in [0, 1], got [{low:g}, {high:g}]")
 
     network = _AtInputSize(pretrained.model, (batch.shape[1], batch.shape[2])).eval()
     outputs: list[np.ndarray] = []
