@@ -45,7 +45,9 @@ A bundle may also carry the instance step tuned for its model (`instance_pipelin
 ## Training
 
 Lightning's `Trainer` runs the training; the entry point builds it from an experiment YAML
-(`data`, `model`, `loss`, `training` sections; see [`configs/experiment.yaml`](configs/experiment.yaml)):
+(`data`, `model`, `loss`, `training` sections). The reference one,
+[`configs/experiment.yaml`](configs/experiment.yaml), is in the repository, not in the installed
+package: copy it as a starting point.
 
 ```bash
 deepcontrail-train experiment.yaml --data-root /path/to/dataset --output-dir runs \
@@ -66,7 +68,8 @@ logger is `training.logger` in the config: `csv` (default, no extra package) or 
 `<output-dir>/mlflow.db`). Metrics: train and validation loss, Dice and IoU per epoch, the
 per-step loss and the learning rate.
 
-`prepare_training(...)` builds the same run without training it.
+`prepare_training(...)`, in `deepcontrail.segmentation.training`, builds the same run without
+training it.
 
 ## Repository scripts (not installed with the package)
 
