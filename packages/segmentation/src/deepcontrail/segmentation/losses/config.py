@@ -6,9 +6,11 @@ Uses only pydantic — no torch dependency.
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+COMPOSITE_COMPONENTS = ("dice", "tversky", "bce", "focal")
 
 
 class LossConfig(BaseModel):
@@ -20,7 +22,7 @@ class LossConfig(BaseModel):
         Loss function name: ``"dice"``, ``"tversky"``, ``"bce"``,
         ``"focal"``, or ``"composite"``.
     smooth
-        Smoothing factor for Dice/Tversky loss.
+        Smoothing factor of the Dice loss. The Tversky loss always uses 0.
     alpha
         Tversky alpha (weight for false positives).
     beta
@@ -28,9 +30,11 @@ class LossConfig(BaseModel):
     gamma
         Tversky focusing parameter.
     from_logits
-        Whether inputs are raw logits (sigmoid applied internally).
+        Whether the Dice and Tversky losses receive raw logits (sigmoid applied internally). The
+        BCE and focal losses always take logits.
     composite_weights
-        Weights for composite loss components.
+        Weights of the composite loss components, among ``"dice"``, ``"tversky"``, ``"bce"`` and
+        ``"focal"``: none negative, at least one positive.
         Keys may be ``"dice"``, ``"tversky"``, ``"bce"``, ``"focal"``.
         Only used when ``name="composite"``.
     pos_weight
@@ -46,9 +50,9 @@ class LossConfig(BaseModel):
         Focal loss class-balance factor.  ``None`` means no balancing.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    name: str = "dice"
+    name: Literal["dice", "tversky", "bce", "focal", "composite"] = "dice"
     smooth: Annotated[float, Field(ge=0.0)] = 1.0
     alpha: Annotated[float, Field(ge=0.0, le=1.0)] = 0.7
     beta: Annotated[float, Field(ge=0.0, le=1.0)] = 0.3
@@ -59,6 +63,23 @@ class LossConfig(BaseModel):
     smooth_factor: float | None = None
     focal_gamma: Annotated[float, Field(ge=0.0)] = 2.0
     focal_alpha: float | None = None
+
+    @model_validator(mode="after")
+    def _check_composite_weights(self) -> LossConfig:
+        """Composite components must be known, non-negative, and at least one positive."""
+        unknown = sorted(set(self.composite_weights) - set(COMPOSITE_COMPONENTS))
+        if unknown:
+            expected = list(COMPOSITE_COMPONENTS)
+            msg = f"unknown composite_weights {unknown}; expected some of {expected}"
+            raise ValueError(msg)
+        negative = sorted(k for k, w in self.composite_weights.items() if w < 0)
+        if negative:
+            raise ValueError(f"composite_weights must not be negative: {negative}")
+        if self.name == "composite" and not any(w > 0 for w in self.composite_weights.values()):
+            raise ValueError(
+                "a composite loss needs at least one positive weight in composite_weights"
+            )
+        return self
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> LossConfig:

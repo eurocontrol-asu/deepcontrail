@@ -26,6 +26,8 @@ class SegmentationModule(pl.LightningModule):
         Weight decay for the optimizer.
     scheduler
         Scheduler name.
+    optimizer
+        ``"AdamW"`` (decoupled weight decay) or ``"Adam"`` (weight decay as an L2 penalty).
     epochs
         Total training epochs (used for ``CosineAnnealingLR``'s ``T_max``).
     native_size
@@ -46,6 +48,7 @@ class SegmentationModule(pl.LightningModule):
         warmup_epochs: int = 0,
         scheduler_interval: str = "epoch",
         steps_per_epoch: int = 1,
+        optimizer: str = "AdamW",
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["model", "loss_fn"])
@@ -58,6 +61,7 @@ class SegmentationModule(pl.LightningModule):
         self.warmup_epochs = warmup_epochs
         self.scheduler_interval = scheduler_interval
         self.steps_per_epoch = steps_per_epoch
+        self.optimizer_name = optimizer
         self.native_size = native_size
 
         self._val_preds: list[torch.Tensor] = []
@@ -145,12 +149,14 @@ class SegmentationModule(pl.LightningModule):
 
     def configure_optimizers(self) -> dict[str, Any]:
         """Build optimizer and learning rate scheduler."""
-        if self.weight_decay > 0:
-            optimizer = torch.optim.AdamW(
-                self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+        optimizers = {"AdamW": torch.optim.AdamW, "Adam": torch.optim.Adam}
+        if self.optimizer_name not in optimizers:
+            raise ValueError(
+                f"unknown optimizer {self.optimizer_name!r}; expected {list(optimizers)}"
             )
-        else:
-            optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = optimizers[self.optimizer_name](
+            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+        )
 
         per_step = self.scheduler_interval == "step"
         unit = self.steps_per_epoch if per_step else 1

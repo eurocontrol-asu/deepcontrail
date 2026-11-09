@@ -150,3 +150,10 @@ def test_model_config_extra_kwargs_preserved():
 
     d = cfg.model_dump()
     assert d["extra_kwargs"]["encoder_depth"] == 3
+
+
+def test_model_config_rejects_an_unknown_field():
+    from deepcontrail.segmentation.models.config import ModelConfig
+
+    with pytest.raises(ValidationError, match="encoder"):
+        ModelConfig.from_dict({"encoder": "resnet34"})  # typo of "encoder_name"

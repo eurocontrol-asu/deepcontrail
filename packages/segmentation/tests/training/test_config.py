@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pytest
 import yaml
@@ -293,3 +294,47 @@ def test_load_configs_data_root_overrides_every_split(tmp_path):
     )
 
     assert {train.root, val.root, test.root} == {"/elsewhere"}
+
+
+# --- Validation: names, ranges and unknown keys ---
+
+
+@pytest.mark.parametrize("field", [{"optimizer": "SGD"}, {"scheduler": "StepLR"}])
+def test_training_config_rejects_an_optimizer_or_scheduler_that_is_not_implemented(field) -> None:
+    with pytest.raises(ValidationError):
+        TrainingConfig.from_dict(field)
+
+
+def test_training_config_rejects_a_warmup_as_long_as_the_training() -> None:
+    with pytest.raises(ValidationError, match="warmup_epochs"):
+        TrainingConfig.from_dict({"epochs": 5, "warmup_epochs": 5})
+
+
+def test_training_config_rejects_an_unknown_field() -> None:
+    with pytest.raises(ValidationError, match="epoch"):
+        TrainingConfig.from_dict({"epoch": 5})  # typo of "epochs"
+
+
+def test_load_configs_rejects_an_unknown_section(tmp_path) -> None:
+    path = tmp_path / "experiment.yaml"
+    path.write_text(yaml.dump({"data": {}, "model": {}, "trainig": {"epochs": 3}}))
+
+    with pytest.raises(ValueError, match="trainig"):
+        load_configs(path)
+
+
+def test_load_configs_rejects_an_unknown_override_key(tmp_path) -> None:
+    path = tmp_path / "experiment.yaml"
+    path.write_text(yaml.dump({"data": {}, "model": {}}))
+
+    with pytest.raises(ValueError, match="epoch"):
+        load_configs(path, {"epoch": 3})  # typo of "epochs"
+
+
+def test_load_configs_accepts_a_cli_namespace_with_other_flags() -> None:
+    reference = Path(__file__).resolve().parents[2] / "configs" / "experiment.yaml"
+    args = argparse.Namespace(data_root="/data/x", checkpoint_root="/ckpt", run_name="r")
+
+    configs = load_configs(reference, args)
+
+    assert configs[0].root == "/data/x", "a CLI namespace may carry flags load_configs ignores"

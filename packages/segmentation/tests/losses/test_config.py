@@ -88,3 +88,38 @@ def test_loss_config_model_dump_roundtrip():
     restored = LossConfig.from_dict(d)
 
     assert restored == original, "model_dump -> from_dict should round-trip"
+
+
+def test_loss_config_rejects_an_unknown_name():
+    from deepcontrail.segmentation.losses.config import LossConfig
+
+    with pytest.raises(ValidationError, match="dicee"):
+        LossConfig(name="dicee")  # type: ignore[arg-type]
+
+
+def test_loss_config_rejects_an_unknown_composite_component():
+    from deepcontrail.segmentation.losses.config import LossConfig
+
+    with pytest.raises(ValidationError, match="dyce"):
+        LossConfig(name="composite", composite_weights={"dyce": 1.0})
+
+
+def test_loss_config_rejects_a_negative_composite_weight():
+    from deepcontrail.segmentation.losses.config import LossConfig
+
+    with pytest.raises(ValidationError, match="bce"):
+        LossConfig(name="composite", composite_weights={"bce": -1.0, "dice": 1.0})
+
+
+def test_loss_config_rejects_a_composite_without_a_positive_weight():
+    from deepcontrail.segmentation.losses.config import LossConfig
+
+    with pytest.raises(ValidationError, match="positive"):
+        LossConfig(name="composite", composite_weights={"dice": 0.0})
+
+
+def test_loss_config_rejects_an_unknown_field():
+    from deepcontrail.segmentation.losses.config import LossConfig
+
+    with pytest.raises(ValidationError, match="smoth"):
+        LossConfig(smoth=2.0)  # type: ignore[call-arg]

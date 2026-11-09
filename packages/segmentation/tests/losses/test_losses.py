@@ -197,8 +197,11 @@ def test_build_loss_composite():
 def test_build_loss_unknown_raises():
     from deepcontrail.segmentation.losses import LossConfig, build_loss
 
+    # LossConfig itself rejects unknown names; build_loss still guards direct callers.
+    unvalidated = LossConfig.model_construct(name="unknown")
+
     with pytest.raises(ValueError, match="Unknown loss name"):
-        build_loss(LossConfig(name="unknown"))
+        build_loss(unvalidated)
 
 
 # ---------------------------------------------------------------------------

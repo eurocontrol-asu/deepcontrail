@@ -44,7 +44,7 @@ class ModelConfig(BaseModel):
         ``encoder_depth``).
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     architecture: str = "Unet"
     encoder_name: str = "efficientnet-b0"
