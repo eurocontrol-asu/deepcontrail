@@ -85,6 +85,29 @@ def test_export_writes_a_bundle_with_the_checkpoint_weights(tmp_path: Path, synt
     assert loaded.config.false_color.channels[2].bands == ("ir_105",)
 
 
+def test_export_requires_a_config(tmp_path: Path, synthetic_root: Path):
+    """A config is required: exporting without it silently used a reference recipe."""
+    ckpt, _, _ = _checkpoint(tmp_path, synthetic_root)
+
+    with pytest.raises(SystemExit):
+        _load_script().main(["--checkpoint", str(ckpt), "--output-dir", str(tmp_path / "bundle")])
+
+
+def test_export_records_no_tta_when_asked(tmp_path: Path, synthetic_root: Path):
+    """The `--no-tta` flag is recorded in the bundle's config.json."""
+    import json
+
+    ckpt, config, _ = _checkpoint(tmp_path, synthetic_root)
+    out = tmp_path / "bundle"
+
+    _load_script().main(
+        ["--checkpoint", str(ckpt), "--config", str(config), "--output-dir", str(out), "--no-tta"]
+    )  # fmt: skip
+
+    tta = json.loads((out / "config.json").read_text())["tta"]
+    assert tta is False, "--no-tta must record tta=false in the bundle config"
+
+
 def test_export_records_metrics_and_provenance(tmp_path: Path, synthetic_root: Path):
     from deepcontrail.segmentation.pretrained import load_pretrained
 

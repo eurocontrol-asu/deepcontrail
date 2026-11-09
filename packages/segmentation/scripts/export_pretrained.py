@@ -41,8 +41,6 @@ from deepcontrail.segmentation.pretrained import (
 )
 from deepcontrail.segmentation.training import load_configs
 
-_DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "experiment.yaml"
-
 
 def _parse_metric(text: str) -> tuple[str, float]:
     name, sep, value = text.partition("=")
@@ -174,7 +172,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Export a checkpoint as a pretrained bundle.")
     parser.add_argument("--checkpoint", type=Path, required=True, help="Lightning .ckpt file.")
     parser.add_argument(
-        "--config", type=Path, default=_DEFAULT_CONFIG, help="Experiment YAML of the run."
+        "--config",
+        type=Path,
+        required=True,
+        help=(
+            "Experiment YAML the run was trained with"
+            " (architecture and preprocessing come from it)."
+        ),
     )
     parser.add_argument("--output-dir", type=Path, required=True, help="Bundle directory.")
     parser.add_argument(
@@ -186,6 +190,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--run-name", default=None, help="Training run (default: ckpt folder).")
     parser.add_argument("--threshold", type=float, default=0.5, help="Decision threshold.")
+    parser.add_argument(
+        "--tta",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Whether test-time augmentation is recommended for this model"
+            " (recorded in config.json)."
+        ),
+    )
     parser.add_argument(
         "--instance-pipeline",
         type=Path,
@@ -203,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--score-model needs --instance-pipeline: it is valid only for its pipeline")
 
     data_cfg, _, _, model_cfg, *_ = load_configs(args.config)
-    checkpoint: dict[str, Any] = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    checkpoint: dict[str, Any] = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
     weights = {
         k.removeprefix("model."): v
         for k, v in checkpoint["state_dict"].items()
@@ -232,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         image_size=data_cfg.image_size,
         native_size=int(checkpoint["hyper_parameters"]["native_size"]),
         threshold=args.threshold,
+        tta=args.tta,
         metrics=dict(args.metric),
         provenance=provenance,
     )
