@@ -1,12 +1,11 @@
-# Mannstein settings for the instance step alone (a binary contrail mask in, e.g. one annotator's own mask).
-# Load with MannsteinConfig.from_yaml; use with detect_instances or evaluate_instances.py --mannstein-config.
+# Mannstein settings for the instance step alone: a binary contrail mask in, e.g. one annotator's
+# own mask. Load with MannsteinConfig.from_yaml; use with detect_instances or
+# evaluate_instances.py --mannstein-config.
 #
-# Tuning (2026-10-30): scripts/optimize_mannstein.py, 200 trials on train annotator samples (1,209 search,
-# 1,209 holdout samples, seed 42), objective = pooled per-annotator mAP over IoU 0.25-0.75. The same
-# Mannstein settings are used by configs/instance_pipeline_consensus.yaml.
-# Re-checked 2026-11-04 after the direction-independent straightness (200 new trials, same samples):
-# holdout 0.907 here vs 0.912 for the search's best (at the 0.005 noise margin, lower F1), so kept.
-# The line filter is off.
+# Tuned with scripts/optimize_mannstein.py (200 trials) on annotators' masks of training scenes:
+# 1,209 search and 1,209 holdout samples (seed 42), objective the pooled per-annotator mAP over
+# IoU 0.25-0.75; mAP 0.907 on the holdout. configs/instance_pipeline_consensus.yaml uses the same
+# Mannstein settings. The line filter is off.
 format_version: 1
 mannstein:
   line_filter: false
