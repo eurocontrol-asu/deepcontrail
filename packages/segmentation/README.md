@@ -86,7 +86,8 @@ per-step loss and the learning rate.
 
   ```bash
   uv run python packages/segmentation/scripts/export_pretrained.py \
-      --checkpoint run/best.ckpt --output-dir bundle --metric test_dice_tta_at_0.5=0.6960
+      --checkpoint run/best.ckpt --config configs/experiment.yaml --output-dir bundle \
+      --metric test_dice_tta_at_0.5=0.6974
   ```
 
 The reference configuration is [`configs/experiment.yaml`](configs/experiment.yaml).

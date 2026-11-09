@@ -1,11 +1,13 @@
 # Default experiment configuration for DeepContrail semantic segmentation.
 #
-# Reference model: UPerNet + CAFormer-B36 at 512 px on the OpenContrails 20250305 export,
+# Reference model: Unet++ + CAFormer-B36 at 512 px on the OpenContrails 20250305 export,
 # standard ash RGB built at load time from spectral_bands/.
 # Results of this configuration (test split, 1,879 scenes, global Dice): the released model
-# eurocontrol-asu/deepcontrail-segmentation v0.1.0 scores 0.6892 single pass and 0.6960 with
-# D4 test-time augmentation (threshold 0.5); four trainings with the same seed scored
-# 0.6916-0.6960 with TTA (GPU training is not bit-for-bit reproducible).
+# eurocontrol-asu/deepcontrail-segmentation v0.1.0 scores 0.6890 single pass and 0.6974 with
+# D4 test-time augmentation (threshold 0.5). GPU training is not bit-for-bit reproducible;
+# compare changes over several runs, not one.
+# - Unet++ over UPerNet: about +0.006 TTA Dice with the same recipe, over 3 and 5 trainings.
+#   CAFormer has no 1/2-resolution features; build_model adds the conv stem Unet++ needs.
 #
 # Key choices:
 # - false_color: standard ash RGB, G = band 14 - band 11 (data_11um - cloud_top).
@@ -47,7 +49,7 @@ data:
     std: [0.229, 0.224, 0.225]
 
 model:
-  architecture: UPerNet
+  architecture: UnetPlusPlus
   encoder_name: tu-caformer_b36.sail_in22k_ft_in1k_384
   encoder_weights: imagenet
   in_channels: 3
