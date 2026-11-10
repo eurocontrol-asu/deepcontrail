@@ -65,32 +65,23 @@ which differs from `20250305` (see [Data notes](#data-notes)).
 
 ## Installation
 
-From a clone (the packages are not on PyPI yet):
+The packages are on PyPI; installing one installs `deepcontrail-core` too:
+
+```bash
+pip install deepcontrail-segmentation               # semantic segmentation, pretrained models
+pip install "deepcontrail-segmentation[mlflow]"     # + the optional MLflow logger
+pip install "deepcontrail-instance[map,scores]"     # instance segmentation (preview)
+pip install deepcontrail-opencontrails              # the OpenContrails converter (TensorFlow)
+```
+
+For development, clone the repository and let [uv](https://docs.astral.sh/uv/) install the
+workspace:
 
 ```bash
 git clone https://github.com/eurocontrol-asu/deepcontrail.git
 cd deepcontrail
 uv sync                    # all packages, the dev tools and the training scripts' dependencies
 uv sync --group convert    # + the OpenContrails converter (TensorFlow)
-```
-
-Or install the packages into an existing environment from git:
-
-```bash
-pip install \
-    "deepcontrail-core @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/core" \
-    "deepcontrail-segmentation @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/segmentation"
-```
-
-`deepcontrail-segmentation[mlflow]` adds the optional MLflow logger.
-
-For instance segmentation, install core with it in the same command (pip does not read the
-workspace sources, so `deepcontrail-core` must be given explicitly):
-
-```bash
-pip install \
-    "deepcontrail-core @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/core" \
-    "deepcontrail-instance[map,scores] @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/instance"
 ```
 
 ## Quickstart

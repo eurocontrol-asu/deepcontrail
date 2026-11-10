@@ -12,8 +12,8 @@ permissions:
 # Every job installs exactly one package (plus its dev group) from the lock, so a package
 # that imports something it does not declare fails here. `--locked` fails the job when
 # uv.lock does not match the pyproject files instead of re-resolving silently.
-# core and instance are also tested on Python 3.12 and 3.13, and segmentation on 3.13,
-# because the packages declare support for 3.11-3.13.
+# Every package declares Python 3.11-3.13, so each is tested on at least 3.11 and 3.13
+# (tests/test_workspace.py checks the matrix against the classifiers).
 
 jobs:
   lint:
@@ -91,6 +91,9 @@ jobs:
           - package: deepcontrail-opencontrails
             path: tools/opencontrails
             python: "3.11"
+          - package: deepcontrail-opencontrails
+            path: tools/opencontrails
+            python: "3.13"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
