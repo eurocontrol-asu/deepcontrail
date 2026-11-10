@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 MEMBERS = sorted(
@@ -112,3 +114,88 @@ def test_tracked_configs_hold_no_machine_specific_paths():
 
     assert configs, "the repository ships example configs"
     assert offending == [], f"configs must not point at one machine's paths: {offending}"
+
+
+# What PyPI shows and installs. The package READMEs are the PyPI pages, and pip users get the
+# newest dependency versions the bounds allow, not the lock.
+
+REQUIRED_URLS = {"Homepage", "Documentation", "Repository", "Issues", "Changelog"}
+
+
+@pytest.mark.parametrize("member", MEMBERS, ids=lambda m: m.name)
+def test_member_metadata_points_back_to_the_project(member: Path):
+    project = _project(member)["project"]
+
+    missing = REQUIRED_URLS - set(project.get("urls", {}))
+
+    assert not missing, f"the PyPI page links to the project; missing URLs: {sorted(missing)}"
+    assert project.get("keywords"), "keywords make the package findable on PyPI"
+    assert any(
+        c.startswith("Programming Language :: Python :: 3.") for c in project.get("classifiers", [])
+    ), "classifiers state the supported Python versions"
+
+
+@pytest.mark.parametrize("member", MEMBERS, ids=lambda m: m.name)
+def test_member_readme_links_work_outside_the_repository(member: Path):
+    readme = (member / "README.md").read_text(encoding="utf-8")
+
+    relative = re.findall(r"\]\((?!https?://|mailto:|#)([^)]+)\)", readme)
+
+    assert relative == [], f"relative links break on the PyPI page; use absolute URLs: {relative}"
+
+
+@pytest.mark.parametrize("member", MEMBERS, ids=lambda m: m.name)
+def test_member_readme_installs_from_pypi(member: Path):
+    readme = (member / "README.md").read_text(encoding="utf-8")
+
+    assert "git+https://" not in readme, "the package is installed from PyPI, not from git"
+    assert "uv sync" not in readme, "uv sync only works in a clone of the repository"
+
+
+@pytest.mark.parametrize("member", MEMBERS, ids=lambda m: m.name)
+def test_member_does_not_pin_dependencies_exactly(member: Path):
+    dependencies = _project(member)["project"]["dependencies"]
+
+    pinned = [d for d in dependencies if "==" in d]
+
+    assert pinned == [], f"an exact pin blocks pip on other Python versions and platforms: {pinned}"
+
+
+def test_members_share_one_build_backend_requirement():
+    requirements = {m.name: _project(m)["build-system"]["requires"] for m in MEMBERS}
+
+    assert len({tuple(r) for r in requirements.values()}) == 1, (
+        f"every package builds with the same backend bounds: {requirements}"
+    )
+
+
+def _python_versions_tested_in_ci() -> dict[str, set[str]]:
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    tested: dict[str, set[str]] = {}
+    for job in workflow["jobs"]["package"]["strategy"]["matrix"]["include"]:
+        tested.setdefault(job["package"], set()).add(job["python"])
+    return tested
+
+
+@pytest.mark.parametrize("member", MEMBERS, ids=lambda m: m.name)
+def test_ci_tests_the_oldest_and_newest_python_each_member_claims(member: Path):
+    project = _project(member)["project"]
+    prefix = "Programming Language :: Python :: "
+    claimed = sorted(
+        (
+            c.removeprefix(prefix)
+            for c in project.get("classifiers", [])
+            if re.fullmatch(r".*:: 3\.\d+", c)
+        ),
+        key=lambda v: int(v.split(".")[1]),
+    )
+
+    tested = _python_versions_tested_in_ci().get(project["name"], set())
+
+    assert claimed, "classifiers state the supported Python versions"
+    assert {claimed[0], claimed[-1]} <= tested, (
+        f"{project['name']} claims Python {claimed[0]}-{claimed[-1]}; CI must test both ends "
+        f"(tested: {sorted(tested)})"
+    )

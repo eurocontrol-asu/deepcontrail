@@ -1,7 +1,7 @@
 # deepcontrail-opencontrails
 
 Converts the raw [OpenContrails](https://sites.research.google/gr/contrails/public-datasets/) GOES-16
-TFRecords into the [DeepContrail dataset format](../../packages/core). It is one producer of that
+TFRecords into the [DeepContrail dataset format](https://github.com/eurocontrol-asu/deepcontrail/tree/main/packages/core). It is one producer of that
 format, not part of the library, and it needs TensorFlow.
 
 The TFRecords are in the public Google Cloud Storage bucket `goes_contrails_dataset`; download an
@@ -17,10 +17,10 @@ NOAA. If you use it, cite Ng et al. (2024), "Contrail Detection on GOES-16 ABI W
 OpenContrails Dataset", *IEEE Transactions on Geoscience and Remote Sensing* 62, 1-14.
 
 ```bash
-uv sync --group convert
-uv run deepcontrail-convert-opencontrails \
+pip install deepcontrail-opencontrails   # installs TensorFlow and deepcontrail-core
+deepcontrail-convert-opencontrails \
     --tfrecord-dir /path/to/20250305/tfrecords --output-dir /path/to/dataset
-uv run deepcontrail-validate /path/to/dataset --deep
+deepcontrail-validate /path/to/dataset --deep
 ```
 
 - Training shards go to `train/`, validation shards to `test/` (the holdout).

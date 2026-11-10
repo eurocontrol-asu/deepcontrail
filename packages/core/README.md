@@ -6,10 +6,14 @@ bands, the train/validation/fold partition, and Dice/IoU metrics.
 
 Depends only on numpy, Pillow, pydantic and PyYAML. `import deepcontrail.core` never imports torch.
 
+```bash
+pip install deepcontrail-core
+```
+
 ## The DeepContrail dataset format (version 1)
 
 The library reads this layout and nothing else. Any producer can write it; for OpenContrails
-the [converter](../../tools/opencontrails) does.
+the [converter](https://github.com/eurocontrol-asu/deepcontrail/tree/main/tools/opencontrails) does.
 
 ```
 <root>/

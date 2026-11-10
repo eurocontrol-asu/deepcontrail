@@ -27,8 +27,11 @@ dependencies = [
 deepcontrail-validate = "deepcontrail.core.validate:main"
 
 [project.urls]
+Homepage = "https://github.com/eurocontrol-asu/deepcontrail"
+Documentation = "https://github.com/eurocontrol-asu/deepcontrail/tree/main/packages/core#readme"
 Repository = "https://github.com/eurocontrol-asu/deepcontrail"
-"Bug Tracker" = "https://github.com/eurocontrol-asu/deepcontrail/issues"
+Issues = "https://github.com/eurocontrol-asu/deepcontrail/issues"
+Changelog = "https://github.com/eurocontrol-asu/deepcontrail/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = ["pytest>=7.4", "pyright>=1.1"]

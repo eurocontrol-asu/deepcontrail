@@ -5,8 +5,13 @@ Semantic segmentation of contrails, part of
 transforms, model factory (segmentation-models-pytorch with timm encoders), losses, a Lightning
 module, D4 test-time augmentation, a training entry point, and pretrained models.
 
-It reads datasets in the DeepContrail format (see [`deepcontrail-core`](../core)).
+It reads datasets in the DeepContrail format (see [`deepcontrail-core`](https://github.com/eurocontrol-asu/deepcontrail/tree/main/packages/core)).
 `import deepcontrail.segmentation` stays light; torch is loaded by the parts that need it.
+
+```bash
+pip install deepcontrail-segmentation             # installs deepcontrail-core too
+pip install "deepcontrail-segmentation[mlflow]"   # with the optional MLflow logger
+```
 
 Unet++ also works with transformer-style encoders such as CAFormer, which have no feature map at
 half the input resolution: `build_model` adds a small convolutional stem for that level (two 3×3
@@ -46,7 +51,7 @@ A bundle may also carry the instance step tuned for its model (`instance_pipelin
 
 Lightning's `Trainer` runs the training; the entry point builds it from an experiment YAML
 (`data`, `model`, `loss`, `training` sections). The reference one,
-[`configs/experiment.yaml`](configs/experiment.yaml), is in the repository, not in the installed
+[`configs/experiment.yaml`](https://github.com/eurocontrol-asu/deepcontrail/blob/main/packages/segmentation/configs/experiment.yaml), is in the repository, not in the installed
 package: copy it as a starting point.
 
 ```bash
@@ -93,4 +98,4 @@ training it.
       --metric test_dice_tta_at_0.5=0.6974
   ```
 
-The reference configuration is [`configs/experiment.yaml`](configs/experiment.yaml).
+The reference configuration is [`configs/experiment.yaml`](https://github.com/eurocontrol-asu/deepcontrail/blob/main/packages/segmentation/configs/experiment.yaml).

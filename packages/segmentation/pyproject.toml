@@ -41,8 +41,11 @@ mlflow = ["mlflow>=2.10"]
 deepcontrail-train = "deepcontrail.segmentation.training.run:main"
 
 [project.urls]
+Homepage = "https://github.com/eurocontrol-asu/deepcontrail"
+Documentation = "https://github.com/eurocontrol-asu/deepcontrail/tree/main/packages/segmentation#readme"
 Repository = "https://github.com/eurocontrol-asu/deepcontrail"
-"Bug Tracker" = "https://github.com/eurocontrol-asu/deepcontrail/issues"
+Issues = "https://github.com/eurocontrol-asu/deepcontrail/issues"
+Changelog = "https://github.com/eurocontrol-asu/deepcontrail/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = ["pytest>=7.4", "pyright>=1.1"]

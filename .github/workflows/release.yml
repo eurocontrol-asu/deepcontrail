@@ -1,0 +1,105 @@
+name: Release
+
+# Publishing a GitHub release (tag vX.Y.Z) builds the four packages, publishes them to PyPI and
+# attaches the files to the release. Running the workflow by hand publishes to TestPyPI instead,
+# to rehearse a release. Both use PyPI trusted publishing: no token is stored in the repository.
+#
+# One-time setup on pypi.org and test.pypi.org, for each of deepcontrail-core,
+# deepcontrail-segmentation, deepcontrail-instance and deepcontrail-opencontrails: add a
+# (pending) trusted publisher with owner eurocontrol-asu, repository deepcontrail, workflow
+# release.yml and environment "pypi" (on PyPI) or "testpypi" (on TestPyPI).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          version: "0.13.7"
+      # A release must carry the version of the packages (they are versioned in lockstep).
+      - if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          for pyproject in packages/*/pyproject.toml tools/*/pyproject.toml; do
+            version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$pyproject")
+            if [ "v$version" != "$TAG" ]; then
+              echo "$pyproject has version $version, but the release tag is $TAG"; exit 1
+            fi
+          done
+      - run: uv build --all-packages
+      # A deepcontrail/__init__.py in any wheel would shadow the other namespace packages.
+      - run: |
+          for wheel in dist/*.whl; do
+            if unzip -l "$wheel" | grep -q " deepcontrail/__init__.py$"; then
+              echo "$wheel ships deepcontrail/__init__.py"; exit 1
+            fi
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  pypi:
+    name: Publish to PyPI
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/search/?q=deepcontrail
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+
+  testpypi:
+    name: Publish to TestPyPI
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/search/?q=deepcontrail
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  attach:
+    name: Attach files to the release
+    if: github.event_name == 'release'
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY"

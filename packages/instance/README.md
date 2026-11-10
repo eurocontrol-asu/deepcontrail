@@ -11,12 +11,9 @@ It needs only `deepcontrail-core`, numpy, scipy, pydantic and PyYAML (no torch) 
 `[map]` (pycocotools) to save detections as COCO results, and `[scores]` (scikit-learn) to train a
 score model.
 
-Install `deepcontrail-core` in the same command: pip does not read the workspace sources.
-
 ```bash
-pip install \
-    "deepcontrail-core @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/core" \
-    "deepcontrail-instance[map,scores] @ git+https://github.com/eurocontrol-asu/deepcontrail#subdirectory=packages/instance"
+pip install deepcontrail-instance                # the base package
+pip install "deepcontrail-instance[map,scores]"  # with both extras
 ```
 
 ## Usage
@@ -34,12 +31,12 @@ The pipeline thresholds the map (at 0.465), splits the mask into straight contra
 Mannstein-style detection, grows each contrail by one pixel into neighbours with probability above
 0.371 (annotators draw contrails wider than the thresholded mask), and weights each score by the
 contrail's mean probability. Its settings live in `InstancePipelineConfig`; the defaults equal
-[`configs/instance_pipeline.yaml`](configs/instance_pipeline.yaml), and
+[`configs/instance_pipeline.yaml`](https://github.com/eurocontrol-asu/deepcontrail/blob/main/packages/instance/configs/instance_pipeline.yaml), and
 `InstancePipelineConfig.consensus()` equals
-[`configs/instance_pipeline_consensus.yaml`](configs/instance_pipeline_consensus.yaml), for when
+[`configs/instance_pipeline_consensus.yaml`](https://github.com/eurocontrol-asu/deepcontrail/blob/main/packages/instance/configs/instance_pipeline_consensus.yaml), for when
 only contrails agreed by most annotators matter. `detect_instances(binary_mask)` runs plain
 Mannstein on any binary mask (settings: `MannsteinConfig`, whose defaults are the pipeline's;
-[`configs/mannstein_annotator_masks.yaml`](configs/mannstein_annotator_masks.yaml) holds the
+[`configs/mannstein_annotator_masks.yaml`](https://github.com/eurocontrol-asu/deepcontrail/blob/main/packages/instance/configs/mannstein_annotator_masks.yaml) holds the
 settings for annotators' own masks).
 
 Mannstein's oriented line filter (`MannsteinConfig(line_filter=True)`) is off in the shipped
@@ -92,7 +89,7 @@ consensus mask and the consensus contrails (drawn by more than half of the annot
 from it by `deepcontrail.instance.labels`, for any number of annotators, one included.
 
 Instance annotations use the `instance_masks/<split>/<id>.npy` format of the
-[DeepContrail dataset format](../core): an `(N, H, W, A)` int8 array (1 = pixel of contrail n
+[DeepContrail dataset format](https://github.com/eurocontrol-asu/deepcontrail/tree/main/packages/core): an `(N, H, W, A)` int8 array (1 = pixel of contrail n
 drawn by annotator a, 0 = not, -1 = annotator a drew no contrail n; `A = 1` for one annotator),
 read with `deepcontrail.core.readers.load_instance_masks`. `instance_masks_from_label_image` and
 `instance_masks_from_annotators` build it from a label image or from per-annotator masks.
@@ -158,7 +155,7 @@ validation scenes.
 
 ## Scripts (repository only)
 
-Command-line tools in [`scripts/`](scripts), run from the repository root. They read only
+Command-line tools in [`scripts/`](https://github.com/eurocontrol-asu/deepcontrail/tree/main/packages/instance/scripts), run from the repository root. They read only
 `instance_masks/<split>/` from a dataset, plus one `<id>.npy` probability map per scene for a
 semantic model's predictions.
 
