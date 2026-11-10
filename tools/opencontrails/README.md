@@ -1,9 +1,20 @@
 # deepcontrail-opencontrails
 
 Converts the raw [OpenContrails](https://sites.research.google/gr/contrails/public-datasets/) GOES-16
-TFRecords (bucket [`goes_contrails_dataset`](https://storage.cloud.google.com/goes_contrails_dataset))
-into the [DeepContrail dataset format](../../packages/core). It is one producer of
-that format, not part of the library, and it needs TensorFlow.
+TFRecords into the [DeepContrail dataset format](../../packages/core). It is one producer of that
+format, not part of the library, and it needs TensorFlow.
+
+The TFRecords are in the public Google Cloud Storage bucket `goes_contrails_dataset`; download an
+export with the [Google Cloud CLI](https://cloud.google.com/sdk/docs/install):
+
+```bash
+gcloud storage cp -r gs://goes_contrails_dataset/20250305 .
+```
+
+The OpenContrails data is published by Google Research under the
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) licence; GOES-16 imagery is courtesy of
+NOAA. If you use it, cite Ng et al. (2024), "Contrail Detection on GOES-16 ABI With the
+OpenContrails Dataset", *IEEE Transactions on Geoscience and Remote Sensing* 62, 1-14.
 
 ```bash
 uv sync --group convert

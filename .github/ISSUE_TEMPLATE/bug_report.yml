@@ -3,10 +3,11 @@ description: Something is broken
 labels: [bug]
 body:
   - type: input
-    id: version
+    id: versions
     attributes:
-      label: deepcontrail version
-      placeholder: "e.g. 0.1.0"
+      label: DeepContrail packages and versions
+      description: Output of `pip list | grep deepcontrail` (or `uv pip list | grep deepcontrail`).
+      placeholder: "deepcontrail-core 0.1.0, deepcontrail-segmentation 0.1.0"
     validations:
       required: true
   - type: textarea
