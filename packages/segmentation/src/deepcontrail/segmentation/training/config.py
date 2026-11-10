@@ -75,7 +75,10 @@ class TrainingConfig(BaseModel):
     weight_decay
         Weight decay for the optimizer.
     precision
-        Mixed-precision mode for Lightning (e.g. ``"16-mixed"``).
+        Lightning precision. The default ``"32-true"`` trains safely on any hardware.
+        ``"bf16-mixed"`` is faster and is what the reference configuration uses; it needs an
+        Ampere or newer GPU. Avoid ``"16-mixed"`` with attention encoders such as CAFormer:
+        float16 overflows and the loss becomes NaN.
     gradient_clip_val
         Gradient clipping value, or ``None`` to disable.
     logger
@@ -92,7 +95,7 @@ class TrainingConfig(BaseModel):
     warmup_epochs: int = Field(default=0, ge=0)
     scheduler_interval: Literal["epoch", "step"] = "epoch"
     weight_decay: float = Field(default=1e-4, ge=0)
-    precision: str = "16-mixed"
+    precision: str = "32-true"
     gradient_clip_val: float | None = None
     logger: Literal["csv", "mlflow"] = "csv"
 

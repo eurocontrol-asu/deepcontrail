@@ -47,10 +47,13 @@ def test_training_config_default_weight_decay() -> None:
     assert cfg.weight_decay == 1e-4
 
 
-def test_training_config_default_precision() -> None:
+def test_training_config_default_precision_is_full_float32() -> None:
     cfg = TrainingConfig()
 
-    assert cfg.precision == "16-mixed"
+    assert cfg.precision == "32-true", (
+        "the default must train safely on any hardware: float16 gives NaN losses with "
+        "attention encoders, and bfloat16 needs an Ampere or newer GPU"
+    )
 
 
 def test_training_config_default_gradient_clip_val_is_none() -> None:
