@@ -199,3 +199,19 @@ def test_ci_tests_the_oldest_and_newest_python_each_member_claims(member: Path):
         f"{project['name']} claims Python {claimed[0]}-{claimed[-1]}; CI must test both ends "
         f"(tested: {sorted(tested)})"
     )
+
+
+@pytest.mark.parametrize("job", ["pypi", "testpypi"])
+def test_release_publishes_each_package_independently(job: str):
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    )
+    strategy = workflow["jobs"][job]["strategy"]
+
+    assert strategy.get("fail-fast") is False, (
+        "one package failing to publish (e.g. its trusted publisher is not registered yet) must "
+        "not cancel the uploads of the others; the failed job is re-run on its own"
+    )
+    assert sorted(strategy["matrix"]["package"]) == sorted(m.name for m in MEMBERS), (
+        "every package of the workspace is published"
+    )
