@@ -11,7 +11,8 @@ name: Release
 # One-time setup on pypi.org and test.pypi.org, for each <name> in core, segmentation, instance
 # and opencontrails: add a (pending) trusted publisher for project deepcontrail-<name> with owner
 # eurocontrol-asu, repository deepcontrail, workflow release.yml and environment pypi-<name> (on
-# PyPI) or testpypi-<name> (on TestPyPI).
+# PyPI) or testpypi-<name> (on TestPyPI). PyPI accepts at most three pending publishers per
+# account: register the fourth once the first three projects exist, then re-run its failed job.
 
 on:
   release:
@@ -61,6 +62,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     strategy:
+      # One package failing (e.g. its trusted publisher is not registered yet) must not cancel
+      # the others; re-run the failed job once it is fixed.
+      fail-fast: false
       matrix:
         package: [core, segmentation, instance, opencontrails]
     environment:
@@ -84,6 +88,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     strategy:
+      # One package failing (e.g. its trusted publisher is not registered yet) must not cancel
+      # the others; re-run the failed job once it is fixed.
+      fail-fast: false
       matrix:
         package: [core, segmentation, instance, opencontrails]
     environment:
