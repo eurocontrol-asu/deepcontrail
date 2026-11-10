@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+message: "If you use DeepContrail, please cite it as below."
+title: "DeepContrail: contrail detection and segmentation in satellite imagery"
+type: software
+authors:
+  - family-names: Heffar
+    given-names: Amine
+    affiliation: EUROCONTROL
+version: 0.1.0
+license: EUPL-1.2
+repository-code: "https://github.com/eurocontrol-asu/deepcontrail"
+keywords:
+  - contrails
+  - semantic segmentation
+  - instance segmentation
+  - satellite imagery
+  - GOES-16
+references:
+  - type: article
+    title: "Contrail Detection on GOES-16 ABI With the OpenContrails Dataset"
+    authors:
+      - family-names: Ng
+        given-names: Joe Yue-Hei
+      - family-names: McCloskey
+        given-names: Kevin
+      - family-names: Cui
+        given-names: Jian
+      - family-names: Meijer
+        given-names: Vincent R.
+      - family-names: Brand
+        given-names: Erica
+      - family-names: Sarna
+        given-names: Aaron
+      - family-names: Goyal
+        given-names: Nita
+      - family-names: Van Arsdale
+        given-names: Christopher
+      - family-names: Geraedts
+        given-names: Scott
+    journal: "IEEE Transactions on Geoscience and Remote Sensing"
+    volume: 62
+    start: 1
+    end: 14
+    year: 2024

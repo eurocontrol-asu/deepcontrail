@@ -5,7 +5,11 @@ in satellite imagery.
 
 This repository will host every phase of the project. **Version 0.1.0 ships the first phase:
 semantic segmentation** of contrails in GOES-16 ABI imagery, trained and evaluated on the
-OpenContrails dataset. The later phases will be added as they are developed.
+OpenContrails dataset, plus a preview of instance segmentation. The later phases will be added as
+they are developed.
+
+**Status: alpha.** The API may change between minor versions. The packages support Python 3.11
+to 3.13 and are tested on Linux. Training is meant for a GPU; prediction also runs on a CPU.
 
 ## Goal
 
@@ -13,7 +17,8 @@ Provide a clean, well-typed, and reusable library for detecting contrails in sat
 Development follows a phased roadmap:
 
 1. **Semantic segmentation**: detect contrail pixels in GOES-16 imagery (**released in v0.1.0**)
-2. **Instance segmentation**: separate individual contrails (MTG) (next)
+2. **Instance segmentation**: separate individual contrails (**preview in v0.1.0**, tuned on
+   GOES-16; MTG next)
 3. **Tracking**: follow contrails across time steps
 4. **Attribution**: assign ADS-B flight trajectories to detected contrails
 5. **Altitude estimation**: infer contrail altitude from imagery
@@ -27,7 +32,7 @@ packages that share the `deepcontrail` namespace:
 |---|---|---|
 | [`deepcontrail-core`](packages/core) | `deepcontrail.core` | Torch-free foundations: the dataset format and its validation, false-colour composites, train/val/fold splits, Dice/IoU |
 | [`deepcontrail-segmentation`](packages/segmentation) | `deepcontrail.segmentation` | Semantic segmentation: dataset, models, losses, training (`train`), pretrained models (`load_pretrained`, `predict`) |
-| [`deepcontrail-instance`](packages/instance) | `deepcontrail.instance` | Instance segmentation (in progress): splits a segmentation map into individual contrails (Mannstein pipeline, learned scores); torch-free |
+| [`deepcontrail-instance`](packages/instance) | `deepcontrail.instance` | Instance segmentation (preview; the API may change): splits a segmentation map into individual contrails (Mannstein pipeline, learned scores); torch-free |
 | [`deepcontrail-opencontrails`](tools/opencontrails) | `deepcontrail.opencontrails` | Converter from the OpenContrails TFRecords to the dataset format (a tool, not part of the library) |
 
 ## Results: semantic segmentation
@@ -136,8 +141,13 @@ uv run deepcontrail-validate /path/to/dataset --deep
 ```
 
 The raw TFRecords are published by Google Research on the
-[OpenContrails page](https://sites.research.google/gr/contrails/public-datasets/), in the bucket
-[`goes_contrails_dataset`](https://storage.cloud.google.com/goes_contrails_dataset) (export `20250305/`).
+[OpenContrails page](https://sites.research.google/gr/contrails/public-datasets/), under the
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) licence. They are in the public Google
+Cloud Storage bucket `goes_contrails_dataset`; download the `20250305` export with the [Google Cloud CLI](https://cloud.google.com/sdk/docs/install):
+
+```bash
+gcloud storage cp -r gs://goes_contrails_dataset/20250305 .
+```
 
 ### Data notes
 
@@ -163,6 +173,44 @@ uv run pytest
 
 All four must be green before opening a pull request. CI also tests each package in an
 environment with only that package installed.
+
+## Contributing
+
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately, as described in
+[SECURITY.md](SECURITY.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+## Citing
+
+If you use DeepContrail, please cite it; GitHub's "Cite this repository" button gives the
+reference from [CITATION.cff](CITATION.cff). If you use the pretrained model or the OpenContrails
+data, please also cite the dataset:
+
+```bibtex
+@article{Ng2024ContrailDO,
+  title={Contrail Detection on GOES-16 ABI With the OpenContrails Dataset},
+  author={Joe Yue-Hei Ng and Kevin McCloskey and Jian Cui and Vincent R. Meijer and Erica Brand and Aaron Sarna and Nita Goyal and Christopher Van Arsdale and Scott Geraedts},
+  journal={IEEE Transactions on Geoscience and Remote Sensing},
+  year={2024},
+  volume={62},
+  pages={1-14}
+}
+```
+
+## Acknowledgements
+
+The models are trained on the [OpenContrails](https://sites.research.google/gr/contrails/public-datasets/)
+dataset by Google Research. GOES-16 imagery is courtesy of NOAA. The segmentation models build on
+[segmentation-models-pytorch](https://github.com/qubvel-org/segmentation_models.pytorch),
+[timm](https://github.com/huggingface/pytorch-image-models) and
+[PyTorch Lightning](https://github.com/Lightning-AI/pytorch-lightning). The instance package's
+references are listed in [`packages/instance`](packages/instance#references-and-acknowledgements).
+
+## Contact
+
+DeepContrail is developed by the EUROCONTROL Aviation Sustainability Unit. Use
+[GitHub issues](https://github.com/eurocontrol-asu/deepcontrail/issues) for bugs and questions, or
+email [github-asu@eurocontrol.int](mailto:github-asu@eurocontrol.int).
 
 ## License
 
