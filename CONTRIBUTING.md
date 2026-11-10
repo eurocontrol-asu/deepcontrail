@@ -57,6 +57,17 @@ namespace; the converter is in `tools/opencontrails/`. Each package has its own 
   the Dice on a fixed validation set, with the seed used.
 - **Dependencies:** do not add one without discussing it in the issue first.
 
+## AI-assisted contributions
+
+You may use AI coding assistants; the maintainers do too (see the README). You remain the author
+and are responsible for what you submit:
+
+- understand every line and be able to explain it in review;
+- make sure the code can be contributed under the EUPL-1.2 and does not copy code under an
+  incompatible licence;
+- test it like any other change;
+- say in the pull request if an assistant wrote a substantial part of it.
+
 ## Commit messages
 
 We use [Conventional Commits](https://www.conventionalcommits.org/): a type, then a short summary

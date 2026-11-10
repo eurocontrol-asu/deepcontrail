@@ -180,6 +180,14 @@ Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) and the
 [Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately, as described in
 [SECURITY.md](SECURITY.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
+## Use of AI tools
+
+DeepContrail was developed with the help of [Claude Code](https://claude.com/claude-code), an AI
+coding assistant by Anthropic, used for writing code, tests and documentation and for reviewing
+them. The maintainers directed the design and the work, and reviewed, tested and merged
+every change through pull requests; they are responsible for its content. The experiments and
+the reported results come from training and evaluation runs, not from the assistant.
+
 ## Citing
 
 If you use DeepContrail, please cite it; GitHub's "Cite this repository" button gives the
