@@ -16,6 +16,13 @@ permissions:
 # (tests/test_workspace.py checks the matrix against the classifiers).
 
 jobs:
+  runner-smoke-test:
+    name: Self-hosted runner smoke test
+    runs-on: self-hosted
+    steps:
+      - run: hostname && whoami && uname -a
+      - run: df -h "$RUNNER_TEMP" "$GITHUB_WORKSPACE"
+
   lint:
     name: Lint & format
     runs-on: ubuntu-latest
