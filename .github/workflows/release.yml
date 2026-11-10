@@ -4,10 +4,14 @@ name: Release
 # attaches the files to the release. Running the workflow by hand publishes to TestPyPI instead,
 # to rehearse a release. Both use PyPI trusted publishing: no token is stored in the repository.
 #
-# One-time setup on pypi.org and test.pypi.org, for each of deepcontrail-core,
-# deepcontrail-segmentation, deepcontrail-instance and deepcontrail-opencontrails: add a
-# (pending) trusted publisher with owner eurocontrol-asu, repository deepcontrail, workflow
-# release.yml and environment "pypi" (on PyPI) or "testpypi" (on TestPyPI).
+# Each package is published from its own environment (pypi-<name>, testpypi-<name>): PyPI does
+# not accept two pending trusted publishers with the same owner, repository, workflow and
+# environment, so four packages from one repository need four environment names.
+#
+# One-time setup on pypi.org and test.pypi.org, for each <name> in core, segmentation, instance
+# and opencontrails: add a (pending) trusted publisher for project deepcontrail-<name> with owner
+# eurocontrol-asu, repository deepcontrail, workflow release.yml and environment pypi-<name> (on
+# PyPI) or testpypi-<name> (on TestPyPI).
 
 on:
   release:
@@ -52,13 +56,16 @@ jobs:
           if-no-files-found: error
 
   pypi:
-    name: Publish to PyPI
+    name: Publish deepcontrail-${{ matrix.package }} to PyPI
     if: github.event_name == 'release'
     needs: build
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [core, segmentation, instance, opencontrails]
     environment:
-      name: pypi
-      url: https://pypi.org/search/?q=deepcontrail
+      name: pypi-${{ matrix.package }}
+      url: https://pypi.org/project/deepcontrail-${{ matrix.package }}/
     permissions:
       id-token: write
     steps:
@@ -66,16 +73,22 @@ jobs:
         with:
           name: dist
           path: dist/
+      - run: mkdir upload && mv dist/deepcontrail_${{ matrix.package }}-* upload/
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
+        with:
+          packages-dir: upload/
 
   testpypi:
-    name: Publish to TestPyPI
+    name: Publish deepcontrail-${{ matrix.package }} to TestPyPI
     if: github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [core, segmentation, instance, opencontrails]
     environment:
-      name: testpypi
-      url: https://test.pypi.org/search/?q=deepcontrail
+      name: testpypi-${{ matrix.package }}
+      url: https://test.pypi.org/project/deepcontrail-${{ matrix.package }}/
     permissions:
       id-token: write
     steps:
@@ -83,9 +96,11 @@ jobs:
         with:
           name: dist
           path: dist/
+      - run: mkdir upload && mv dist/deepcontrail_${{ matrix.package }}-* upload/
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
         with:
           repository-url: https://test.pypi.org/legacy/
+          packages-dir: upload/
 
   attach:
     name: Attach files to the release
