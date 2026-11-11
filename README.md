@@ -65,9 +65,9 @@ threshold 0.5, same recipe). Before the augmentation fix of #47, when the two fl
 together, two Unet++ trainings scored 0.6992 and 0.6995 and four UPerNet trainings 0.6916–0.6960.
 With the fix, Unet++ scored 0.6974 (the model above) and UPerNet 0.6912.
 
-An earlier Unet++ training (before the augmentation fix) scored **0.6979 private / 0.6816 public**
-on the hidden test set of the Kaggle *Google Research – Identify Contrails to Reduce Global
-Warming* competition (TTA, threshold 0.5). Kaggle's labels follow the older `20230419` export,
+The released model scored **0.70414 private / 0.69328 public** on the hidden test set of the
+Kaggle *Google Research – Identify Contrails to Reduce Global Warming* competition (TTA,
+threshold 0.5). Kaggle's labels follow the older `20230419` export,
 which differs from `20250305` (see [Data notes](#data-notes)).
 
 ## Installation
