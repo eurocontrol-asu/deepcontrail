@@ -7,11 +7,16 @@ producer. Two JSON files describe it:
   ``spectral_bands/{split}/<id>.npy`` file, with the key configs use for each channel.
 - ``metadata/dataset_info.json`` (``DatasetInfo``): where the data comes from, how many
   labelled scenes each split holds, which labels exist and the recommended pixel shift.
+
+Versioning: a new optional field can be added within version 1; readers keep it, ignore it and
+warn (it may also be a typo). A change that older readers would misread bumps
+``format_version``, and reading a newer version than this package supports asks to upgrade.
 """
 
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 from typing import Annotated, Literal, Self, TypeVar
 
@@ -54,7 +59,7 @@ class BandChannel(BaseModel):
         ``(a, b)`` when the channel is stored as ``a - b`` of two other channels.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="allow")
 
     index: Annotated[int, Field(ge=0)]
     key: Annotated[str, Field(pattern=r"^[a-z0-9_]+$")]
@@ -68,7 +73,7 @@ class BandChannel(BaseModel):
 class BandManifest(BaseModel):
     """``spectral_bands/bands.json``: what each channel of the spectral arrays holds."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="allow")
 
     format_version: Literal[1]
     sensor: str
@@ -134,7 +139,7 @@ class DatasetInfo(BaseModel):
         Provenance notes for people; not read by the library.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="allow")
 
     format_version: Literal[1]
     source: str
@@ -160,6 +165,14 @@ def _read(root: str | Path, relative: str, schema: type[_Schema]) -> _Schema:
     except json.JSONDecodeError as exc:
         msg = f"{path}: not valid JSON ({exc})"
         raise DatasetContractError(msg) from exc
+    version = payload.get("format_version") if isinstance(payload, dict) else None
+    if isinstance(version, int) and not isinstance(version, bool) and version > FORMAT_VERSION:
+        msg = (
+            f"{path}: written in DeepContrail format v{version}; this deepcontrail-core reads "
+            f"format v{FORMAT_VERSION}. Please upgrade deepcontrail-core "
+            "(pip install --upgrade deepcontrail-core)."
+        )
+        raise DatasetContractError(msg)
     if isinstance(payload, dict) and "format_version" not in payload:
         msg = (
             f"{path}: written before DeepContrail format v1 (no format_version). Regenerate the "
@@ -168,10 +181,28 @@ def _read(root: str | Path, relative: str, schema: type[_Schema]) -> _Schema:
         )
         raise DatasetContractError(msg)
     try:
-        return schema.model_validate(payload)
+        result = schema.model_validate(payload)
     except ValidationError as exc:
         msg = f"{path}: does not follow DeepContrail format v1:\n{exc}"
         raise DatasetContractError(msg) from exc
+    unknown = _unknown_fields(result)
+    if unknown:
+        warnings.warn(
+            f"{path}: fields not in DeepContrail format v{FORMAT_VERSION}, ignored: "
+            f"{', '.join(unknown)} (a typo, or written by a newer deepcontrail)",
+            UserWarning,
+            stacklevel=3,
+        )
+    return result
+
+
+def _unknown_fields(model: BaseModel, prefix: str = "") -> list[str]:
+    """Name the fields a file holds beyond the format (kept in ``model_extra``), recursively."""
+    names = [f"{prefix}{key}" for key in model.model_extra or {}]
+    if isinstance(model, BandManifest):
+        for channel in model.channels:
+            names += _unknown_fields(channel, f"channels[{channel.index}].")
+    return names
 
 
 def read_band_manifest(root: str | Path) -> BandManifest:

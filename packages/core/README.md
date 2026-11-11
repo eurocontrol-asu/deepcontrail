@@ -89,6 +89,19 @@ Optional fields:
 Read both with `read_band_manifest(root)` and `read_dataset_info(root)`; a missing or invalid file
 raises `DatasetContractError` naming the file.
 
+### Versioning
+
+`format_version` is the format's major version; this release reads version 1.
+
+- **Within version 1, optional fields may be added.** A reader that does not know a field keeps
+  it, ignores it and warns, naming it (it may also be a typo, such as `temporl` for
+  `temporal`). Required fields and the meaning of existing fields never change within a
+  version.
+- **A change older readers would misread** (a new required field, a field whose meaning
+  changes, a new directory layout) bumps `format_version`. Reading a dataset of a newer version
+  than the installed `deepcontrail-core` supports raises `DatasetContractError` asking to
+  upgrade.
+
 Instance masks are read with `deepcontrail.core.readers.load_instance_masks(path)`, which raises
 `ValueError` on an array that is not in the format above; `extract_all_annotator_instances(raw)`
 turns one into each annotator's list of boolean contrail masks.

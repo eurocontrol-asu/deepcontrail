@@ -11,6 +11,10 @@ All notable changes to DeepContrail are listed here. The format follows
 - `predict` follows the model's `config.tta` when `tta` is not given (it defaulted to no
   test-time augmentation, while the released model recommends it). Pass `tta=False` for the
   previous behaviour.
+- Dataset format: unknown fields in `bands.json` and `dataset_info.json` are now ignored with a
+  warning naming them, instead of rejected, so optional fields can be added within version 1;
+  a dataset of a newer format version gets an error asking to upgrade `deepcontrail-core`. The
+  versioning rule is documented in the `deepcontrail-core` README.
 
 ## [0.1.0] - 2026-11-11
 
