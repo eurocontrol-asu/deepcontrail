@@ -6,8 +6,9 @@
 [![License: EUPL-1.2](https://img.shields.io/badge/license-EUPL--1.2-blue)](LICENSE)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24130966.svg)](https://doi.org/10.5281/zenodo.24130966)
 
-Open-source library for **contrail detection, segmentation, tracking, and flight attribution**
-in satellite imagery.
+Open-source library for **contrail detection in satellite imagery**. Version 0.1.0 does semantic
+segmentation of contrails in GOES-16 imagery, with instance segmentation in preview; tracking,
+flight attribution and altitude estimation are planned (see [Goal](#goal)).
 
 This repository will host every phase of the project. **Version 0.1.0 ships the first phase:
 semantic segmentation** of contrails in GOES-16 ABI imagery, trained and evaluated on the

@@ -6,7 +6,7 @@ All notable changes to DeepContrail are listed here. The format follows
 
 ## [Unreleased]
 
-## [0.1.0]
+## [0.1.0] - 2026-11-11
 
 The first release: semantic segmentation of contrails in GOES-16 ABI imagery, and a preview of
 instance segmentation.
