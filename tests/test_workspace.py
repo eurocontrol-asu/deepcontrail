@@ -235,3 +235,15 @@ def test_citation_metadata_matches_the_packages():
     assert [c["affiliation"] for c in zenodo["creators"]] == [
         a["affiliation"] for a in citation["authors"]
     ], "Zenodo and CITATION.cff give the same affiliations"
+
+
+def test_readme_doi_badge_cites_the_citation_doi():
+    citation = yaml.safe_load((ROOT / "CITATION.cff").read_text(encoding="utf-8"))
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    badge_dois = re.findall(r"https://doi\.org/(10\.\d+/[^)\s]+)", readme.split("\n## ", 1)[0])
+
+    assert "doi" in citation, "CITATION.cff carries the Zenodo DOI once a release exists"
+    assert badge_dois == [citation["doi"]], (
+        "the README's DOI badge and CITATION.cff cite the same (all-versions) DOI"
+    )
