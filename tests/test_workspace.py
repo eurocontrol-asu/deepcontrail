@@ -272,3 +272,31 @@ def test_member_authors_match_the_citation(member: Path):
     assert project.get("maintainers") == [
         {"name": citation["authors"][0]["affiliation"], "email": "github-asu@eurocontrol.int"}
     ], "users contact the team (the authors' unit and its address), not a personal address"
+
+
+def test_newest_dependencies_workflow_covers_every_package():
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "newest-dependencies.yml").read_text(encoding="utf-8")
+    )
+    matrix = workflow["jobs"]["newest"]["strategy"]["matrix"]
+    paths = {entry["package"]: entry["path"] for entry in matrix["include"]}
+
+    assert sorted(matrix["package"]) == sorted(m.name for m in MEMBERS), (
+        "every package is tested weekly with the newest dependencies pip would install"
+    )
+    assert {ROOT / p for p in paths.values()} == set(MEMBERS), "each package runs its own tests"
+
+
+def test_newest_dependencies_workflow_ignores_the_workspace_pins():
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "newest-dependencies.yml").read_text(encoding="utf-8")
+    )
+    commands = " ".join(step.get("run", "") for step in workflow["jobs"]["newest"]["steps"])
+    uv_pip = re.findall(r"uv (?:venv|pip install)[^\n]*", commands)
+
+    assert uv_pip, "the workflow creates an environment and installs into it with uv"
+    assert all("--no-config" in c for c in uv_pip), (
+        "uv pip reads the root pyproject.toml, whose constraint-dependencies pin torchmetrics and "
+        "lightning-utilities for training runs; without --no-config the job would test those pins, "
+        f"not what pip users get: {uv_pip}"
+    )
