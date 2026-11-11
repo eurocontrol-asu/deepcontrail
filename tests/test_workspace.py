@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -215,3 +216,22 @@ def test_release_publishes_each_package_independently(job: str):
     assert sorted(strategy["matrix"]["package"]) == sorted(m.name for m in MEMBERS), (
         "every package of the workspace is published"
     )
+
+
+def test_citation_metadata_matches_the_packages():
+    citation = yaml.safe_load((ROOT / "CITATION.cff").read_text(encoding="utf-8"))
+    zenodo = json.loads((ROOT / ".zenodo.json").read_text(encoding="utf-8"))
+    package = _project(MEMBERS[0])["project"]
+
+    authors = [f"{a['family-names']}, {a['given-names']}" for a in citation["authors"]]
+
+    assert str(citation["version"]) == package["version"], "CITATION.cff cites the released version"
+    assert citation["license"] == zenodo["license"] == package["license"], (
+        "CITATION.cff, .zenodo.json and the packages declare the same licence"
+    )
+    assert [c["name"] for c in zenodo["creators"]] == authors, (
+        "Zenodo lists the same authors, in the same order, as CITATION.cff"
+    )
+    assert [c["affiliation"] for c in zenodo["creators"]] == [
+        a["affiliation"] for a in citation["authors"]
+    ], "Zenodo and CITATION.cff give the same affiliations"

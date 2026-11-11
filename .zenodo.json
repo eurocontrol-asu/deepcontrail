@@ -1,0 +1,14 @@
+{
+  "title": "DeepContrail: contrail detection and segmentation in satellite imagery",
+  "upload_type": "software",
+  "description": "Open-source library for contrail detection in satellite imagery. Version 0.1.0 covers semantic segmentation of contrails in GOES-16 ABI imagery (dataset format and validation, training, test-time augmentation, pretrained models) and a preview of instance segmentation, with a converter for the OpenContrails dataset. The pretrained model is published on the Hugging Face Hub as eurocontrol-asu/deepcontrail-segmentation.",
+  "creators": [
+    {"name": "Heffar, Amine", "affiliation": "EUROCONTROL Aviation Sustainability Unit"}
+  ],
+  "license": "EUPL-1.2",
+  "keywords": ["contrails", "semantic segmentation", "instance segmentation", "satellite imagery", "remote sensing", "GOES-16", "deep learning", "aviation", "climate"],
+  "related_identifiers": [
+    {"identifier": "https://huggingface.co/eurocontrol-asu/deepcontrail-segmentation", "relation": "isSupplementedBy", "resource_type": "other"},
+    {"identifier": "10.1109/TGRS.2023.3345226", "relation": "references", "resource_type": "publication-article"}
+  ]
+}
