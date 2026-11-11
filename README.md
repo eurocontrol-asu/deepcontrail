@@ -94,18 +94,26 @@ uv sync --group convert    # + the OpenContrails converter (TensorFlow)
 
 ### Predict with the pretrained model
 
+Five sample scenes are published as the Hugging Face dataset
+[`eurocontrol-asu/deepcontrail-samples`](https://huggingface.co/datasets/eurocontrol-asu/deepcontrail-samples)
+(31 MB, OpenContrails test scenes in the dataset format), so this runs in a minute after
+`pip install deepcontrail-segmentation`:
+
 ```python
 import numpy as np
+from huggingface_hub import snapshot_download
 from deepcontrail.core import false_color_from_spectral, read_band_manifest
 from deepcontrail.segmentation import load_pretrained, predict
 
+root = snapshot_download("eurocontrol-asu/deepcontrail-samples", repo_type="dataset")
 model = load_pretrained("eurocontrol-asu/deepcontrail-segmentation", revision="v0.1.0")
-bands = np.load(f"{root}/spectral_bands/test/{record_id}.npy")
+bands = np.load(f"{root}/spectral_bands/test/1801360214472457069.npy")
 composite = false_color_from_spectral(bands, model.config.false_color, read_band_manifest(root))
-probabilities = predict(model, composite, tta=True)  # (H, W), float32 in [0, 1]
+probabilities = predict(model, composite, tta=model.config.tta)  # (256, 256), float32 in [0, 1]
 mask = probabilities > model.config.threshold
 ```
 
+With your own data, `root` is any dataset in the DeepContrail format (see [Data](#data)).
 `load_pretrained` also takes a local folder. The
 [model card](https://huggingface.co/eurocontrol-asu/deepcontrail-segmentation) describes the
 training, the scores and the limits.
