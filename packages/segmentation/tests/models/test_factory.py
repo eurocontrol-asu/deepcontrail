@@ -225,6 +225,32 @@ def test_build_model_unetplusplus_transformer_encoder_keeps_decoder_options(dumm
     assert model.segmentation_head[0].in_channels == 32, "decoder_channels were dropped"
 
 
+def test_build_model_unetplusplus_transformer_encoder_initialises_like_smp():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("segmentation_models_pytorch")
+    from deepcontrail.segmentation.models import ModelConfig, build_model
+
+    torch.manual_seed(0)
+    model = build_model(
+        ModelConfig(
+            architecture="UnetPlusPlus",
+            encoder_name=TRANSFORMER_STYLE_ENCODER,
+            encoder_weights=None,
+        )
+    )
+    rebuilt = [*model.decoder.modules(), *model.encoder.stem.modules()]
+    convs = [m for m in rebuilt if isinstance(m, torch.nn.Conv2d) and m.weight.numel() >= 4096]
+
+    # smp initialises decoders with Kaiming-uniform (fan_in, ReLU): weight std = sqrt(2 / fan_in).
+    ratios = [m.weight.std().item() / (2 / m.weight[0].numel()) ** 0.5 for m in convs]
+
+    assert convs, "the rebuilt decoder and the stem have convolutions"
+    assert all(0.85 < r < 1.15 for r in ratios), (
+        "the rebuilt Unet++ decoder and the 1/2-scale stem must start from smp's decoder "
+        f"initialisation, not PyTorch's default (about 0.41 of it): {[round(r, 2) for r in ratios]}"
+    )
+
+
 def test_build_model_unetplusplus_convolutional_encoder_matches_smp():
     pytest.importorskip("segmentation_models_pytorch")
     import segmentation_models_pytorch as smp
