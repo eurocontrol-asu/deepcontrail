@@ -1,5 +1,11 @@
 # DeepContrail
 
+[![PyPI](https://img.shields.io/pypi/v/deepcontrail-segmentation?label=PyPI)](https://pypi.org/project/deepcontrail-segmentation/)
+[![Python](https://img.shields.io/pypi/pyversions/deepcontrail-segmentation)](https://pypi.org/project/deepcontrail-segmentation/)
+[![CI](https://github.com/eurocontrol-asu/deepcontrail/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/eurocontrol-asu/deepcontrail/actions/workflows/ci.yml)
+[![License: EUPL-1.2](https://img.shields.io/badge/license-EUPL--1.2-blue)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24130966.svg)](https://doi.org/10.5281/zenodo.24130966)
+
 Open-source library for **contrail detection, segmentation, tracking, and flight attribution**
 in satellite imagery.
 
@@ -181,8 +187,9 @@ the reported results come from training and evaluation runs, not from the assist
 
 ## Citing
 
-If you use DeepContrail, please cite it; GitHub's "Cite this repository" button gives the
-reference from [CITATION.cff](CITATION.cff). If you use the pretrained model or the OpenContrails
+If you use DeepContrail, please cite it
+([doi:10.5281/zenodo.24130966](https://doi.org/10.5281/zenodo.24130966), all versions); GitHub's
+"Cite this repository" button gives the reference from [CITATION.cff](CITATION.cff). If you use the pretrained model or the OpenContrails
 data, please also cite the dataset:
 
 ```bibtex
