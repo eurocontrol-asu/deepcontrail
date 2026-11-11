@@ -1,0 +1,56 @@
+name: Newest dependencies
+
+# CI tests the versions locked in uv.lock, but pip users get the newest versions the package
+# bounds allow. Once a week, install each package's built wheel with the newest dependencies and
+# run its tests, so a breaking upstream release is caught before users report it. A failure
+# here means: fix the code, or bound the dependency in the package's pyproject.toml.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"  # Mondays 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  newest:
+    name: ${{ matrix.package }}${{ matrix.extras }} (py${{ matrix.python }}, newest)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [core, segmentation, instance, opencontrails]
+        python: ["3.11", "3.13"]
+        # Per-package settings, added to every Python version of that package.
+        include:
+          - package: core
+            path: packages/core
+          - package: segmentation
+            path: packages/segmentation
+            extras: "[mlflow]"
+          - package: instance
+            path: packages/instance
+            extras: "[map,scores]"
+            test-deps: optuna
+          - package: opencontrails
+            path: tools/opencontrails
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          version: "0.13.7"
+      - run: uv python install ${{ matrix.python }}
+      - run: uv build --all-packages --wheel --out-dir dist
+      # Install the wheels built from this commit, not the workspace sources or the lock: the
+      # package and deepcontrail-core by path, every other dependency at its newest version.
+      # --no-config: the root pyproject.toml pins torchmetrics and lightning-utilities for our own
+      # training runs (constraint-dependencies), and uv pip would apply those pins here too.
+      - run: |
+          uv venv --no-config --python ${{ matrix.python }} .newest
+          uv pip install --no-config --python .newest \
+            dist/deepcontrail_core-*.whl \
+            "$(ls dist/deepcontrail_${{ matrix.package }}-*.whl)${{ matrix.extras }}" \
+            pytest ${{ matrix.test-deps }}
+          uv pip list --python .newest
+      - run: .newest/bin/python -m pytest ${{ matrix.path }}/tests
