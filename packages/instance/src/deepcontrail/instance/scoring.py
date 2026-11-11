@@ -74,9 +74,39 @@ def instance_features(
     np.ndarray
         One value per name in :data:`FEATURES`.
     """
+    counts = _coverage(scene_masks)
+    return _features(mask, probs, score, len(scene_masks), counts, _multiplicity(mask, scene_masks))
+
+
+def _coverage(scene_masks: Sequence[np.ndarray]) -> np.ndarray | None:
+    """Per pixel, how many of the scene's masks cover it (``None`` for an empty scene)."""
+    if not scene_masks:
+        return None
+    stacked = np.stack([np.asarray(m, dtype=bool) for m in scene_masks])
+    counts: np.ndarray = stacked.sum(axis=0, dtype=np.int64)
+    return counts
+
+
+def _multiplicity(mask: np.ndarray, scene_masks: Sequence[np.ndarray]) -> int:
+    """How many times this very object is in ``scene_masks``: it never overlaps itself."""
+    return sum(1 for m in scene_masks if m is mask)
+
+
+def _features(
+    mask: np.ndarray,
+    probs: np.ndarray,
+    score: float,
+    n_masks: int,
+    counts: np.ndarray | None,
+    multiplicity: int,
+) -> np.ndarray:
+    """Compute :func:`instance_features` from the scene's per-pixel coverage, shared by a scene.
+
+    ``counts`` (see ``_coverage``) replaces stacking every other mask for every contrail, which
+    made a scene's features quadratic in its number of contrails.
+    """
     # A 0/1 int mask indexes ``probs`` by position and ``~mask`` is a bitwise not, so compute on a
-    # bool copy. But keep the identity test below on the original objects: a bool copy is no longer
-    # ``is`` the mask in scene_masks, and the contrail would then count as overlapping itself.
+    # bool copy. The overlap discounts the mask by identity (``multiplicity``), not by value.
     bool_mask = np.asarray(mask, dtype=bool)
     ys, xs = np.nonzero(bool_mask)
     n = len(ys)
@@ -93,19 +123,13 @@ def instance_features(
         length, straightness, angle = float(n), 0.0, 0.0
     ring = binary_dilation(bool_mask, np.ones((3, 3), dtype=bool)) & ~bool_mask
     ring_mean = float(probs[ring].mean()) if ring.any() else 0.0
-    others = [np.asarray(m, dtype=bool) for m in scene_masks if m is not mask]
-    shared = (
-        float(np.logical_and(bool_mask, np.any(np.stack(others), axis=0)).sum() / n)
-        if others
-        else 0.0
-    )
+    if counts is None or n_masks == multiplicity:
+        shared = 0.0  # no other contrail in the scene
+    else:
+        shared = float(((counts[bool_mask] - multiplicity) > 0).sum() / n)
     h, w = bool_mask.shape
     border = min(centre[0], centre[1], h - 1 - centre[0], w - 1 - centre[1]) / max(h, w)
-    union_area = (
-        float(np.any(np.stack([np.asarray(m, dtype=bool) for m in scene_masks]), axis=0).sum())
-        if scene_masks
-        else 0.0
-    )
+    union_area = float((counts > 0).sum()) if counts is not None else 0.0
     return np.array(
         [
             n,
@@ -122,7 +146,7 @@ def instance_features(
             ring_mean,
             values.mean() - ring_mean,
             score,
-            len(scene_masks),
+            n_masks,
             shared,
             union_area,
             border,
@@ -139,8 +163,12 @@ def scene_features(
     """Return the ``(n_contrails, len(FEATURES))`` features of one scene's detections."""
     if not masks:
         return np.zeros((0, len(FEATURES)))
+    counts = _coverage(masks)
     return np.stack(
-        [instance_features(m, probs, s, masks) for m, s in zip(masks, scores, strict=True)]
+        [
+            _features(m, probs, s, len(masks), counts, _multiplicity(m, masks))
+            for m, s in zip(masks, scores, strict=True)
+        ]
     )
 
 
