@@ -6,7 +6,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "EUPL-1.2"
 license-files = ["LICENSE"]
-authors = [{ name = "EUROCONTROL" }]
+authors = [{ name = "Amine Heffar" }]
+maintainers = [
+    { name = "EUROCONTROL Aviation Sustainability Unit", email = "github-asu@eurocontrol.int" },
+]
 keywords = ["contrails", "segmentation", "remote-sensing", "deep-learning", "satellite", "GOES"]
 classifiers = [
     "Development Status :: 3 - Alpha",

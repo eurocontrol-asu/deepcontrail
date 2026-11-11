@@ -257,3 +257,18 @@ def test_changelog_releases_are_dated():
     assert releases, "the changelog lists the releases"
     undated = [v for v, rest in releases if not re.fullmatch(r" - \d{4}-\d{2}-\d{2}", rest)]
     assert not undated, f"each release heading carries its date (Keep a Changelog): {undated}"
+
+
+@pytest.mark.parametrize("member", MEMBERS, ids=lambda m: m.name)
+def test_member_authors_match_the_citation(member: Path):
+    citation = yaml.safe_load((ROOT / "CITATION.cff").read_text(encoding="utf-8"))
+    project = _project(member)["project"]
+
+    cited = [f"{a['given-names']} {a['family-names']}" for a in citation["authors"]]
+
+    assert [a["name"] for a in project["authors"]] == cited, (
+        "PyPI credits the same people, in the same order, as CITATION.cff and Zenodo"
+    )
+    assert project.get("maintainers") == [
+        {"name": citation["authors"][0]["affiliation"], "email": "github-asu@eurocontrol.int"}
+    ], "users contact the team (the authors' unit and its address), not a personal address"
