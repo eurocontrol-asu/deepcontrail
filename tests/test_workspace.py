@@ -247,3 +247,13 @@ def test_readme_doi_badge_cites_the_citation_doi():
     assert badge_dois == [citation["doi"]], (
         "the README's DOI badge and CITATION.cff cite the same (all-versions) DOI"
     )
+
+
+def test_changelog_releases_are_dated():
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+    releases = re.findall(r"^## \[(\d+\.\d+\.\d+)\](.*)$", changelog, re.M)
+
+    assert releases, "the changelog lists the releases"
+    undated = [v for v, rest in releases if not re.fullmatch(r" - \d{4}-\d{2}-\d{2}", rest)]
+    assert not undated, f"each release heading carries its date (Keep a Changelog): {undated}"
