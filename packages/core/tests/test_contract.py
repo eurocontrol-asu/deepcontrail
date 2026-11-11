@@ -114,13 +114,56 @@ def test_band_manifest_rejects_another_format_version():
         BandManifest.model_validate(_manifest(format_version=2))
 
 
-def test_band_manifest_rejects_unknown_fields():
-    from deepcontrail.core.contract import BandManifest
+def test_read_band_manifest_with_unknown_fields_loads_and_names_them(tmp_path: Path):
+    from deepcontrail.core.contract import read_band_manifest
 
-    payload = _manifest(channels=[_channel(0, "a", abi_band=13)])
+    payload = _manifest(licence="CC-BY-4.0", channels=[_channel(0, "a", abi_band=13)])
+    _write(tmp_path, "spectral_bands/bands.json", payload)
 
-    with pytest.raises(ValueError, match="abi_band"):
-        BandManifest.model_validate(payload)
+    with pytest.warns(UserWarning, match=r"licence.*abi_band|abi_band.*licence") as caught:
+        manifest = read_band_manifest(tmp_path)
+
+    assert manifest.keys == ("a",), "an optional field added within v1 must not break reading"
+    assert "bands.json" in str(caught[0].message), "the warning names the file (a typo?)"
+
+
+def test_read_dataset_info_with_an_unknown_field_loads_and_names_it(tmp_path: Path):
+    from deepcontrail.core.contract import read_dataset_info
+
+    _write(tmp_path, "metadata/dataset_info.json", _info(temporl=True))
+
+    with pytest.warns(UserWarning, match="temporl"):
+        info = read_dataset_info(tmp_path)
+
+    assert info.temporal is None, "an unknown field is ignored, never read as a known one"
+
+
+def test_read_dataset_info_with_only_known_fields_does_not_warn(tmp_path: Path):
+    import warnings
+
+    from deepcontrail.core.contract import read_dataset_info
+
+    _write(tmp_path, "metadata/dataset_info.json", _info(temporal=False, export="20250305"))
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        read_dataset_info(tmp_path)
+
+
+@pytest.mark.parametrize("relative", ["spectral_bands/bands.json", "metadata/dataset_info.json"])
+def test_read_metadata_of_a_newer_format_asks_to_upgrade(tmp_path: Path, relative: str):
+    from deepcontrail.core.contract import (
+        DatasetContractError,
+        read_band_manifest,
+        read_dataset_info,
+    )
+
+    payload = _manifest() if relative.startswith("spectral") else _info()
+    _write(tmp_path, relative, payload | {"format_version": 2})
+    read = read_band_manifest if relative.startswith("spectral") else read_dataset_info
+
+    with pytest.raises(DatasetContractError, match=r"format v2.*upgrade deepcontrail-core"):
+        read(tmp_path)
 
 
 # --- DatasetInfo ------------------------------------------------------------------
