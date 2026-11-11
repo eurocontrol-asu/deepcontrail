@@ -191,6 +191,39 @@ def test_predict_returns_probabilities_at_the_input_size():
     assert probs.max() <= 1.0
 
 
+@pytest.mark.parametrize("configured", [True, False])
+def test_predict_without_tta_argument_follows_the_model_config(configured: bool):
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    pretrained = Pretrained(_model(), _config(tta=configured))
+    composite = _composite()
+
+    default = predict(pretrained, composite)
+
+    with_tta = predict(pretrained, composite, tta=True)
+    without_tta = predict(pretrained, composite, tta=False)
+    assert not np.allclose(with_tta, without_tta), "the test model must give different TTA output"
+    expected = with_tta if configured else without_tta
+    np.testing.assert_allclose(
+        default,
+        expected,
+        atol=1e-6,
+        err_msg="predict uses TTA exactly when the model's config says so",
+    )
+
+
+def test_predict_explicit_tta_overrides_the_model_config():
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    composite = _composite()
+    with_tta = Pretrained(_model(), _config(tta=True))
+    without_tta = Pretrained(with_tta.model, _config(tta=False))
+
+    np.testing.assert_allclose(
+        predict(with_tta, composite, tta=False), predict(without_tta, composite), atol=1e-6
+    )
+
+
 def test_predict_accepts_a_batch():
     from deepcontrail.segmentation.pretrained import Pretrained, predict
 
@@ -302,7 +335,7 @@ def test_predict_matches_the_training_pipeline(synthetic_root: Path):
         expected = torch.sigmoid(module(image[None]))[0, 0].numpy()
         expected_tta = tta_predict(module, image[None])[0].numpy()
 
-    np.testing.assert_allclose(predict(pretrained, composite), expected, atol=1e-6)
+    np.testing.assert_allclose(predict(pretrained, composite, tta=False), expected, atol=1e-6)
     np.testing.assert_allclose(predict(pretrained, composite, tta=True), expected_tta, atol=1e-6)
 
 

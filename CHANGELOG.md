@@ -6,6 +6,12 @@ All notable changes to DeepContrail are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `predict` follows the model's `config.tta` when `tta` is not given (it defaulted to no
+  test-time augmentation, while the released model recommends it). Pass `tta=False` for the
+  previous behaviour.
+
 ## [0.1.0] - 2026-11-11
 
 The first release: semantic segmentation of contrails in GOES-16 ABI imagery, and a preview of

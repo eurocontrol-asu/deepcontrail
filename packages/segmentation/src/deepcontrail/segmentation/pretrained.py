@@ -18,7 +18,7 @@ Example::
 
     model = load_pretrained("path/or/hub-repo-id")
     composite = false_color_from_spectral(bands, model.config.false_color, manifest)
-    probabilities = predict(model, composite, tta=True)
+    probabilities = predict(model, composite)  # with TTA when the model's config says so
     mask = probabilities > model.config.threshold
 """
 
@@ -194,7 +194,7 @@ def predict(
     pretrained: Pretrained,
     composite: np.ndarray,
     *,
-    tta: bool = False,
+    tta: bool | None = None,
     pixel_shift: float = 0.0,
     batch_size: int = 8,
 ) -> np.ndarray:
@@ -209,7 +209,8 @@ def predict(
         bands with ``pretrained.config.false_color``. ``H`` and ``W`` must equal
         ``pretrained.config.native_size``, the size of the scenes the model was trained on.
     tta
-        Average the 8 D4 transforms (see ``pretrained.config.tta``).
+        Average the 8 D4 transforms. ``None`` (default) follows ``pretrained.config.tta``,
+        the setting the model was evaluated with; ``True`` or ``False`` overrides it.
     pixel_shift
         Shift (pixels, right and down) aligning the input with the labels the model
         was trained on; 0 when the input is already aligned.
@@ -260,6 +261,8 @@ def predict(
     if low < 0.0 or high > 1.0:
         raise ValueError(f"composite values must be in [0, 1], got [{low:g}, {high:g}]")
 
+    if tta is None:
+        tta = pretrained.config.tta
     network = _AtInputSize(pretrained.model, (batch.shape[1], batch.shape[2])).eval()
     outputs: list[np.ndarray] = []
     for start in range(0, len(batch), batch_size):
