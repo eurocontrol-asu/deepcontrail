@@ -33,6 +33,34 @@ def _line(row: int, start: int = 8, stop: int = 56, width: int = 1) -> np.ndarra
     return mask
 
 
+def test_scene_features_equal_each_contrails_instance_features_exactly():
+    from deepcontrail.instance.scoring import scene_features
+
+    rng = np.random.default_rng(0)
+    probs = rng.random((_S, _S)).astype(np.float32)
+    crossing = np.zeros((_S, _S), dtype=bool)
+    crossing[:, 30] = True
+    shared = _line(10)
+    masks = [
+        _line(10),  # overlaps the crossing line and the repeated mask below
+        crossing,
+        _line(40, width=3).astype(np.uint8),  # a 0/1 integer mask
+        shared,
+        shared,  # the same object twice: it never counts as overlapping itself
+        _line(60, start=0, stop=_S),  # touches the border
+    ]
+    scores = [0.9, 0.8, 0.7, 0.6, 0.6, 0.5]
+
+    features = scene_features(masks, probs, scores)
+
+    expected = np.stack(
+        [instance_features(m, probs, s, masks) for m, s in zip(masks, scores, strict=True)]
+    )
+    np.testing.assert_array_equal(
+        features, expected, err_msg="the scene-level computation must give identical features"
+    )
+
+
 def _training_set(n: int = 500) -> tuple[np.ndarray, np.ndarray]:
     rng = np.random.default_rng(0)
     x = rng.random((n, len(FEATURES)))
