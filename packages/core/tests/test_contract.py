@@ -261,6 +261,25 @@ def test_read_band_manifest_without_format_version_explains_how_to_upgrade(tmp_p
         read_band_manifest(tmp_path)
 
 
+def test_scene_stems_lists_sorted_stems_and_skips_hidden_files(tmp_path: Path):
+    from deepcontrail.core import scene_stems
+
+    for name in ("b.npy", "a.npy", "._a.npy", ".DS_Store", "c.png", "notes.txt"):
+        (tmp_path / name).write_bytes(b"")
+
+    stems = scene_stems(tmp_path, ".npy")
+
+    assert stems == ["a", "b"], (
+        "hidden files (macOS ._ companions, .DS_Store) are never scenes; only the suffix counts"
+    )
+
+
+def test_scene_stems_of_a_missing_folder_is_empty(tmp_path: Path):
+    from deepcontrail.core import scene_stems
+
+    assert scene_stems(tmp_path / "absent", ".png") == []
+
+
 def test_dataset_contract_error_is_a_value_error():
     from deepcontrail.core.contract import DatasetContractError
 

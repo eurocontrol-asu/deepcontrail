@@ -152,6 +152,29 @@ class DatasetInfo(BaseModel):
     pixel_shift_note: str | None = None
 
 
+def scene_stems(directory: str | Path, suffix: str) -> list[str]:
+    """Return the sorted ids of the files ending in ``suffix`` in one dataset directory.
+
+    Hidden files (names starting with ``.``, such as the ``._<name>`` metadata companions macOS
+    writes when copying to other disks) are never scenes. A missing directory has none.
+
+    Parameters
+    ----------
+    directory
+        A split directory, e.g. ``<root>/spectral_bands/train``.
+    suffix
+        File suffix including the dot, e.g. ``".npy"`` or ``".png"``.
+    """
+    directory = Path(directory)
+    if not directory.is_dir():
+        return []
+    return sorted(
+        p.name[: -len(suffix)]
+        for p in directory.iterdir()
+        if p.name.endswith(suffix) and not p.name.startswith(".") and p.is_file()
+    )
+
+
 def _read(root: str | Path, relative: str, schema: type[_Schema]) -> _Schema:
     path = Path(root) / relative
     if not path.is_file():

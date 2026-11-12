@@ -10,6 +10,7 @@ from deepcontrail.core.contract import (
     DatasetInfo,
     read_band_manifest,
     read_dataset_info,
+    scene_stems,
 )
 from deepcontrail.core.false_color import (
     FalseColorChannel,
@@ -44,6 +45,7 @@ __all__ = [
     "partition_stems",
     "read_band_manifest",
     "read_dataset_info",
+    "scene_stems",
     "split_fingerprint",
     "validate_dataset",
 ]

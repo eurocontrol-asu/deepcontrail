@@ -33,6 +33,7 @@ from deepcontrail.core.contract import (
     Label,
     read_band_manifest,
     read_dataset_info,
+    scene_stems,
 )
 from deepcontrail.core.readers import instance_mask_problem
 from deepcontrail.core.splits import context_frames
@@ -171,7 +172,7 @@ def _read_metadata(
 
 def _labelled_scenes(root: Path, split: str, temporal: bool | None) -> list[str]:
     """Stems of ``spectral_bands/{split}/*.npy``, the declared context frames excluded."""
-    stems = [p.stem for p in (root / "spectral_bands" / split).glob("*.npy")]
+    stems = scene_stems(root / "spectral_bands" / split, ".npy")
     return sorted(set(stems) - context_frames(stems, temporal=temporal))
 
 
@@ -185,7 +186,7 @@ def _check_split_files(root: Path, split: str, scenes: list[str], info: DatasetI
     scene_set = set(scenes)
     for label in info.labels:
         directory, ext = LABEL_FILES[label]
-        present = {p.stem for p in (root / directory / split).glob(f"*{ext}")}
+        present = set(scene_stems(root / directory / split, ext))
         for stem in scenes:
             if stem not in present:
                 msg = f"labelled scene {stem} has no {label} label"
@@ -209,9 +210,9 @@ def _check_contents(
     workers: int,
 ) -> list[Issue]:
     jobs = [
-        (split, path.stem)
+        (split, stem)
         for split in SPLITS
-        for path in sorted((root / "spectral_bands" / split).glob("*.npy"))
+        for stem in scene_stems(root / "spectral_bands" / split, ".npy")
     ]
     labelled = {(split, s) for split, scenes in scenes_by_split.items() for s in scenes}
 

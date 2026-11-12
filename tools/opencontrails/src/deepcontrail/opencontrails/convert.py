@@ -70,6 +70,7 @@ from deepcontrail.core.contract import (
     DatasetInfo,
     Label,
     read_dataset_info,
+    scene_stems,
 )
 from deepcontrail.core.false_color import (
     FalseColorChannel,
@@ -516,7 +517,7 @@ def _format_from_disk(output_dir: Path) -> FormatInfo:
     else:
         is_temporal = any(
             context_frames(
-                [p.stem for p in (output_dir / "spectral_bands" / split).glob("*.npy")],
+                scene_stems(output_dir / "spectral_bands" / split, ".npy"),
                 temporal=True,
             )
             for split in _SPLITS
@@ -529,7 +530,7 @@ def _format_from_disk(output_dir: Path) -> FormatInfo:
 def _write_split_lists(output_dir: Path) -> None:
     """Write ``splits_{split}.txt`` from the consensus masks on disk (complete after resumes)."""
     for split in _SPLITS:
-        stems = sorted(p.stem for p in (output_dir / "semantic_masks" / split).glob("*.png"))
+        stems = scene_stems(output_dir / "semantic_masks" / split, ".png")
         (output_dir / f"splits_{split}.txt").write_text("".join(f"{s}\n" for s in stems))
 
 

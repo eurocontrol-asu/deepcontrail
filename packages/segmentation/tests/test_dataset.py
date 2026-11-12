@@ -41,6 +41,20 @@ def test_init_discovers_paired_samples(synthetic_root: Path):
     assert len(ds) == 4, "5 stems with val_fraction=0.1 → 4 train"
 
 
+def test_init_ignores_hidden_files_copied_from_a_mac(synthetic_root: Path):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    (synthetic_root / "spectral_bands" / "train" / "._x.npy").write_bytes(b"\x00\x05\x16\x07")
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE, root=str(synthetic_root), split="train", image_size=_SYNTH_SIZE
+    )
+
+    ds = SegmentationDataset(cfg)
+
+    assert len(ds) == 4, "a macOS ._ companion is not a scene (and has no mask)"
+
+
 def test_init_splits_train_val_on_the_fly(synthetic_root: Path):
     from deepcontrail.segmentation.config import SegmentationDataConfig
     from deepcontrail.segmentation.dataset import SegmentationDataset
