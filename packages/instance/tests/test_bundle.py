@@ -83,6 +83,18 @@ def test_save_instance_step_without_score_model_writes_only_the_pipeline(tmp_pat
     assert load_instance_step(tmp_path).score_model is None
 
 
+def test_save_instance_step_without_score_model_removes_an_earlier_one(tmp_path: Path):
+    save_instance_step(tmp_path, _CONFIG, _score_model())
+
+    save_instance_step(tmp_path, _CONFIG)
+
+    assert not (tmp_path / "score_model.json").exists(), (
+        "saving without a score model means the pipeline's own scores; an earlier score model "
+        "left in the folder would still be loaded"
+    )
+    assert load_instance_step(tmp_path).score_model is None
+
+
 @pytest.mark.parametrize(("trained_with", "used_with"), [(True, False), (False, True)])
 def test_load_instance_step_rejects_a_score_model_made_with_other_tta(
     tmp_path: Path, trained_with: bool, used_with: bool

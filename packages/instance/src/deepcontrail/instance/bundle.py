@@ -102,6 +102,9 @@ def save_instance_step(
 ) -> None:
     """Write ``instance_pipeline.yaml`` (and ``score_model.json``) into a bundle folder.
 
+    Without ``score_model``, an earlier ``score_model.json`` in the folder is removed, so the
+    bundle uses the pipeline's own scores as asked.
+
     Raises
     ------
     ValueError
@@ -114,3 +117,5 @@ def save_instance_step(
     config.to_yaml(directory / PIPELINE_FILE)
     if score_model is not None:
         score_model.to_json(directory / SCORE_MODEL_FILE)
+    else:
+        (directory / SCORE_MODEL_FILE).unlink(missing_ok=True)

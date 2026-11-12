@@ -16,6 +16,11 @@ All notable changes to DeepContrail are listed here. The format follows
   a dataset of a newer format version gets an error asking to upgrade `deepcontrail-core`. The
   versioning rule is documented in the `deepcontrail-core` README.
 
+### Fixed
+
+- `save_instance_step` without a score model removes an earlier `score_model.json` from the
+  folder; it was left behind and still loaded.
+
 ## [0.1.0] - 2026-11-11
 
 The first release: semantic segmentation of contrails in GOES-16 ABI imagery, and a preview of
