@@ -300,3 +300,17 @@ def test_newest_dependencies_workflow_ignores_the_workspace_pins():
         "lightning-utilities for training runs; without --no-config the job would test those pins, "
         f"not what pip users get: {uv_pip}"
     )
+
+
+def test_citation_references_are_cited_in_the_readme():
+    citation = yaml.safe_load((ROOT / "CITATION.cff").read_text(encoding="utf-8"))
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    titles = [r["title"] for r in citation.get("references", [])]
+    flat = re.sub(r"[{}\s]+", " ", readme)
+    missing = [t for t in titles if re.sub(r"[{}\s]+", " ", t) not in flat]
+
+    assert len(titles) >= 2, "CITATION.cff lists the dataset paper and the prior contrail study"
+    assert not missing, (
+        f"the README's Citing section gives every reference of CITATION.cff: {missing}"
+    )

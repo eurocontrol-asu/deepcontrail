@@ -204,6 +204,18 @@ data, please also cite the dataset:
 }
 ```
 
+DeepContrail continues an earlier study of contrail segmentation on GOES-16 by the same unit:
+
+```bibtex
+@inproceedings{jarry2024deep,
+  author    = {Jarry, Gabriel and Very, Philippe and Heffar, Amine and Torjman-Levavasseur, Valentin},
+  title     = {Deep Semantic Contrails Segmentation of {GOES-16} Satellite Images: A Hyperparameter Exploration},
+  booktitle = {Proceedings of the SESAR Innovation Days},
+  year      = {2024},
+  url       = {https://sesar.eu/sites/default/files/documents/sid/2024/papers/SIDs_2024_paper_028%20final.pdf}
+}
+```
+
 ## Acknowledgements
 
 The models are trained on the [OpenContrails](https://sites.research.google/gr/contrails/public-datasets/)
@@ -212,6 +224,8 @@ dataset by Google Research. GOES-16 imagery is courtesy of NOAA. The segmentatio
 [timm](https://github.com/huggingface/pytorch-image-models) and
 [PyTorch Lightning](https://github.com/Lightning-AI/pytorch-lightning). The instance package's
 references are listed in [`packages/instance`](packages/instance#references-and-acknowledgements).
+DeepContrail continues the contrail segmentation study of Jarry, Very, Heffar and
+Torjman-Levavasseur ([SESAR Innovation Days 2024](https://sesar.eu/sites/default/files/documents/sid/2024/papers/SIDs_2024_paper_028%20final.pdf); see [Citing](#citing)).
 
 ## Contact
 
