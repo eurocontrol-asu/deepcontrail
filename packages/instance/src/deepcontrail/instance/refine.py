@@ -23,7 +23,7 @@ def grow_instances(
     scores: list[float],
     threshold: float,
     steps: int,
-    connectivity: int = 4,
+    connectivity: int = 8,
 ) -> list[np.ndarray]:
     """Grow instances into neighbouring pixels whose probability exceeds ``threshold``.
 
@@ -46,7 +46,7 @@ def grow_instances(
     steps
         Number of growth steps (0 returns copies of the input).
     connectivity
-        4 or 8.
+        4 or 8 (default, as in :class:`InstancePipelineConfig`).
 
     Returns
     -------
