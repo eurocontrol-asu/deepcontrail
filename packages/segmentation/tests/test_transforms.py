@@ -141,9 +141,59 @@ def test_build_augmentation_shift_scale_rotate_included():
     cfg = AugmentationConfig(shift_scale_rotate=0.5)
     transform = build_augmentation(cfg, seed=42)
 
-    # 3 base transforms + the extra ShiftScaleRotate.
-    assert len(transform.transforms) == 4
-    assert any(isinstance(t, albumentations.ShiftScaleRotate) for t in transform.transforms)
+    assert len(transform.transforms) == 4, "3 base transforms + the shift-scale-rotate"
+
+
+def test_build_augmentation_shift_scale_rotate_draws_exactly_like_albumentations_one():
+    if not hasattr(albumentations, "ShiftScaleRotate"):
+        pytest.skip("this albumentations no longer has ShiftScaleRotate to compare with")
+    import warnings
+
+    from deepcontrail.segmentation.config import AugmentationConfig
+    from deepcontrail.segmentation.transforms import build_augmentation, seed_augmentation
+
+    cfg = AugmentationConfig(shift_scale_rotate=0.5)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)  # its own deprecation warning
+        reference = albumentations.Compose(
+            [
+                albumentations.HorizontalFlip(p=cfg.horizontal_flip),
+                albumentations.VerticalFlip(p=cfg.vertical_flip),
+                albumentations.RandomRotate90(p=cfg.random_rotate_90),
+                albumentations.ShiftScaleRotate(
+                    shift_limit=cfg.shift_limit,
+                    scale_limit=cfg.scale_limit,
+                    rotate_limit=cfg.rotate_limit,
+                    p=cfg.shift_scale_rotate,
+                ),
+            ]
+        )
+    seed_augmentation(reference, 7)
+    ours = build_augmentation(cfg, seed=7)
+    rng = np.random.RandomState(0)
+
+    for _ in range(100):
+        image = rng.uniform(0, 1, (32, 32, 3)).astype(np.float32)
+        mask = rng.choice([0, 1], size=(32, 32)).astype(np.uint8)
+        expected = reference(image=image, mask=mask)
+
+        out = ours(image=image, mask=mask)
+
+        np.testing.assert_array_equal(out["image"], expected["image"], err_msg="same recipe")
+        np.testing.assert_array_equal(out["mask"], expected["mask"], err_msg="same recipe")
+
+
+def test_build_augmentation_uses_no_deprecated_albumentations_transform():
+    import warnings
+
+    from deepcontrail.segmentation.config import AugmentationConfig
+    from deepcontrail.segmentation.transforms import build_augmentation
+
+    cfg = AugmentationConfig(shift_scale_rotate=0.5, gaussian_blur=0.5, brightness_contrast=0.5)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        build_augmentation(cfg, seed=0)
 
 
 def test_build_augmentation_photometric_preserves_mask():

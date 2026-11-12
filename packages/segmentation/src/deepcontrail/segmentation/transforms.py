@@ -64,10 +64,16 @@ def build_augmentation(config: AugmentationConfig, seed: int) -> A.Compose:
     ]
     if config.shift_scale_rotate > 0:
         transforms.append(
-            A.ShiftScaleRotate(
-                shift_limit=config.shift_limit,
-                scale_limit=config.scale_limit,
-                rotate_limit=config.rotate_limit,
+            # What the deprecated A.ShiftScaleRotate(shift_limit, scale_limit, rotate_limit)
+            # builds (it subclasses Affine; Affine's other defaults are the same): no shear,
+            # linear image / nearest mask interpolation, a constant 0 border, same draws.
+            A.Affine(
+                scale=(1 - config.scale_limit, 1 + config.scale_limit),
+                translate_percent={
+                    "x": (-config.shift_limit, config.shift_limit),
+                    "y": (-config.shift_limit, config.shift_limit),
+                },
+                rotate=(-config.rotate_limit, config.rotate_limit),
                 p=config.shift_scale_rotate,
             )
         )
