@@ -456,6 +456,18 @@ def test_validate_dataset_treats_an_undeclared_context_frame_as_a_scene(tmp_path
     )
 
 
+def test_validate_dataset_ignores_hidden_files_copied_from_a_mac(tmp_path: Path):
+    root = _make_root(tmp_path)
+    clean = _rules(_validate(root))
+    # macOS writes a "._<name>" metadata companion next to every file it copies.
+    (root / "spectral_bands" / "train" / "._11.npy").write_bytes(b"\x00\x05\x16\x07")
+    (root / "semantic_masks" / "train" / "._11.png").write_bytes(b"\x00\x05\x16\x07")
+
+    report = _validate(root)
+
+    assert _rules(report) == clean, "hidden files are not scenes, so they cannot break a dataset"
+
+
 def test_validate_dataset_reports_metadata_that_is_not_utf8(tmp_path: Path):
     root = _make_root(tmp_path)
     # Write a dataset_info.json with non-UTF-8 bytes (Latin-1 encoded café)

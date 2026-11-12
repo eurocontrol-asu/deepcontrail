@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from deepcontrail.core.contract import scene_stems
 from deepcontrail.core.readers import (
     binarize_mask,
     extract_all_annotator_instances,
@@ -93,7 +94,7 @@ def list_scenes(root: str | Path, split: str) -> list[str]:
     folder = Path(root) / "instance_masks" / split
     if not folder.is_dir():
         raise FileNotFoundError(f"directory not found: {folder}")
-    return sorted(p.stem for p in folder.glob("*.npy"))
+    return scene_stems(folder, ".npy")
 
 
 def split_scenes(

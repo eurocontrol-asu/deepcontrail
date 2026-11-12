@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from deepcontrail.core.contract import read_band_manifest, read_dataset_info
+from deepcontrail.core.contract import read_band_manifest, read_dataset_info, scene_stems
 from deepcontrail.core.false_color import check_false_color, load_spectral_false_color
 from deepcontrail.core.readers import (
     binarize_mask,
@@ -147,7 +147,7 @@ class SegmentationDataset:
         dataset root.
         """
         mask_ext = ".npy" if self.config.mask_type == "probability" else ".png"
-        image_stems = [p.stem for p in sorted(image_dir.glob("*.npy"))]
+        image_stems = scene_stems(image_dir, ".npy")
         context = context_frames(image_stems, temporal=read_dataset_info(self._root).temporal)
         stems: list[str] = []
         missing: list[str] = []

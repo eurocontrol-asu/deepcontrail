@@ -44,6 +44,10 @@ the [converter](https://github.com/eurocontrol-asu/deepcontrail/tree/main/tools/
 
 All JSON and text files (`bands.json`, `dataset_info.json`, `splits_*.txt`) must be UTF-8 encoded.
 
+Hidden files (names starting with `.`, such as the `._<name>` companions macOS writes when
+copying to other disks) are never scenes; `scene_stems(directory, suffix)` lists the ids of one
+directory this way.
+
 ### `spectral_bands/bands.json`
 
 ```json
