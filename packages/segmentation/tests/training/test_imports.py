@@ -30,10 +30,15 @@ def test_import_find_optimal_threshold() -> None:
     assert callable(find_optimal_threshold)
 
 
-def test_import_resolve_run_paths() -> None:
-    from deepcontrail.segmentation.training import resolve_run_paths
+def test_training_api_does_not_expose_the_experiment_script_settings() -> None:
+    import deepcontrail.segmentation.training as training
 
-    assert callable(resolve_run_paths)
+    script_only = {"resolve_run_paths", "CHECKPOINT_ROOT_ENV", "MLFLOW_TRACKING_URI_ENV"}
+
+    assert not script_only & set(training.__all__), (
+        "where scripts/train.py writes its runs is the script's business, not the library's"
+    )
+    assert not any(hasattr(training, name) for name in script_only)
 
 
 def test_import_load_configs() -> None:
