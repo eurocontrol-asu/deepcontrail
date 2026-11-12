@@ -45,3 +45,17 @@ references:
     start: 1
     end: 14
     year: 2024
+  - type: conference-paper
+    title: "Deep Semantic Contrails Segmentation of GOES-16 Satellite Images: A Hyperparameter Exploration"
+    authors:
+      - family-names: Jarry
+        given-names: Gabriel
+      - family-names: Very
+        given-names: Philippe
+      - family-names: Heffar
+        given-names: Amine
+      - family-names: Torjman-Levavasseur
+        given-names: Valentin
+    collection-title: "Proceedings of the SESAR Innovation Days"
+    year: 2024
+    url: "https://sesar.eu/sites/default/files/documents/sid/2024/papers/SIDs_2024_paper_028%20final.pdf"

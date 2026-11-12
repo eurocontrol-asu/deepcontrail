@@ -9,6 +9,7 @@
   "keywords": ["contrails", "semantic segmentation", "instance segmentation", "satellite imagery", "remote sensing", "GOES-16", "deep learning", "aviation", "climate"],
   "related_identifiers": [
     {"identifier": "https://huggingface.co/eurocontrol-asu/deepcontrail-segmentation", "relation": "isSupplementedBy", "resource_type": "other"},
-    {"identifier": "10.1109/TGRS.2023.3345226", "relation": "references", "resource_type": "publication-article"}
+    {"identifier": "10.1109/TGRS.2023.3345226", "relation": "references", "resource_type": "publication-article"},
+    {"identifier": "https://sesar.eu/sites/default/files/documents/sid/2024/papers/SIDs_2024_paper_028%20final.pdf", "relation": "references", "resource_type": "publication-conferencepaper"}
   ]
 }
