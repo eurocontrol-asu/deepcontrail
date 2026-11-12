@@ -46,6 +46,25 @@ def test_grow_instances_eight_connectivity_adds_diagonals():
     assert grown[0].sum() == 9
 
 
+def test_grow_instances_default_connectivity_matches_the_pipeline():
+    from deepcontrail.instance import InstancePipelineConfig
+
+    probs = np.ones((H, W), np.float32)
+    default = grow_instances([_mask((4, 4))], probs, [1.0], threshold=0.5, steps=1)
+
+    pipeline = grow_instances(
+        [_mask((4, 4))],
+        probs,
+        [1.0],
+        threshold=0.5,
+        steps=1,
+        connectivity=InstancePipelineConfig().grow_connectivity,
+    )
+    assert np.array_equal(default[0], pipeline[0]), (
+        "called directly, grow_instances must grow like the pipeline does by default"
+    )
+
+
 def test_grow_instances_respects_probability_threshold():
     probs = np.zeros((H, W), dtype=np.float32)
     probs[4, 5] = 0.6
