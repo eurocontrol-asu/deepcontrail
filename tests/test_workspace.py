@@ -314,3 +314,17 @@ def test_citation_references_are_cited_in_the_readme():
     assert not missing, (
         f"the README's Citing section gives every reference of CITATION.cff: {missing}"
     )
+
+
+@pytest.mark.parametrize("member", MEMBERS, ids=lambda m: m.name)
+def test_member_requires_the_core_release_it_is_built_with(member: Path):
+    project = _project(member)["project"]
+    core = [d for d in project["dependencies"] if re.match(r"deepcontrail-core\b", d)]
+    if project["name"] == "deepcontrail-core":
+        pytest.skip("core itself")
+    major, minor = _project(ROOT)["project"]["version"].split(".")[:2]
+
+    assert core == [f"deepcontrail-core>={major}.{minor},<{major}.{int(minor) + 1}"], (
+        "packages are released in lockstep and use core's newest API (e.g. scene_stems): each must "
+        f"require the core minor version it is built with, got {core}"
+    )
