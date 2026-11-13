@@ -53,18 +53,6 @@ FEATURES: tuple[str, ...] = (
 """Names of the features of one detected contrail, the columns of :func:`scene_features`."""
 
 
-def _instance_features(
-    mask: np.ndarray, probs: np.ndarray, score: float, scene_masks: Sequence[np.ndarray]
-) -> np.ndarray:
-    """Features of one contrail, computed alone: the reference that tests compare with.
-
-    ``mask`` must be one of the very objects in ``scene_masks`` (it is found by identity);
-    use :func:`scene_features`, which describes a whole scene at once.
-    """
-    counts = _coverage(scene_masks)
-    return _features(mask, probs, score, len(scene_masks), counts, _multiplicity(mask, scene_masks))
-
-
 def _coverage(scene_masks: Sequence[np.ndarray]) -> np.ndarray | None:
     """Per pixel, how many of the scene's masks cover it (``None`` for an empty scene)."""
     if not scene_masks:

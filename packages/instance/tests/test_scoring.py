@@ -20,7 +20,6 @@ from deepcontrail.instance import (
     scene_features,
     training_data,
 )
-from deepcontrail.instance.scoring import _instance_features
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,32 +31,6 @@ def _line(row: int, start: int = 8, stop: int = 56, width: int = 1) -> np.ndarra
     mask = np.zeros((_S, _S), dtype=bool)
     mask[row : row + width, start:stop] = True
     return mask
-
-
-def test_scene_features_equal_each_contrails_reference_features_exactly():
-    rng = np.random.default_rng(0)
-    probs = rng.random((_S, _S)).astype(np.float32)
-    crossing = np.zeros((_S, _S), dtype=bool)
-    crossing[:, 30] = True
-    shared = _line(10)
-    masks = [
-        _line(10),  # overlaps the crossing line and the repeated mask below
-        crossing,
-        _line(40, width=3).astype(np.uint8),  # a 0/1 integer mask
-        shared,
-        shared,  # the same object twice: it never counts as overlapping itself
-        _line(60, start=0, stop=_S),  # touches the border
-    ]
-    scores = [0.9, 0.8, 0.7, 0.6, 0.6, 0.5]
-
-    features = scene_features(masks, probs, scores)
-
-    expected = np.stack(
-        [_instance_features(m, probs, s, masks) for m, s in zip(masks, scores, strict=True)]
-    )
-    np.testing.assert_array_equal(
-        features, expected, err_msg="the scene-level computation must give identical features"
-    )
 
 
 def _training_set(n: int = 500) -> tuple[np.ndarray, np.ndarray]:
@@ -110,8 +83,72 @@ def test_scene_features_describe_size_shape_and_probability() -> None:
     assert named["width"] == pytest.approx(2.0, rel=0.05)
     assert named["mean_prob"] == pytest.approx(0.8)
     assert named["ring_mean_prob"] == pytest.approx(0.1), "pixels just around the contrail"
+    assert named["contrast"] == pytest.approx(0.7), "mean probability minus the ring's"
     assert named["pipeline_score"] == pytest.approx(0.6)
     assert named["n_scene_instances"] == 1
+
+
+@pytest.mark.parametrize(
+    ("pixels", "sin2", "cos2"),
+    [
+        ((np.full(48, 10), np.arange(8, 56)), 0.0, 1.0),  # horizontal
+        ((np.arange(8, 56), np.full(48, 30)), 0.0, -1.0),  # vertical
+        ((np.arange(8, 56), np.arange(8, 56)), 1.0, 0.0),  # diagonal
+    ],
+)
+def test_scene_features_of_a_straight_line_give_its_orientation(pixels, sin2, cos2) -> None:
+    mask = np.zeros((_S, _S), dtype=bool)
+    mask[pixels] = True
+    probs = mask.astype(np.float32)
+
+    named = dict(zip(FEATURES, scene_features([mask], probs, [0.5])[0], strict=True))
+
+    assert named["straightness"] == pytest.approx(1.0), "a one-pixel line is perfectly straight"
+    assert named["orientation_sin2"] == pytest.approx(sin2, abs=1e-12)
+    assert named["orientation_cos2"] == pytest.approx(cos2, abs=1e-12)
+
+
+def test_scene_features_of_a_square_blob_have_no_straightness() -> None:
+    mask = np.zeros((_S, _S), dtype=bool)
+    mask[20:25, 20:25] = True
+
+    named = dict(
+        zip(FEATURES, scene_features([mask], mask.astype(np.float32), [0.5])[0], strict=True)
+    )
+
+    assert named["straightness"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_scene_features_summarise_the_probabilities_inside_the_contrail() -> None:
+    mask = _line(10, start=0, stop=10)  # 10 pixels, centre (10, 4.5)
+    values = np.arange(0.05, 1.0, 0.1)  # 0.05, 0.15, ..., 0.95
+    probs = np.zeros((_S, _S), dtype=np.float32)
+    probs[10, 0:10] = values
+
+    named = dict(zip(FEATURES, scene_features([mask], probs, [0.5])[0], strict=True))
+
+    assert named["mean_prob"] == pytest.approx(0.5, abs=1e-6)
+    assert named["min_prob"] == pytest.approx(0.05, abs=1e-6)
+    assert named["max_prob"] == pytest.approx(0.95, abs=1e-6)
+    assert named["std_prob"] == pytest.approx(np.std(values), abs=1e-6)
+    assert named["p10_prob"] == pytest.approx(0.14, abs=1e-6)
+    assert named["p90_prob"] == pytest.approx(0.86, abs=1e-6)
+    assert named["frac_above_0_7"] == pytest.approx(0.3), "0.75, 0.85 and 0.95"
+    assert named["ring_mean_prob"] == 0.0
+    assert named["contrast"] == pytest.approx(0.5, abs=1e-6)
+    assert named["border_distance"] == pytest.approx(4.5 / _S), "nearest edge of the centre"
+
+
+def test_scene_features_describe_the_scene_the_same_for_every_contrail() -> None:
+    masks = [_line(10), _line(40, width=3)]  # 48 + 144 pixels, disjoint
+    probs = np.where(masks[0] | masks[1], 0.8, 0.0).astype(np.float32)
+
+    features = scene_features(masks, probs, [0.5, 0.5])
+
+    named = [dict(zip(FEATURES, row, strict=True)) for row in features]
+    assert [n["n_scene_instances"] for n in named] == [2, 2]
+    assert [n["scene_pred_area"] for n in named] == [192, 192]
+    assert [n["shared_pixels_frac"] for n in named] == [0.0, 0.0]
 
 
 def test_scene_features_treat_integer_masks_like_boolean_masks() -> None:
