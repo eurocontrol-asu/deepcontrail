@@ -136,7 +136,7 @@ def test_mannstein_config_rejects_r_score_out_of_range():
     from deepcontrail.instance.config import MannsteinConfig
 
     with pytest.raises(ValidationError):
-        MannsteinConfig(min_r_score=1.5)
+        MannsteinConfig(min_straightness=1.5)
 
 
 def test_mannstein_config_rejects_iou_out_of_range():

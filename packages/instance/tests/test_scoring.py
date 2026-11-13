@@ -313,11 +313,25 @@ def test_score_model_from_newer_library_asks_to_upgrade(tmp_path: Path) -> None:
     path = tmp_path / "score_model.json"
     ScoreModel.fit(x, y, _CONFIG).to_json(path)
     data = json.loads(path.read_text())
-    data["format_version"] = 2
+    data["format_version"] = 3
     path.write_text(json.dumps(data))
 
     with pytest.raises(ValueError, match="upgrade deepcontrail-instance"):
         ScoreModel.from_json(path)
+
+
+def test_score_model_reads_a_format_1_file(tmp_path: Path) -> None:
+    path = tmp_path / "score_model.json"
+    _tree_model().to_json(path)
+    data = json.loads(path.read_text())
+    data["format_version"] = 1
+    data["pipeline_config"]["mannstein"]["min_r_score"] = 0.5
+    del data["pipeline_config"]["mannstein"]["min_straightness"]
+    path.write_text(json.dumps(data))
+
+    loaded = ScoreModel.from_json(path)
+
+    assert loaded.pipeline_config.mannstein.min_straightness == 0.25, "format 1 compared r squared"
 
 
 @pytest.mark.parametrize("version", [None, 0, "1"])

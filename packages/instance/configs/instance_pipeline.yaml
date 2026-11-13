@@ -8,7 +8,7 @@
 # per-annotator mAP over IoU 0.25-0.75; mAP 0.274 on 1,009 holdout scenes. The line filter is
 # off: at these settings it kept every pixel.
 # For contrails agreed by most annotators, see configs/instance_pipeline_consensus.yaml.
-format_version: 1
+format_version: 2
 mannstein:
   line_filter: false
   num_kernels: 24
@@ -18,7 +18,7 @@ mannstein:
   response_threshold: 0.00012714987768293402
   min_pixels: 5
   min_length: 4.173422506229322
-  min_r_score: 0.07830797096507566
+  min_straightness: 0.006132138316667133
   lookback: 53
   alignment_threshold: 2.4559123612088265
   fit_avg_size: 2

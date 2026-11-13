@@ -168,7 +168,7 @@ def test_detect_instances_scores_empty_mask_returns_empty_lists():
 
 def _short_line_config(**kw: int | None) -> MannsteinConfig:
     """Lenient settings so only the end-averaging size decides whether a short line survives."""
-    return MannsteinConfig(min_pixels=3, min_length=2.0, min_r_score=0.0, **kw)
+    return MannsteinConfig(min_pixels=3, min_length=2.0, min_straightness=0.0, **kw)
 
 
 def test_filter_avg_size_none_reuses_fit_avg_size():

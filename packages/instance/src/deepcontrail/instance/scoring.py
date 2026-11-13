@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 from scipy.ndimage import binary_dilation
 
-from deepcontrail.instance.config import InstancePipelineConfig
+from deepcontrail.instance.config import InstancePipelineConfig, _upgrade_mannstein_v1
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -306,9 +306,12 @@ class ScoreModel:
     features: tuple[str, ...] = FEATURES
     trained_on: dict[str, Any] = field(default_factory=dict)
 
-    FORMAT_VERSION: ClassVar[int] = 1
+    FORMAT_VERSION: ClassVar[int] = 2
     """Version of the JSON layout. Any new field, or change of meaning, raises it, so an older
-    library refuses a newer file instead of misreading it."""
+    library refuses a newer file instead of misreading it.
+
+    Version 1 files are still read: their ``pipeline_config`` is converted with
+    :func:`deepcontrail.instance.config._upgrade_mannstein_v1`."""
 
     ESTIMATOR_SETTINGS: ClassVar[dict[str, Any]] = {
         "max_iter": 300,
@@ -418,7 +421,7 @@ class ScoreModel:
                 f"deepcontrail-instance (this one reads version {cls.FORMAT_VERSION}); "
                 "upgrade deepcontrail-instance"
             )
-        if version != cls.FORMAT_VERSION:
+        if version not in (1, cls.FORMAT_VERSION):
             raise ValueError(
                 f"{path}: score model format version {version!r} is not supported "
                 f"(expected {cls.FORMAT_VERSION}); retrain it with this library version"
@@ -431,7 +434,10 @@ class ScoreModel:
         trees = tuple({k: np.asarray(v) for k, v in tree.items()} for tree in data["trees"])
         for i, tree in enumerate(trees):
             _check_tree(i, tree)
-        config = InstancePipelineConfig.from_dict(data["pipeline_config"])
+        pipeline = dict(data["pipeline_config"])
+        if version == 1 and isinstance(pipeline.get("mannstein"), dict):
+            pipeline["mannstein"] = _upgrade_mannstein_v1(pipeline["mannstein"])
+        config = InstancePipelineConfig.from_dict(pipeline)
         return cls(
             float(data["baseline"]),
             trees,

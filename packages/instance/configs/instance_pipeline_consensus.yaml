@@ -6,7 +6,7 @@
 # Checked with scripts/optimize_pipeline.py --objective consensus (100 trials) on the same
 # validation predictions: no searched setting beat these on the 1,009 holdout scenes (consensus
 # mAP 0.442, within noise of the best). The line filter is off.
-format_version: 1
+format_version: 2
 mannstein:
   line_filter: false
   num_kernels: 27
@@ -16,7 +16,7 @@ mannstein:
   response_threshold: 0.00012114447935536606
   min_pixels: 10
   min_length: 3.6267323822860877
-  min_r_score: 0.05470144383145452
+  min_straightness: 0.0029922479572457735
   lookback: 53
   alignment_threshold: 2.663708517028666
   fit_avg_size: 3

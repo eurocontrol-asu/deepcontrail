@@ -263,7 +263,7 @@ def test_pipeline_config_yaml_without_mannstein_section_uses_the_preset(tmp_path
 
 def test_pipeline_config_yaml_empty_mannstein_section_uses_the_preset(tmp_path: Path):
     path = tmp_path / "config.yaml"
-    path.write_text("format_version: 1\nmannstein:\npipeline:\n  grow_steps: 0\n")
+    path.write_text("format_version: 2\nmannstein:\npipeline:\n  grow_steps: 0\n")
 
     cfg = InstancePipelineConfig.from_yaml(path)
 
@@ -284,11 +284,58 @@ def test_pipeline_config_yaml_records_and_checks_its_format_version(tmp_path: Pa
     path = tmp_path / "out.yaml"
     InstancePipelineConfig().to_yaml(path)
 
-    assert yaml.safe_load(path.read_text())["format_version"] == 1
+    assert yaml.safe_load(path.read_text())["format_version"] == 2
     with pytest.raises(ValueError, match="upgrade deepcontrail-instance"):
-        InstancePipelineConfig.from_yaml(_write_yaml(tmp_path, {"format_version": 2}))
+        InstancePipelineConfig.from_yaml(_write_yaml(tmp_path, {"format_version": 3}))
     with pytest.raises(ValueError, match="not supported"):
         InstancePipelineConfig.from_yaml(_write_yaml(tmp_path, {"format_version": 0}))
+
+
+def test_pipeline_config_reads_a_format_1_file_with_min_r_score(tmp_path: Path):
+    path = tmp_path / "v1.yaml"
+    path.write_text("format_version: 1\nmannstein:\n  min_r_score: 0.3\n")
+
+    config = InstancePipelineConfig.from_yaml(path)
+
+    assert config.mannstein.min_straightness == 0.3**2, "format 1 compared r squared"
+
+
+@pytest.mark.parametrize(
+    ("file", "new_value", "old_value"),
+    [
+        ("instance_pipeline.yaml", 0.006132138316667133, 0.07830797096507566),
+        ("instance_pipeline_consensus.yaml", 0.0029922479572457735, 0.05470144383145452),
+        ("mannstein_annotator_masks.yaml", 0.0029922479572457735, 0.05470144383145452),
+    ],
+)
+def test_shipped_configs_reproduce_their_format_1_values(
+    tmp_path: Path, file: str, new_value: float, old_value: float
+) -> None:
+    from pathlib import Path
+
+    from deepcontrail.instance.config import MannsteinConfig
+
+    configs_dir = Path(__file__).resolve().parents[1] / "configs"
+    text = (configs_dir / file).read_text()
+    format_1 = text.replace("format_version: 2", "format_version: 1").replace(
+        f"min_straightness: {new_value}", f"min_r_score: {old_value}"
+    )
+    assert "min_r_score" in format_1, "the format-1 text must carry the legacy key"
+
+    format_2_path = tmp_path / "v2.yaml"
+    format_2_path.write_text(text)
+    format_1_path = tmp_path / "v1.yaml"
+    format_1_path.write_text(format_1)
+
+    loader = (
+        MannsteinConfig.from_yaml
+        if file == "mannstein_annotator_masks.yaml"
+        else InstancePipelineConfig.from_yaml
+    )
+
+    assert loader(format_1_path) == loader(format_2_path), (
+        f"configs/{file} loads the same from its format-1 and format-2 text"
+    )
 
 
 def test_configs_reject_unknown_fields_in_code():

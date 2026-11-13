@@ -41,7 +41,7 @@ def _run_pipeline(
         mask,
         config.min_pixels,
         config.min_length,
-        config.min_r_score,
+        config.min_straightness,
         config.lookback,
         config.alignment_threshold,
         config.fit_avg_size if config.filter_avg_size is None else config.filter_avg_size,

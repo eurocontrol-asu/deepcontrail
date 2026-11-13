@@ -82,16 +82,16 @@ def straightness(rows: np.ndarray, cols: np.ndarray) -> float:
 def is_long_and_straight(
     rows: np.ndarray,
     cols: np.ndarray,
-    min_r_score: float,
+    min_straightness: float,
     min_length: float,
     avg_size: int,
 ) -> bool:
     """Keep a region only if it is straight enough and long enough.
 
-    Compares the region's :func:`straightness` with ``min_r_score²`` (so ``min_r_score`` reads
-    like a correlation threshold). The length runs between the means of the ``avg_size`` extreme
-    coordinates on each axis, projected onto a line fitted along the more-spread axis from the
-    exact integer sums of the whole region, and is compared with ``min_length``.
+    Compares the region's :func:`straightness` with ``min_straightness``. The length runs between
+    the means of the ``avg_size`` extreme coordinates on each axis, projected onto a line fitted
+    along the more-spread axis from the exact integer sums of the whole region, and is compared
+    with ``min_length``.
 
     Parameters
     ----------
@@ -99,8 +99,8 @@ def is_long_and_straight(
         Row coordinates of the region pixels.
     cols
         Column coordinates of the region pixels.
-    min_r_score
-        Straightness threshold, squared before the comparison.
+    min_straightness
+        Minimum straightness, in [0, 1].
     min_length
         Minimum contrail pixel length.
     avg_size
@@ -144,7 +144,7 @@ def is_long_and_straight(
 
     length = float(np.hypot(c_lo - c_hi, r_lo - r_hi))
     linearity = straightness(rows_arr, cols_arr)
-    return bool(linearity > np.square(min_r_score) and length > min_length)
+    return bool(linearity > min_straightness and length > min_length)
 
 
 def _axis_endpoints(values: np.ndarray, n: int, avg_size: int) -> tuple[float, float]:
