@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 from scipy.ndimage import binary_dilation
 
-from deepcontrail.instance.config import InstancePipelineConfig
+from deepcontrail.instance.config import InstancePipelineConfig, _upgrade_mannstein_v1
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -50,32 +50,7 @@ FEATURES: tuple[str, ...] = (
     "orientation_sin2",
     "orientation_cos2",
 )
-"""Names of the features of one detected contrail, in the order of :func:`instance_features`."""
-
-
-def instance_features(
-    mask: np.ndarray, probs: np.ndarray, score: float, scene_masks: Sequence[np.ndarray]
-) -> np.ndarray:
-    """Describe one detected contrail (size, shape, probabilities, surroundings).
-
-    Parameters
-    ----------
-    mask
-        Boolean ``(H, W)`` mask of the contrail.
-    probs
-        The scene's probability map ``(H, W)``.
-    score
-        The contrail's score from the pipeline.
-    scene_masks
-        All contrails detected in the scene, ``mask`` included.
-
-    Returns
-    -------
-    np.ndarray
-        One value per name in :data:`FEATURES`.
-    """
-    counts = _coverage(scene_masks)
-    return _features(mask, probs, score, len(scene_masks), counts, _multiplicity(mask, scene_masks))
+"""Names of the features of one detected contrail, the columns of :func:`scene_features`."""
 
 
 def _coverage(scene_masks: Sequence[np.ndarray]) -> np.ndarray | None:
@@ -100,7 +75,7 @@ def _features(
     counts: np.ndarray | None,
     multiplicity: int,
 ) -> np.ndarray:
-    """Compute :func:`instance_features` from the scene's per-pixel coverage, shared by a scene.
+    """Compute one contrail's features from the scene's per-pixel coverage.
 
     ``counts`` (see ``_coverage``) replaces stacking every other mask for every contrail, which
     made a scene's features quadratic in its number of contrails.
@@ -160,7 +135,26 @@ def _features(
 def scene_features(
     masks: Sequence[np.ndarray], probs: np.ndarray, scores: Sequence[float]
 ) -> np.ndarray:
-    """Return the ``(n_contrails, len(FEATURES))`` features of one scene's detections."""
+    """Describe every detected contrail of one scene (size, shape, probabilities, surroundings).
+
+    These are the inputs of a :class:`ScoreModel`.
+
+    Parameters
+    ----------
+    masks
+        Boolean ``(H, W)`` masks of all the contrails detected in the scene.
+    probs
+        The scene's probability map ``(H, W)``.
+    scores
+        The pipeline's score of each contrail, aligned with ``masks``.
+
+    Returns
+    -------
+    np.ndarray
+        ``(len(masks), len(FEATURES))``: one row per contrail, one column per name in
+        :data:`FEATURES`. ``shared_pixels_frac`` counts the pixels a contrail shares with the
+        scene's other masks.
+    """
     if not masks:
         return np.zeros((0, len(FEATURES)))
     counts = _coverage(masks)
@@ -312,8 +306,12 @@ class ScoreModel:
     features: tuple[str, ...] = FEATURES
     trained_on: dict[str, Any] = field(default_factory=dict)
 
-    FORMAT_VERSION: ClassVar[int] = 1
-    """Version of the JSON layout; bump it when the features or the tree format change."""
+    FORMAT_VERSION: ClassVar[int] = 2
+    """Version of the JSON layout. Any new field, or change of meaning, raises it, so an older
+    library refuses a newer file instead of misreading it.
+
+    Version 1 files are still read: their ``pipeline_config`` is converted with
+    :func:`deepcontrail.instance.config._upgrade_mannstein_v1`."""
 
     ESTIMATOR_SETTINGS: ClassVar[dict[str, Any]] = {
         "max_iter": 300,
@@ -410,20 +408,36 @@ class ScoreModel:
         Raises
         ------
         ValueError
-            If the file has another format version or other feature names.
+            If the file has another format version (a newer one asks to upgrade the library) or
+            other feature names.
         """
         data = json.loads(Path(path).read_text())
-        if data.get("format_version") != cls.FORMAT_VERSION:
+        if not isinstance(data, dict):
+            raise ValueError(f"{path}: a score model file holds a JSON object")
+        version = data.get("format_version")
+        if isinstance(version, int) and version > cls.FORMAT_VERSION:
             raise ValueError(
-                f"score model format version {data.get('format_version')!r} is not supported "
+                f"{path}: score model format version {version} comes from a newer "
+                f"deepcontrail-instance (this one reads version {cls.FORMAT_VERSION}); "
+                "upgrade deepcontrail-instance"
+            )
+        if version not in (1, cls.FORMAT_VERSION):
+            raise ValueError(
+                f"{path}: score model format version {version!r} is not supported "
                 f"(expected {cls.FORMAT_VERSION}); retrain it with this library version"
             )
+        missing = sorted({"features", "baseline", "pipeline_config", "trees"} - set(data))
+        if missing:
+            raise ValueError(f"{path}: score model file misses {missing}")
         if tuple(data["features"]) != FEATURES:
             raise ValueError("score model features differ from this library's FEATURES")
         trees = tuple({k: np.asarray(v) for k, v in tree.items()} for tree in data["trees"])
         for i, tree in enumerate(trees):
             _check_tree(i, tree)
-        config = InstancePipelineConfig.from_dict(data["pipeline_config"])
+        pipeline = dict(data["pipeline_config"])
+        if version == 1 and isinstance(pipeline.get("mannstein"), dict):
+            pipeline["mannstein"] = _upgrade_mannstein_v1(pipeline["mannstein"])
+        config = InstancePipelineConfig.from_dict(pipeline)
         return cls(
             float(data["baseline"]),
             trees,

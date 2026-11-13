@@ -16,6 +16,7 @@ This module reads and writes them from a folder only, so ``deepcontrail.instance
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -59,7 +60,7 @@ def load_instance_step(directory: str | Path, *, tta: bool | None = None) -> Ins
     -------
     InstanceStep
         ``instance_pipeline.yaml`` (else ``InstancePipelineConfig()``) and ``score_model.json``
-        (else ``None``).
+        (else ``None``). A missing ``instance_pipeline.yaml`` gives a ``UserWarning``.
 
     Raises
     ------
@@ -73,11 +74,16 @@ def load_instance_step(directory: str | Path, *, tta: bool | None = None) -> Ins
     if not directory.is_dir():
         raise FileNotFoundError(f"{directory}: no such bundle folder")
     pipeline_path = directory / PIPELINE_FILE
-    config = (
-        InstancePipelineConfig.from_yaml(pipeline_path)
-        if pipeline_path.is_file()
-        else InstancePipelineConfig()
-    )
+    if pipeline_path.is_file():
+        config = InstancePipelineConfig.from_yaml(pipeline_path)
+    else:
+        warnings.warn(
+            f"{directory} has no {PIPELINE_FILE}: using the default InstancePipelineConfig(), "
+            "tuned for DeepContrail's reference model",
+            UserWarning,
+            stacklevel=2,
+        )
+        config = InstancePipelineConfig()
     score_path = directory / SCORE_MODEL_FILE
     if not score_path.is_file():
         return InstanceStep(config)

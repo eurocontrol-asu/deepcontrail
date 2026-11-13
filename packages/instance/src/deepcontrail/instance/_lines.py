@@ -17,7 +17,7 @@ import numpy as np
 from scipy.signal import oaconvolve
 
 # A kernel is a difference of two Gaussians of the signed distance ``d`` to its axis. The two
-# sigmas, in kernel-cell units, are sigma1/size and (sigma1 + sigma_delta)/size.
+# sigmas, on the kernel's [-1, 1] grid, are sigma1/size and (sigma1 + sigma_delta)/size.
 
 
 def line_orientations(num_kernels: int) -> np.ndarray:
@@ -84,9 +84,9 @@ def build_kernels(
     kernel_size
         Kernel spatial size in pixels.
     sigma1
-        Inner Gaussian sigma in pixels.
+        Inner Gaussian width (see MannsteinConfig.sigma1: about half of it in pixels).
     sigma_delta
-        Outer minus inner Gaussian sigma, in pixels.
+        Outer minus inner Gaussian width, in the same units.
 
     Returns
     -------
@@ -135,9 +135,9 @@ def detect_line_pixels(
     kernel_size
         Kernel spatial size in pixels (odd).
     sigma1
-        Inner Gaussian sigma in pixels.
+        Inner Gaussian width (see MannsteinConfig.sigma1: about half of it in pixels).
     sigma_delta
-        Outer minus inner Gaussian sigma, in pixels.
+        Outer minus inner Gaussian width, in the same units.
     threshold
         Response / mask value threshold for detection.
 

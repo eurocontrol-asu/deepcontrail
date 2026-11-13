@@ -291,6 +291,13 @@ def test_split_scenes_refuses_an_empty_holdout(n, n_search, n_holdout):
         split_scenes(stems, seed=0, n_search=n_search, n_holdout=n_holdout)
 
 
+def test_check_size_rejects_a_prediction_off_the_mask_grid() -> None:
+    from deepcontrail.instance._evaluation import check_size
+
+    with pytest.raises(ValueError, match="4x5"):
+        check_size(np.zeros((4, 5)), (4, 4), "s1")
+
+
 # --- parallel detection without fork ---
 
 

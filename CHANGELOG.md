@@ -6,6 +6,41 @@ All notable changes to DeepContrail are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `deepcontrail-instance` is no longer a preview: it has the same status as the other packages
+  (alpha: the API may change between minor versions, and every change is listed here).
+- `MannsteinConfig.min_r_score` is renamed `min_straightness` and compared directly with the
+  straightness, so its value is the square of the old one (defaults 0.00613 and, for the
+  consensus settings, 0.00299; detections are unchanged). `instance_pipeline.yaml` and
+  `score_model.json` move to format version 2; version-1 files, such as those of the published
+  model `v0.1.0`, are still read and converted.
+- `instance_pipeline.yaml` and `score_model.json` written by a newer `deepcontrail-instance` (a
+  higher `format_version`) are refused with a message to upgrade. Any new field, or change of
+  meaning, in these files raises their `format_version`.
+- `load_instance_step` warns when a bundle has no `instance_pipeline.yaml` and the default
+  settings are used.
+- The root README shows the instance results and, in the quickstart, how to separate the
+  contrails. The instance README explains what a score means, corrects the crossing-angle limit
+  (contrails crossing at less than about 25° often merge) and says which instance step is
+  published.
+
+### Fixed
+
+- An empty section in an instance config (`mannstein:` with nothing below it) counts as empty
+  instead of raising a `TypeError`; a malformed config or score-model file gets a `ValueError`
+  that names the file.
+- The instance training and tuning scripts skip hidden files, like the rest of the library.
+- The line-filter widths `sigma1` and `sigma_delta` are documented in their real units (about
+  half a pixel each), not in pixels.
+
+### Removed
+
+- `deepcontrail.instance.instance_features`: it found the contrail among the scene's masks by
+  object identity, so an equal copy of a mask got a wrong `shared_pixels_frac`. Use
+  `scene_features(masks, probabilities, scores)`, now public, which describes every detection of
+  a scene.
+
 ## [0.2.0] - 2026-11-13
 
 Fixes and clearer behaviour on top of 0.1.0, found after the first release. The pretrained model

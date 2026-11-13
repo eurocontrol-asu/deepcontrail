@@ -159,7 +159,7 @@ def grow_regions(
     binary_mask: np.ndarray,
     min_pixels: int,
     min_length: float,
-    min_r_score: float,
+    min_straightness: float,
     lookback: int,
     alignment_threshold: float,
     avg_size: int,
@@ -174,8 +174,8 @@ def grow_regions(
         Minimum pixel count to keep a region.
     min_length
         Minimum region length for the linearity check.
-    min_r_score
-        Straightness threshold, squared before the comparison.
+    min_straightness
+        Minimum straightness (see :func:`deepcontrail.instance._shape.is_long_and_straight`).
     lookback
         Trailing window used for the local alignment regression.
     alignment_threshold
@@ -230,7 +230,7 @@ def grow_regions(
         if region.size < min_pixels:
             continue
         rows_arr, cols_arr = region.coords()
-        if is_long_and_straight(rows_arr, cols_arr, min_r_score, min_length, avg_size):
+        if is_long_and_straight(rows_arr, cols_arr, min_straightness, min_length, avg_size):
             contrails.append((rows_arr, cols_arr))
 
     return contrails

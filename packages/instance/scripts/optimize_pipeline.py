@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING, Any
 
 import optuna
 
+from deepcontrail.core import scene_stems
 from deepcontrail.core.readers import load_instance_masks
 from deepcontrail.instance import InstancePipelineConfig, MannsteinConfig
 from deepcontrail.instance._evaluation import (
@@ -105,7 +106,7 @@ def main(args: argparse.Namespace) -> dict[str, Any]:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    stems = sorted(p.stem for p in Path(args.pred_dir).glob("*.npy"))
+    stems = scene_stems(args.pred_dir, ".npy")
     if not stems:
         raise FileNotFoundError(f"no .npy predictions in {args.pred_dir}")
     search_stems, holdout_stems = split_scenes(stems, args.seed, args.n_images, args.n_holdout)

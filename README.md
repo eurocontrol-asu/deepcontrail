@@ -6,14 +6,13 @@
 [![License: EUPL-1.2](https://img.shields.io/badge/license-EUPL--1.2-blue)](LICENSE)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24130966.svg)](https://doi.org/10.5281/zenodo.24130966)
 
-Open-source library for **contrail detection in satellite imagery**. It does semantic
-segmentation of contrails in GOES-16 imagery, with instance segmentation in preview; tracking,
-flight attribution and altitude estimation are planned (see [Goal](#goal)).
+Open-source library for **contrail detection in satellite imagery**. It does semantic and
+instance segmentation of contrails in GOES-16 imagery; tracking, flight attribution and altitude
+estimation are planned (see [Goal](#goal)).
 
-This repository will host every phase of the project. **The current release ships the first phase:
-semantic segmentation** of contrails in GOES-16 ABI imagery, trained and evaluated on the
-OpenContrails dataset, plus a preview of instance segmentation. The later phases will be added as
-they are developed.
+This repository will host every phase of the project. **The current release ships the first two
+phases: semantic and instance segmentation** of contrails in GOES-16 ABI imagery, trained and
+evaluated on the OpenContrails dataset. The later phases will be added as they are developed.
 
 **Status: alpha.** The API may change between minor versions. The packages support Python 3.11
 to 3.13 and are tested on Linux. Training is meant for a GPU; prediction also runs on a CPU.
@@ -24,7 +23,7 @@ Provide a clean, well-typed, and reusable library for detecting contrails in sat
 Development follows a phased roadmap:
 
 1. **Semantic segmentation**: detect contrail pixels in GOES-16 imagery (**released in v0.1.0**)
-2. **Instance segmentation**: separate individual contrails (**preview in v0.1.0**, tuned on
+2. **Instance segmentation**: separate individual contrails (**released in v0.3.0**, tuned on
    GOES-16; MTG next)
 3. **Tracking**: follow contrails across time steps
 4. **Attribution**: assign ADS-B flight trajectories to detected contrails
@@ -39,7 +38,7 @@ packages that share the `deepcontrail` namespace:
 |---|---|---|
 | [`deepcontrail-core`](packages/core) | `deepcontrail.core` | Torch-free foundations: the dataset format and its validation, false-colour composites, train/val/fold splits, Dice/IoU |
 | [`deepcontrail-segmentation`](packages/segmentation) | `deepcontrail.segmentation` | Semantic segmentation: dataset, models, losses, training (`train`), pretrained models (`load_pretrained`, `predict`) |
-| [`deepcontrail-instance`](packages/instance) | `deepcontrail.instance` | Instance segmentation (preview; the API may change): splits a segmentation map into individual contrails (Mannstein pipeline, learned scores); torch-free |
+| [`deepcontrail-instance`](packages/instance) | `deepcontrail.instance` | Instance segmentation: splits a segmentation map into individual contrails (Mannstein pipeline, learned scores); torch-free |
 | [`deepcontrail-opencontrails`](tools/opencontrails) | `deepcontrail.opencontrails` | Converter from the OpenContrails TFRecords to the dataset format (a tool, not part of the library) |
 
 ## Results: semantic segmentation
@@ -70,6 +69,21 @@ Kaggle *Google Research – Identify Contrails to Reduce Global Warming* competi
 threshold 0.5). Kaggle's labels follow the older `20230419` export,
 which differs from `20250305` (see [Data notes](#data-notes)).
 
+## Results: instance segmentation
+
+The instance step splits the reference model's probability map into individual contrails
+([`packages/instance`](packages/instance)). On the 1,879 test scenes (probabilities with D4
+test-time augmentation), scored with the COCO segmentation mAP averaged over IoU 0.25–0.75:
+
+| Settings | Per-annotator mAP | Consensus mAP |
+|---|---|---|
+| Defaults + learned scores (shipped with the model) | **0.280** | 0.435 |
+| Consensus settings (`InstancePipelineConfig.consensus()`) | 0.252 | **0.446** |
+
+"Per-annotator" scores the detections against each annotator's contrails; "consensus" scores each
+scene once against the contrails drawn by most annotators. The full table, the metric and the
+limits are in the [package README](packages/instance#evaluation).
+
 ## Installation
 
 The packages are on PyPI; installing one installs `deepcontrail-core` too:
@@ -77,7 +91,7 @@ The packages are on PyPI; installing one installs `deepcontrail-core` too:
 ```bash
 pip install deepcontrail-segmentation               # semantic segmentation, pretrained models
 pip install "deepcontrail-segmentation[mlflow]"     # + the optional MLflow logger
-pip install "deepcontrail-instance[map,scores]"     # instance segmentation (preview)
+pip install "deepcontrail-instance[map,scores]"     # instance segmentation
 pip install deepcontrail-opencontrails              # the OpenContrails converter (TensorFlow)
 ```
 
@@ -118,6 +132,19 @@ With your own data, `root` is any dataset in the DeepContrail format (see [Data]
 `load_pretrained` also takes a local folder. The
 [model card](https://huggingface.co/eurocontrol-asu/deepcontrail-segmentation) describes the
 training, the scores and the limits.
+
+### Separate the contrails
+
+The model bundle also holds the instance step tuned for this model. Continuing from above, after
+`pip install "deepcontrail-instance[map]"`:
+
+```python
+from deepcontrail.instance import load_instance_step, to_coco_results
+
+step = load_instance_step(model.directory, tta=model.config.tta)
+contrails, scores = step(probabilities)  # one boolean (256, 256) mask and one score per contrail
+results = to_coco_results(contrails, scores, image_id="1801360214472457069")  # JSON-ready
+```
 
 ### Train
 

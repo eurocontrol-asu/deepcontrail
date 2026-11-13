@@ -20,8 +20,8 @@ from deepcontrail.instance.refine import grow_instances, probability_weighted_sc
 from deepcontrail.instance.scoring import (
     FEATURES,
     ScoreModel,
-    instance_features,
     match_quality,
+    scene_features,
     training_data,
 )
 
@@ -37,13 +37,13 @@ __all__ = [
     "detect_instances",
     "detect_instances_from_probabilities",
     "grow_instances",
-    "instance_features",
     "instance_masks_from_annotators",
     "instance_masks_from_label_image",
     "load_instance_step",
     "match_quality",
     "probability_weighted_scores",
     "save_instance_step",
+    "scene_features",
     "to_coco_results",
     "training_data",
 ]

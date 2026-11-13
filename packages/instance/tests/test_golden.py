@@ -1,4 +1,4 @@
-"""Golden regression test: exact instance masks and scores on fixed synthetic scenes.
+"""Golden regression test: exact instance masks, scores and score-model features on fixed scenes.
 
 Any change to the instance results must be deliberate: regenerate the fixture with
 ``uv run --no-sync python packages/instance/tests/test_golden.py`` in the commit that changes them,
@@ -17,6 +17,7 @@ from deepcontrail.instance import (
     detect_instances,
     detect_instances_from_probabilities,
 )
+from deepcontrail.instance.scoring import scene_features
 
 FIXTURE = Path(__file__).with_name("golden_instances.npz")
 _SIZE = 96
@@ -59,6 +60,7 @@ def _outputs() -> dict[str, np.ndarray]:
                 np.concatenate(ids).astype(np.int64) if ids else np.zeros(0, dtype=np.int64)
             )
             out[f"{key}_scores"] = np.asarray(scores, dtype=np.float64)
+            out[f"{key}_features"] = scene_features(masks, probs, scores)
     return out
 
 
@@ -69,7 +71,7 @@ def test_instance_results_match_the_golden_fixture():
 
     assert set(actual) == set(expected.files)
     for key, value in actual.items():
-        if key.endswith("_scores"):
+        if key.endswith(("_scores", "_features")):
             np.testing.assert_allclose(value, expected[key], rtol=0, atol=1e-12, err_msg=key)
         else:
             np.testing.assert_array_equal(value, expected[key], err_msg=key)

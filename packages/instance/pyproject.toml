@@ -42,7 +42,7 @@ Issues = "https://github.com/eurocontrol-asu/deepcontrail/issues"
 Changelog = "https://github.com/eurocontrol-asu/deepcontrail/blob/main/CHANGELOG.md"
 
 [dependency-groups]
-# optuna: only the tuning scripts run it (deepcontrail.instance.tuning imports it for types only).
+# optuna: only the tuning scripts run it (deepcontrail.instance._tuning imports it for types only).
 dev = ["pytest>=7.4", "pyright>=1.1", "optuna>=4.0"]
 
 [tool.uv.sources]

@@ -18,7 +18,7 @@ def test_suggest_mannstein_config_search_space_is_pinned() -> None:
     assert list(dists) == [
         "min_pixels",
         "min_length",
-        "min_r_score",
+        "min_straightness",
         "lookback",
         "alignment_threshold",
         "fit_avg_size",

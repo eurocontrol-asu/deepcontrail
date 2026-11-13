@@ -12,22 +12,55 @@ from typing import Annotated, Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-FORMAT_VERSION = 1
-"""Version of the instance config file layout (``format_version`` in the YAML files)."""
+FORMAT_VERSION = 2
+"""Version of the instance config file layout (``format_version`` in the YAML files). Any new
+field, or change of meaning, raises it, so an older library refuses a newer file.
+
+Version 1 files (``min_r_score``) are still read: see :func:`_upgrade_mannstein_v1`.
+"""
 
 _SECTIONS = ("format_version", "mannstein", "pipeline")
+
+
+def _upgrade_mannstein_v1(section: dict[str, Any]) -> dict[str, Any]:
+    """Convert a format-1 ``mannstein:`` section to format 2.
+
+    Format 1 had ``min_r_score``, compared as ``straightness > min_r_score**2``; format 2 has
+    ``min_straightness``, compared directly, so the value is squared. Other keys are unchanged.
+    """
+    section = dict(section)
+    if "min_r_score" in section:
+        section["min_straightness"] = section.pop("min_r_score") ** 2
+    return section
 
 
 def _read_sections(path: str | Path) -> dict[str, Any]:
     """Read an instance config YAML and check its top-level keys and format version."""
     with Path(path).open() as f:
         raw = yaml.safe_load(f) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: expected a mapping of sections {list(_SECTIONS)}")
+    for name in ("mannstein", "pipeline"):
+        if name in raw and raw[name] is None:
+            raw[name] = {}  # an empty section, e.g. "mannstein:" with nothing below it
+        if not isinstance(raw.get(name, {}), dict):
+            raise ValueError(f"{path}: the {name}: section must be a mapping of settings")
     unknown = sorted(set(raw) - set(_SECTIONS))
     if unknown:
         raise ValueError(f"{path}: unknown section(s) {unknown}; expected {list(_SECTIONS)}")
     version = raw.get("format_version", FORMAT_VERSION)
-    if version != FORMAT_VERSION:
-        raise ValueError(f"{path}: format_version {version!r} is not supported ({FORMAT_VERSION})")
+    if isinstance(version, int) and version > FORMAT_VERSION:
+        raise ValueError(
+            f"{path}: format_version {version} comes from a newer deepcontrail-instance (this one "
+            f"reads version {FORMAT_VERSION}); upgrade deepcontrail-instance"
+        )
+    if version == 1:
+        if isinstance(raw.get("mannstein"), dict):
+            raw["mannstein"] = _upgrade_mannstein_v1(raw["mannstein"])
+    elif version != FORMAT_VERSION:
+        raise ValueError(
+            f"{path}: format_version {version!r} is not supported (expected {FORMAT_VERSION})"
+        )
     return raw
 
 
@@ -48,19 +81,21 @@ class MannsteinConfig(BaseModel):
     kernel_size
         Kernel size in pixels, odd (line filter only).
     sigma1
-        Inner Gaussian sigma in pixels (line filter only).
+        Inner Gaussian width (line filter only). Not in pixels: the kernel grid spans
+        [-1, 1], so the width in pixels is ``sigma1 * (kernel_size - 1) / (2 * kernel_size)``,
+        about half of ``sigma1``.
     sigma_delta
-        Outer minus inner Gaussian sigma, in pixels (line filter only).
+        Outer minus inner Gaussian width, in the same units as ``sigma1`` (line filter only).
     response_threshold
         Minimum kernel response (line filter only).
     min_pixels
         Minimum contrail size in pixels.
     min_length
         Minimum contrail length in pixels.
-    min_r_score
-        Minimum straightness, squared before the comparison: a contrail is kept when its
-        straightness ((λ1 - λ2) / (λ1 + λ2))², from the eigenvalues of its pixel-coordinate
-        covariance, exceeds ``min_r_score²``. The measure does not depend on the direction.
+    min_straightness
+        Minimum straightness: a contrail is kept when its straightness
+        ((λ1 - λ2) / (λ1 + λ2))², from the eigenvalues of its pixel-coordinate covariance,
+        exceeds this value. 1 is a line, 0 a round blob; it does not depend on the direction.
     lookback
         Number of most recent pixels of a growing contrail used to fit its local direction.
     alignment_threshold
@@ -89,7 +124,7 @@ class MannsteinConfig(BaseModel):
     response_threshold: Annotated[float, Field(ge=0.0)] = 0.00012714987768293402
     min_pixels: Annotated[int, Field(gt=0)] = 5
     min_length: Annotated[float, Field(gt=0.0)] = 4.173422506229322
-    min_r_score: Annotated[float, Field(ge=0.0, le=1.0)] = 0.07830797096507566
+    min_straightness: Annotated[float, Field(ge=0.0, le=1.0)] = 0.006132138316667133
     lookback: Annotated[int, Field(gt=0)] = 53
     alignment_threshold: Annotated[float, Field(gt=0.0)] = 2.4559123612088265
     fit_avg_size: Annotated[int, Field(gt=0)] = 2
@@ -138,7 +173,7 @@ _CONSENSUS_MANNSTEIN = MannsteinConfig(
     response_threshold=0.00012114447935536606,
     min_pixels=10,
     min_length=3.6267323822860877,
-    min_r_score=0.05470144383145452,
+    min_straightness=0.0029922479572457735,
     lookback=53,
     alignment_threshold=2.663708517028666,
     fit_avg_size=3,

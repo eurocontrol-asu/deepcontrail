@@ -31,7 +31,7 @@ def suggest_mannstein_config(trial: BaseTrial) -> MannsteinConfig:
         line_filter=False,
         min_pixels=trial.suggest_int("min_pixels", 3, 50),
         min_length=trial.suggest_float("min_length", 3.0, 50.0),
-        min_r_score=trial.suggest_float("min_r_score", 0.05, 0.6),
+        min_straightness=trial.suggest_float("min_straightness", 0.0025, 0.36),
         lookback=trial.suggest_int("lookback", 10, 60),
         alignment_threshold=trial.suggest_float("alignment_threshold", 0.5, 5.0),
         fit_avg_size=trial.suggest_int("fit_avg_size", 1, 10),
@@ -44,7 +44,7 @@ def suggest_mannstein_config(trial: BaseTrial) -> MannsteinConfig:
 _SEARCHED = (
     "min_pixels",
     "min_length",
-    "min_r_score",
+    "min_straightness",
     "lookback",
     "alignment_threshold",
     "fit_avg_size",

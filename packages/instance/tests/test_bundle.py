@@ -68,11 +68,21 @@ def test_load_instance_step_raises_for_a_missing_folder(tmp_path: Path):
 
 
 def test_load_instance_step_without_instance_files_returns_the_defaults(tmp_path: Path):
-    step = load_instance_step(tmp_path)
+    with pytest.warns(UserWarning, match="instance_pipeline.yaml"):
+        step = load_instance_step(tmp_path)
 
     assert step == InstanceStep(InstancePipelineConfig(), None), (
         "a bundle without the instance files (e.g. v0.1.0) runs the default pipeline"
     )
+
+
+def test_save_instance_step_rejects_a_score_model_of_other_settings(tmp_path: Path):
+    model = ScoreModel(0.25, (), InstancePipelineConfig())
+
+    with pytest.raises(ValueError, match="another pipeline config"):
+        save_instance_step(tmp_path, InstancePipelineConfig.consensus(), model)
+
+    assert not any(tmp_path.iterdir()), "a rejected save must not leave a partial file"
 
 
 def test_save_instance_step_without_score_model_writes_only_the_pipeline(tmp_path: Path):

@@ -99,20 +99,20 @@ def test_straightness_of_a_single_point_is_zero():
 def test_length_test_accepts_a_long_straight_segment():
     rows, cols = _horizontal(5.0, 0, 10)  # 10 pixels, length 9
 
-    assert is_long_and_straight(rows, cols, min_r_score=0.0, min_length=5.0, avg_size=2)
+    assert is_long_and_straight(rows, cols, min_straightness=0.0, min_length=5.0, avg_size=2)
 
 
 def test_length_test_rejects_a_short_straight_segment():
     rows, cols = _horizontal(5.0, 0, 10)  # 10 pixels, length 9
 
-    assert not is_long_and_straight(rows, cols, min_r_score=0.0, min_length=20.0, avg_size=2)
+    assert not is_long_and_straight(rows, cols, min_straightness=0.0, min_length=20.0, avg_size=2)
 
 
 def test_length_test_rejects_a_region_with_too_few_points():
     ys = np.arange(5, dtype=float)
     xs = np.arange(5, dtype=float)
 
-    assert not is_long_and_straight(ys, xs, min_r_score=0.1, min_length=5.0, avg_size=3)
+    assert not is_long_and_straight(ys, xs, min_straightness=0.01, min_length=5.0, avg_size=3)
 
 
 def test_length_test_rejects_a_long_but_bent_segment():
@@ -123,22 +123,26 @@ def test_length_test_rejects_a_long_but_bent_segment():
     blob_c = xs[(ys**2 + xs**2) <= 36].astype(float)
 
     assert straightness(blob_r, blob_c) < 0.3
-    assert is_long_and_straight(straight_r, straight_c, min_r_score=0.0, min_length=5.0, avg_size=2)
-    assert not is_long_and_straight(blob_r, blob_c, min_r_score=0.1, min_length=5.0, avg_size=2)
+    assert is_long_and_straight(
+        straight_r, straight_c, min_straightness=0.0, min_length=5.0, avg_size=2
+    )
+    assert not is_long_and_straight(
+        blob_r, blob_c, min_straightness=0.01, min_length=5.0, avg_size=2
+    )
 
 
 def test_length_test_accepts_a_straight_diagonal():
     ys = np.arange(20, dtype=float)
     xs = np.arange(20, dtype=float)
 
-    assert is_long_and_straight(ys, xs, min_r_score=0.1, min_length=5.0, avg_size=3)
+    assert is_long_and_straight(ys, xs, min_straightness=0.01, min_length=5.0, avg_size=3)
 
 
 @pytest.mark.parametrize("vertical", [False, True], ids=["horizontal", "vertical"])
 def test_length_test_accepts_a_wide_contrail_along_an_axis(vertical):
     rows, cols = _strip(40, 3, vertical=vertical)
 
-    assert is_long_and_straight(rows, cols, min_r_score=0.1, min_length=5.0, avg_size=3)
+    assert is_long_and_straight(rows, cols, min_straightness=0.01, min_length=5.0, avg_size=3)
 
 
 # --- candidate_score ---

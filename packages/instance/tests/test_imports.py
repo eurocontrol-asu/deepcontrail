@@ -41,3 +41,10 @@ def test_script_helpers_are_not_public_modules(name):
     assert importlib.import_module(f"deepcontrail.instance._{name}"), (
         "the scripts' helpers stay available as a private module"
     )
+
+
+def test_public_api_exports_scene_features_not_instance_features() -> None:
+    import deepcontrail.instance as instance
+
+    assert "scene_features" in instance.__all__
+    assert not hasattr(instance, "instance_features"), "removed: it matched masks by identity"
