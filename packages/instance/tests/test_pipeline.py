@@ -266,8 +266,10 @@ def test_pipeline_config_yaml_records_and_checks_its_format_version(tmp_path: Pa
     InstancePipelineConfig().to_yaml(path)
 
     assert yaml.safe_load(path.read_text())["format_version"] == 1
-    with pytest.raises(ValueError, match="format_version"):
+    with pytest.raises(ValueError, match="upgrade deepcontrail-instance"):
         InstancePipelineConfig.from_yaml(_write_yaml(tmp_path, {"format_version": 2}))
+    with pytest.raises(ValueError, match="not supported"):
+        InstancePipelineConfig.from_yaml(_write_yaml(tmp_path, {"format_version": 0}))
 
 
 def test_configs_reject_unknown_fields_in_code():

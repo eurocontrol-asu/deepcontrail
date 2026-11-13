@@ -16,10 +16,11 @@ from deepcontrail.instance import (
     MannsteinConfig,
     ScoreModel,
     detect_instances_from_probabilities,
-    instance_features,
     match_quality,
+    scene_features,
     training_data,
 )
+from deepcontrail.instance.scoring import _instance_features
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -33,9 +34,7 @@ def _line(row: int, start: int = 8, stop: int = 56, width: int = 1) -> np.ndarra
     return mask
 
 
-def test_scene_features_equal_each_contrails_instance_features_exactly():
-    from deepcontrail.instance.scoring import scene_features
-
+def test_scene_features_equal_each_contrails_reference_features_exactly():
     rng = np.random.default_rng(0)
     probs = rng.random((_S, _S)).astype(np.float32)
     crossing = np.zeros((_S, _S), dtype=bool)
@@ -54,7 +53,7 @@ def test_scene_features_equal_each_contrails_instance_features_exactly():
     features = scene_features(masks, probs, scores)
 
     expected = np.stack(
-        [instance_features(m, probs, s, masks) for m, s in zip(masks, scores, strict=True)]
+        [_instance_features(m, probs, s, masks) for m, s in zip(masks, scores, strict=True)]
     )
     np.testing.assert_array_equal(
         features, expected, err_msg="the scene-level computation must give identical features"
@@ -99,11 +98,11 @@ def _tree_model() -> ScoreModel:
 # --- features and labels ---
 
 
-def test_instance_features_describe_size_shape_and_probability() -> None:
+def test_scene_features_describe_size_shape_and_probability() -> None:
     mask = _line(10, width=2)
     probs = np.where(mask, 0.8, 0.1).astype(np.float32)
 
-    feats = instance_features(mask, probs, score=0.6, scene_masks=[mask])
+    feats = scene_features([mask], probs, [0.6])[0]
 
     named = dict(zip(FEATURES, feats, strict=True))
     assert named["n_pixels"] == 96
@@ -115,19 +114,35 @@ def test_instance_features_describe_size_shape_and_probability() -> None:
     assert named["n_scene_instances"] == 1
 
 
-def test_instance_features_treats_integer_masks_like_boolean_masks() -> None:
+def test_scene_features_treat_integer_masks_like_boolean_masks() -> None:
     mask_u = _line(10).astype(np.uint8)
     other_u = _line(30).astype(np.uint8)
     probs = np.where(mask_u | other_u, 0.8, 0.0).astype(np.float32)
 
-    feats_u = instance_features(mask_u, probs, score=0.5, scene_masks=[mask_u, other_u])
+    feats_u = scene_features([mask_u, other_u], probs, [0.5, 0.5])[0]
     mask_b, other_b = mask_u.astype(bool), other_u.astype(bool)
-    feats_b = instance_features(mask_b, probs, score=0.5, scene_masks=[mask_b, other_b])
+    feats_b = scene_features([mask_b, other_b], probs, [0.5, 0.5])[0]
 
     np.testing.assert_allclose(
         feats_u, feats_b, err_msg="a 0/1 int mask must select the same pixels as a bool mask"
     )
     assert dict(zip(FEATURES, feats_u, strict=True))["mean_prob"] == pytest.approx(0.8)
+
+
+def test_scene_features_count_shared_pixels_with_other_contrails_only() -> None:
+    row = _line(10)  # 48 pixels on row 10
+    column = np.zeros((_S, _S), dtype=bool)
+    column[:, 30] = True  # crosses the row at one pixel
+    probs = np.where(row | column, 0.8, 0.1).astype(np.float32)
+
+    alone = scene_features([row], probs, [0.5])
+    crossing = scene_features([row, column], probs, [0.5, 0.5])
+    twice = scene_features([row, row.copy()], probs, [0.5, 0.5])
+
+    shared = FEATURES.index("shared_pixels_frac")
+    assert alone[0, shared] == 0.0, "a contrail never overlaps itself"
+    assert crossing[0, shared] == pytest.approx(1 / 48)
+    assert twice[0, shared] == 1.0, "two detections covering the same pixels share them all"
 
 
 def test_match_quality_is_mean_best_iou_over_annotators_who_drew() -> None:
@@ -229,14 +244,7 @@ def test_pipeline_with_score_model_replaces_scores_not_masks() -> None:
 
     assert len(masks) == len(plain_masks) > 0
     assert all(np.array_equal(a, b) for a, b in zip(masks, plain_masks, strict=True))
-    expected = model.predict(
-        np.stack(
-            [
-                instance_features(m, probs, s, plain_masks)
-                for m, s in zip(plain_masks, plain_scores, strict=True)
-            ]
-        )
-    )
+    expected = model.predict(scene_features(plain_masks, probs, plain_scores))
     np.testing.assert_allclose(scores, expected)
 
 
@@ -262,9 +270,22 @@ def test_score_model_json_records_its_format_version(tmp_path: Path) -> None:
     assert json.loads(path.read_text())["format_version"] == ScoreModel.FORMAT_VERSION
 
 
-@pytest.mark.parametrize("version", [None, 999])
 @requires_sklearn
-def test_score_model_rejects_unknown_format_version(tmp_path: Path, version) -> None:
+def test_score_model_from_newer_library_asks_to_upgrade(tmp_path: Path) -> None:
+    x, y = _training_set()
+    path = tmp_path / "score_model.json"
+    ScoreModel.fit(x, y, _CONFIG).to_json(path)
+    data = json.loads(path.read_text())
+    data["format_version"] = 2
+    path.write_text(json.dumps(data))
+
+    with pytest.raises(ValueError, match="upgrade deepcontrail-instance"):
+        ScoreModel.from_json(path)
+
+
+@pytest.mark.parametrize("version", [None, 0, "1"])
+@requires_sklearn
+def test_score_model_without_format_version_is_refused(tmp_path: Path, version) -> None:
     x, y = _training_set()
     path = tmp_path / "score_model.json"
     ScoreModel.fit(x, y, _CONFIG).to_json(path)
@@ -274,7 +295,7 @@ def test_score_model_rejects_unknown_format_version(tmp_path: Path, version) -> 
         data["format_version"] = version
     path.write_text(json.dumps(data))
 
-    with pytest.raises(ValueError, match="format version"):
+    with pytest.raises(ValueError, match="not supported"):
         ScoreModel.from_json(path)
 
 

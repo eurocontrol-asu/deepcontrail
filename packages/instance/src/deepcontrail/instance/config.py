@@ -13,7 +13,8 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 FORMAT_VERSION = 1
-"""Version of the instance config file layout (``format_version`` in the YAML files)."""
+"""Version of the instance config file layout (``format_version`` in the YAML files). Any new
+field, or change of meaning, raises it, so an older library refuses a newer file."""
 
 _SECTIONS = ("format_version", "mannstein", "pipeline")
 
@@ -26,8 +27,15 @@ def _read_sections(path: str | Path) -> dict[str, Any]:
     if unknown:
         raise ValueError(f"{path}: unknown section(s) {unknown}; expected {list(_SECTIONS)}")
     version = raw.get("format_version", FORMAT_VERSION)
+    if isinstance(version, int) and version > FORMAT_VERSION:
+        raise ValueError(
+            f"{path}: format_version {version} comes from a newer deepcontrail-instance (this one "
+            f"reads version {FORMAT_VERSION}); upgrade deepcontrail-instance"
+        )
     if version != FORMAT_VERSION:
-        raise ValueError(f"{path}: format_version {version!r} is not supported ({FORMAT_VERSION})")
+        raise ValueError(
+            f"{path}: format_version {version!r} is not supported (expected {FORMAT_VERSION})"
+        )
     return raw
 
 
