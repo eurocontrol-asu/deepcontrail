@@ -86,9 +86,11 @@ limits are in the [package README](packages/instance#evaluation).
 
 ## Installation
 
-The packages are on PyPI; installing one installs `deepcontrail-core` too:
+The packages are on PyPI; installing one installs `deepcontrail-core` too, and `deepcontrail`
+installs the whole library:
 
 ```bash
+pip install deepcontrail                            # the whole library (all but the converter)
 pip install deepcontrail-segmentation               # semantic segmentation, pretrained models
 pip install "deepcontrail-segmentation[mlflow]"     # + the optional MLflow logger
 pip install "deepcontrail-instance[map,scores]"     # instance segmentation

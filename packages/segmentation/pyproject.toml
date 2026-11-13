@@ -1,6 +1,6 @@
 [project]
 name = "deepcontrail-segmentation"
-version = "0.2.0"
+version = "0.3.0"
 description = "DeepContrail — semantic segmentation of contrails in satellite imagery."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
-    "deepcontrail-core>=0.2,<0.3",
+    "deepcontrail-core>=0.3,<0.4",
     "numpy>=1.24",
     "pillow>=10.0",
     "pydantic>=2.0",

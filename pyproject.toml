@@ -3,7 +3,7 @@
 
 [project]
 name = "deepcontrail-workspace"
-version = "0.2.0"
+version = "0.3.0"
 description = "DeepContrail development workspace (not published)."
 requires-python = ">=3.11"
 dependencies = [
