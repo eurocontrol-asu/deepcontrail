@@ -7,7 +7,7 @@ body:
     attributes:
       label: DeepContrail packages and versions
       description: Output of `pip list | grep deepcontrail` (or `uv pip list | grep deepcontrail`).
-      placeholder: "deepcontrail-core 0.1.0, deepcontrail-segmentation 0.1.0"
+      placeholder: "deepcontrail-core 0.2.0, deepcontrail-segmentation 0.2.0"
     validations:
       required: true
   - type: textarea

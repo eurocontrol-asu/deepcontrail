@@ -6,8 +6,8 @@ authors:
   - family-names: Heffar
     given-names: Amine
     affiliation: EUROCONTROL Aviation Sustainability Unit
-version: 0.1.0
-date-released: 2026-11-11
+version: 0.2.0
+date-released: 2026-11-13
 doi: 10.5281/zenodo.24130966
 license: EUPL-1.2
 repository-code: "https://github.com/eurocontrol-asu/deepcontrail"
