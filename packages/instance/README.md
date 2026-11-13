@@ -4,7 +4,8 @@ Instance segmentation of contrails, part of
 [DeepContrail](https://github.com/eurocontrol-asu/deepcontrail): it splits a contrail
 segmentation map into individual contrails, one mask and one score each.
 
-**Status: preview.** The API may still change in the next releases.
+**Status: alpha**, like the rest of DeepContrail: the API may change between minor versions, and
+every change is listed in the [changelog](https://github.com/eurocontrol-asu/deepcontrail/blob/main/CHANGELOG.md).
 
 It needs only `deepcontrail-core`, numpy, scipy, pydantic and PyYAML (no torch) and never imports
 `deepcontrail.segmentation`: any model's probability map works as input. Two optional extras:
@@ -24,8 +25,14 @@ from deepcontrail.instance import detect_instances_from_probabilities
 
 probs = np.load("scene_probs.npy")  # (H, W) probabilities in [0, 1]
 masks, scores = detect_instances_from_probabilities(probs)
-# masks: one boolean (H, W) mask per contrail; scores: confidence in [0, 1]
+# masks: one boolean (H, W) mask per contrail; scores: in [0, 1], for ranking
 ```
+
+The scores rank the detections; they are not probabilities. Without a score model, a score is
+the contrail's straightness × tanh(size / saturation) × its mean probability; with one (see
+[Learned scores](#learned-scores)), it is the predicted overlap (mean best IoU) with the
+annotators' contrails. Every detection is returned, without a score cut: to trade recall for
+precision, drop the low scores, with a cut chosen on your own validation scenes.
 
 The pipeline thresholds the map (at 0.465), splits the mask into straight contrails with a
 Mannstein-style detection, grows each contrail by one pixel into neighbours with probability above
@@ -56,8 +63,8 @@ Mannstein-style step alone.
   carry over to the current Unet++ model, which scores higher with them on every measure below.
   For another kind of model, re-tune the pipeline on its predictions for scenes it never trained
   on; tuning needs instance annotations.
-- Two contrails crossing at a small angle come out as one: at 10° always, at 20° with the
-  consensus settings. Touching, nearly parallel contrails also merge.
+- Two contrails that cross at less than about 25° often come out as one, depending on their
+  width and direction. Touching, nearly parallel contrails also merge.
 - The COCO mAP keeps at most 100 detections per sample (a warning says when a sample has more).
 
 ## With a pretrained DeepContrail model
@@ -65,22 +72,34 @@ Mannstein-style step alone.
 A pretrained bundle of `deepcontrail-segmentation` may carry the instance step tuned for its
 model: `instance_pipeline.yaml` and a `score_model.json` trained on that model's predictions.
 `load_instance_step` reads them from the bundle's folder (the defaults when they are absent) and
-refuses a score model made with the other test-time-augmentation setting:
+refuses a score model made with the other test-time-augmentation setting. On the five sample
+scenes of the root README's quickstart (needs `deepcontrail-segmentation` too):
 
 ```python
+import numpy as np
+from huggingface_hub import snapshot_download
+from deepcontrail.core import false_color_from_spectral, read_band_manifest
 from deepcontrail.instance import load_instance_step, to_coco_results
 from deepcontrail.segmentation import load_pretrained, predict
 
-model = load_pretrained("eurocontrol-asu/deepcontrail-segmentation")
-step = load_instance_step(model.directory, tta=model.config.tta)
+root = snapshot_download("eurocontrol-asu/deepcontrail-samples", repo_type="dataset")
+model = load_pretrained("eurocontrol-asu/deepcontrail-segmentation", revision="v0.1.0")
+bands = np.load(f"{root}/spectral_bands/test/1801360214472457069.npy")
+composite = false_color_from_spectral(bands, model.config.false_color, read_band_manifest(root))
 probabilities = predict(model, composite, tta=model.config.tta)
+
+step = load_instance_step(model.directory, tta=model.config.tta)
 masks, scores = step(probabilities)
-results = to_coco_results(masks, scores, image_id="scene_1")  # JSON-ready, needs [map]
+results = to_coco_results(masks, scores, image_id="1801360214472457069")  # JSON-ready, needs [map]
 ```
 
 A score model records what it was trained on (`ScoreModel.trained_on`: semantic model, TTA,
 scene size, scikit-learn and package versions); the pipeline refuses it on scenes of another size,
 since its features are in pixels. `save_instance_step` writes the two files into a bundle folder.
+
+Both files carry a `format_version`. Any new field, or any change of meaning, raises it, so an
+older `deepcontrail-instance` refuses a newer file with a message to upgrade instead of misreading
+it. Unknown fields are always an error, so a typo is never ignored.
 
 ## Annotations and results
 
@@ -146,6 +165,10 @@ score each scene once against its consensus contrails.
 | `configs/instance_pipeline_consensus.yaml` (no growth) | 0.252 | 0.248 | 0.510 (0.485) | 0.350 | 0.415 (0.407) | 0.446 | 0.439 |
 | defaults + learned scores | 0.280 | 0.273 | 0.532 (0.504) | 0.387 | 0.448 (0.438) | 0.435 | 0.424 |
 | consensus settings + learned scores | 0.258 | 0.253 | 0.510 (0.485) | 0.350 | 0.415 (0.407) | 0.459 | 0.450 |
+
+The model bundle on the Hugging Face Hub carries the defaults with their learned scores (third
+row). The consensus settings are `InstancePipelineConfig.consensus()` (second row); their learned
+scores (fourth row) are not published.
 
 On each annotator's own mask instead of a prediction, the instance step alone reaches mAP 0.921
 (`configs/mannstein_annotator_masks.yaml`). Most errors therefore come from the semantic step and

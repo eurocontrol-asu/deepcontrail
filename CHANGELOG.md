@@ -6,6 +6,25 @@ All notable changes to DeepContrail are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `deepcontrail-instance` is no longer a preview: it has the same status as the other packages
+  (alpha: the API may change between minor versions, and every change is listed here).
+- `instance_pipeline.yaml` and `score_model.json` written by a newer `deepcontrail-instance` (a
+  higher `format_version`) are refused with a message to upgrade. Any new field, or change of
+  meaning, in these files raises their `format_version`.
+- The root README shows the instance results and, in the quickstart, how to separate the
+  contrails. The instance README explains what a score means, corrects the crossing-angle limit
+  (contrails crossing at less than about 25° often merge) and says which instance step is
+  published.
+
+### Removed
+
+- `deepcontrail.instance.instance_features`: it found the contrail among the scene's masks by
+  object identity, so an equal copy of a mask got a wrong `shared_pixels_frac`. Use
+  `scene_features(masks, probabilities, scores)`, now public, which describes every detection of
+  a scene.
+
 ## [0.2.0] - 2026-11-13
 
 Fixes and clearer behaviour on top of 0.1.0, found after the first release. The pretrained model
