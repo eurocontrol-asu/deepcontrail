@@ -300,6 +300,24 @@ def test_pipeline_config_reads_a_format_1_file_with_min_r_score(tmp_path: Path):
     assert config.mannstein.min_straightness == 0.3**2, "format 1 compared r squared"
 
 
+def test_pipeline_config_reads_an_unversioned_file_with_min_r_score_as_format_1(tmp_path: Path):
+    path = tmp_path / "old.yaml"
+    path.write_text("mannstein:\n  min_r_score: 0.3\n")
+
+    config = InstancePipelineConfig.from_yaml(path)
+
+    assert config.mannstein.min_straightness == 0.3**2, "min_r_score only existed in format 1"
+
+
+def test_pipeline_config_reads_an_unversioned_file_as_the_current_format(tmp_path: Path):
+    path = tmp_path / "new.yaml"
+    path.write_text("mannstein:\n  min_straightness: 0.3\n")
+
+    config = InstancePipelineConfig.from_yaml(path)
+
+    assert config.mannstein.min_straightness == 0.3
+
+
 @pytest.mark.parametrize(
     ("file", "new_value", "old_value"),
     [
