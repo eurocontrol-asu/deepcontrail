@@ -44,7 +44,7 @@ contrail's mean probability. Its settings live in `InstancePipelineConfig`; the 
 only contrails agreed by most annotators matter. `detect_instances(binary_mask)` runs plain
 Mannstein on any binary mask (settings: `MannsteinConfig`, whose defaults are the pipeline's;
 [`configs/mannstein_annotator_masks.yaml`](https://github.com/eurocontrol-asu/deepcontrail/blob/main/packages/instance/configs/mannstein_annotator_masks.yaml) holds the
-settings for annotators' own masks).
+settings for annotators' own masks, the same as `InstancePipelineConfig.consensus().mannstein`).
 
 Mannstein's oriented line filter (`MannsteinConfig(line_filter=True)`) is off in the shipped
 settings: on these masks it kept every pixel and took most of the run time.

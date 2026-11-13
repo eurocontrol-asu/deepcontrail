@@ -99,6 +99,8 @@ def evaluate_annotator_samples(
         ``gt_masks[i]`` is the list of GT boolean masks of sample ``i`` (one annotator).
     pred_scores
         Confidence per predicted mask, aligned with ``pred_masks``; ``None`` = 1.0 for all.
+        With equal scores the ranking hides false detections, so the mAP then mostly
+        measures recall: pass the pipeline's scores.
     iou_thresholds
         IoU thresholds averaged by the mAP. Defaults to 0.25, 0.35, ..., 0.75.
     match_iou
@@ -122,7 +124,7 @@ def evaluate_annotator_samples(
     if len(pred_masks) != len(gt_masks) or (
         pred_scores is not None and len(pred_scores) != len(pred_masks)
     ):
-        raise ValueError("pred_masks, gt_masks and pred_scores must have one entry per samples")
+        raise ValueError("pred_masks, gt_masks and pred_scores must have one entry per sample")
     keep = [i for i, gt in enumerate(gt_masks) if gt or include_empty]
     preds = [pred_masks[i] for i in keep]
     gts = [gt_masks[i] for i in keep]

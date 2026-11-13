@@ -409,6 +409,8 @@ class ScoreModel:
             other feature names.
         """
         data = json.loads(Path(path).read_text())
+        if not isinstance(data, dict):
+            raise ValueError(f"{path}: a score model file holds a JSON object")
         version = data.get("format_version")
         if isinstance(version, int) and version > cls.FORMAT_VERSION:
             raise ValueError(
@@ -421,6 +423,9 @@ class ScoreModel:
                 f"{path}: score model format version {version!r} is not supported "
                 f"(expected {cls.FORMAT_VERSION}); retrain it with this library version"
             )
+        missing = sorted({"features", "baseline", "pipeline_config", "trees"} - set(data))
+        if missing:
+            raise ValueError(f"{path}: score model file misses {missing}")
         if tuple(data["features"]) != FEATURES:
             raise ValueError("score model features differ from this library's FEATURES")
         trees = tuple({k: np.asarray(v) for k, v in tree.items()} for tree in data["trees"])

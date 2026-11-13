@@ -23,6 +23,13 @@ def _read_sections(path: str | Path) -> dict[str, Any]:
     """Read an instance config YAML and check its top-level keys and format version."""
     with Path(path).open() as f:
         raw = yaml.safe_load(f) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: expected a mapping of sections {list(_SECTIONS)}")
+    for name in ("mannstein", "pipeline"):
+        if name in raw and raw[name] is None:
+            raw[name] = {}  # an empty section, e.g. "mannstein:" with nothing below it
+        if not isinstance(raw.get(name, {}), dict):
+            raise ValueError(f"{path}: the {name}: section must be a mapping of settings")
     unknown = sorted(set(raw) - set(_SECTIONS))
     if unknown:
         raise ValueError(f"{path}: unknown section(s) {unknown}; expected {list(_SECTIONS)}")
@@ -56,9 +63,11 @@ class MannsteinConfig(BaseModel):
     kernel_size
         Kernel size in pixels, odd (line filter only).
     sigma1
-        Inner Gaussian sigma in pixels (line filter only).
+        Inner Gaussian width (line filter only). Not in pixels: the kernel grid spans
+        [-1, 1], so the width in pixels is ``sigma1 * (kernel_size - 1) / (2 * kernel_size)``,
+        about half of ``sigma1``.
     sigma_delta
-        Outer minus inner Gaussian sigma, in pixels (line filter only).
+        Outer minus inner Gaussian width, in the same units as ``sigma1`` (line filter only).
     response_threshold
         Minimum kernel response (line filter only).
     min_pixels

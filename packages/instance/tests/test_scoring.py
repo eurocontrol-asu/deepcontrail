@@ -369,6 +369,39 @@ def test_score_model_file_without_a_record_still_loads(tmp_path: Path) -> None:
     assert ScoreModel.from_json(path).trained_on == {}, "files written before the record load"
 
 
+def test_score_model_from_json_names_missing_keys(tmp_path: Path) -> None:
+    path = tmp_path / "score_model.json"
+    _tree_model().to_json(path)
+    data = json.loads(path.read_text())
+    del data["baseline"]
+    path.write_text(json.dumps(data))
+
+    with pytest.raises(ValueError, match="baseline"):
+        ScoreModel.from_json(path)
+
+
+def test_score_model_from_json_rejects_other_feature_names(tmp_path: Path) -> None:
+    path = tmp_path / "score_model.json"
+    _tree_model().to_json(path)
+    data = json.loads(path.read_text())
+    data["features"] = data["features"][::-1]
+    path.write_text(json.dumps(data))
+
+    with pytest.raises(ValueError, match="features differ"):
+        ScoreModel.from_json(path)
+
+
+def test_score_model_from_json_rejects_a_non_finite_threshold(tmp_path: Path) -> None:
+    path = tmp_path / "score_model.json"
+    _tree_model().to_json(path)
+    data = json.loads(path.read_text())
+    data["trees"][0]["num_threshold"][0] = float("nan")  # json writes NaN
+    path.write_text(json.dumps(data))
+
+    with pytest.raises(ValueError, match="not finite"):
+        ScoreModel.from_json(path)
+
+
 # --- from_json rejects a malformed tree (a downloaded model may be corrupt) ---
 
 

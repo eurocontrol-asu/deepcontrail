@@ -122,6 +122,16 @@ def test_mannstein_config_rejects_negative_sigma():
         MannsteinConfig(sigma1=-0.5)
 
 
+def test_mannstein_config_from_yaml_without_mannstein_section_is_refused(tmp_path: Path):
+    from deepcontrail.instance.config import MannsteinConfig
+
+    yaml_path = tmp_path / "pipeline.yaml"
+    yaml_path.write_text(yaml.dump({"pipeline": {"grow_steps": 0}}))
+
+    with pytest.raises(ValueError, match="no mannstein"):
+        MannsteinConfig.from_yaml(yaml_path)
+
+
 def test_mannstein_config_rejects_r_score_out_of_range():
     from deepcontrail.instance.config import MannsteinConfig
 

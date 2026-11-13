@@ -168,7 +168,7 @@ def test_evaluate_annotator_samples_without_per_threshold_and_empty_input():
 def test_evaluate_annotator_samples_rejects_mismatched_lengths():
     from deepcontrail.instance.metrics import evaluate_annotator_samples
 
-    with pytest.raises(ValueError, match="samples"):
+    with pytest.raises(ValueError, match="one entry per sample"):
         evaluate_annotator_samples([[]], [[], []])
 
 

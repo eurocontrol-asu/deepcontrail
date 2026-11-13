@@ -33,6 +33,7 @@ from typing import Any
 
 import numpy as np
 
+from deepcontrail.core import scene_stems
 from deepcontrail.core.readers import load_instance_masks
 from deepcontrail.instance import (
     InstancePipelineConfig,
@@ -125,7 +126,7 @@ def main(args: argparse.Namespace) -> dict[str, Any]:
         if args.pipeline_config
         else InstancePipelineConfig()
     )
-    stems = sorted(p.stem for p in Path(args.pred_dir).glob("*.npy"))
+    stems = scene_stems(args.pred_dir, ".npy")
     search_stems, holdout_stems = split_scenes(stems, args.seed, args.n_images, args.n_holdout)
 
     probs, gts = load_predictions(args.pred_dir, args.root, search_stems, args.split)

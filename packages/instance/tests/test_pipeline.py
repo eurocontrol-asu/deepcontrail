@@ -261,6 +261,25 @@ def test_pipeline_config_yaml_without_mannstein_section_uses_the_preset(tmp_path
     assert cfg.mannstein == InstancePipelineConfig().mannstein
 
 
+def test_pipeline_config_yaml_empty_mannstein_section_uses_the_preset(tmp_path: Path):
+    path = tmp_path / "config.yaml"
+    path.write_text("format_version: 1\nmannstein:\npipeline:\n  grow_steps: 0\n")
+
+    cfg = InstancePipelineConfig.from_yaml(path)
+
+    assert cfg == InstancePipelineConfig(grow_steps=0), (
+        "an empty 'mannstein:' section (None) falls back to the preset, not an error"
+    )
+
+
+def test_pipeline_config_yaml_must_be_a_mapping(tmp_path: Path):
+    path = tmp_path / "config.yaml"
+    path.write_text("- a\n")
+
+    with pytest.raises(ValueError, match="mapping"):
+        InstancePipelineConfig.from_yaml(path)
+
+
 def test_pipeline_config_yaml_records_and_checks_its_format_version(tmp_path: Path):
     path = tmp_path / "out.yaml"
     InstancePipelineConfig().to_yaml(path)
