@@ -20,10 +20,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [core, segmentation, instance, opencontrails]
+        package: [deepcontrail, core, segmentation, instance, opencontrails]
         python: ["3.11", "3.13"]
         # Per-package settings, added to every Python version of that package.
         include:
+          # The code-free package: install it with the library wheels built from this commit
+          # (0.3.0 is not on PyPI before the release).
+          - package: deepcontrail
+            path: packages/deepcontrail
+            wheel: deepcontrail-[0-9]*.whl
+            extra-wheels: dist/deepcontrail_segmentation-*.whl dist/deepcontrail_instance-*.whl
           - package: core
             path: packages/core
           - package: segmentation
@@ -50,7 +56,7 @@ jobs:
           uv venv --no-config --python ${{ matrix.python }} .newest
           uv pip install --no-config --python .newest \
             dist/deepcontrail_core-*.whl \
-            "$(ls dist/deepcontrail_${{ matrix.package }}-*.whl)${{ matrix.extras }}" \
-            pytest ${{ matrix.test-deps }}
+            "$(ls dist/${{ matrix.wheel || format('deepcontrail_{0}-*.whl', matrix.package) }})${{ matrix.extras }}" \
+            ${{ matrix.extra-wheels }} pytest ${{ matrix.test-deps }}
           uv pip list --python .newest
       - run: .newest/bin/python -m pytest ${{ matrix.path }}/tests

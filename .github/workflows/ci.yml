@@ -94,6 +94,16 @@ jobs:
           - package: deepcontrail-opencontrails
             path: tools/opencontrails
             python: "3.13"
+          # The code-free package that installs the library: its job proves the three install
+          # together (no source of its own to type-check).
+          - package: deepcontrail
+            path: packages/deepcontrail
+            python: "3.11"
+            typecheck: false
+          - package: deepcontrail
+            path: packages/deepcontrail
+            python: "3.13"
+            typecheck: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
@@ -101,7 +111,8 @@ jobs:
           version: "0.13.7"
       - run: uv python install ${{ matrix.python }}
       - run: uv sync --locked --python ${{ matrix.python }} --package ${{ matrix.package }} ${{ matrix.extras }}
-      - run: uv run --no-sync pyright ${{ matrix.path }}/src
+      - if: matrix.typecheck != false
+        run: uv run --no-sync pyright ${{ matrix.path }}/src
       - run: uv run --no-sync pytest ${{ matrix.path }}/tests
 
   build:

@@ -6,6 +6,18 @@ All notable changes to DeepContrail are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-13
+
+Instance segmentation leaves preview, and the PyPI package `deepcontrail` installs the whole
+library. The pretrained model is unchanged (Hugging Face revision `v0.1.0`); its instance files
+(format version 1) are read as before.
+
+### Added
+
+- `pip install deepcontrail` installs the library: `deepcontrail-core`,
+  `deepcontrail-segmentation` and `deepcontrail-instance[map,scores]`, at the same release. It
+  has no code of its own; the OpenContrails converter stays a separate install.
+
 ### Changed
 
 - `deepcontrail-instance` is no longer a preview: it has the same status as the other packages

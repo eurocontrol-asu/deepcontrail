@@ -21,6 +21,7 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "deepcontrail",
     "deepcontrail-core",
     "deepcontrail-instance",
     "deepcontrail-opencontrails",
@@ -1104,8 +1105,33 @@ wheels = [
 ]
 
 [[package]]
+name = "deepcontrail"
+version = "0.3.0"
+source = { editable = "packages/deepcontrail" }
+dependencies = [
+    { name = "deepcontrail-core" },
+    { name = "deepcontrail-instance", extra = ["map", "scores"] },
+    { name = "deepcontrail-segmentation" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "deepcontrail-core", editable = "packages/core" },
+    { name = "deepcontrail-instance", extras = ["map", "scores"], editable = "packages/instance" },
+    { name = "deepcontrail-segmentation", editable = "packages/segmentation" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=7.4" }]
+
+[[package]]
 name = "deepcontrail-core"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -1137,7 +1163,7 @@ dev = [
 
 [[package]]
 name = "deepcontrail-instance"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/instance" }
 dependencies = [
     { name = "deepcontrail-core" },
@@ -1185,7 +1211,7 @@ dev = [
 
 [[package]]
 name = "deepcontrail-opencontrails"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "tools/opencontrails" }
 dependencies = [
     { name = "deepcontrail-core" },
@@ -1217,7 +1243,7 @@ dev = [
 
 [[package]]
 name = "deepcontrail-segmentation"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/segmentation" }
 dependencies = [
     { name = "albumentations" },
@@ -1274,7 +1300,7 @@ dev = [
 
 [[package]]
 name = "deepcontrail-workspace"
-version = "0.2.0"
+version = "0.3.0"
 source = { virtual = "." }
 default-groups = ["dev", "experiments"]
 dependencies = [

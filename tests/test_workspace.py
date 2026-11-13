@@ -16,6 +16,15 @@ MEMBERS = sorted(
     for p in [*ROOT.glob("packages/*/pyproject.toml"), *ROOT.glob("tools/*/pyproject.toml")]
 )
 
+# Members with a module; the code-free package `deepcontrail` only installs the others.
+MODULE_MEMBERS = [
+    m
+    for m in MEMBERS
+    if tomllib.loads((m / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["uv"][
+        "build-backend"
+    ]["module-name"]
+]
+
 
 def _project(path: Path) -> dict:
     with (path / "pyproject.toml").open("rb") as f:
@@ -26,6 +35,7 @@ def test_workspace_has_the_expected_members():
     names = {_project(m)["project"]["name"] for m in MEMBERS}
 
     assert names == {
+        "deepcontrail",
         "deepcontrail-core",
         "deepcontrail-segmentation",
         "deepcontrail-instance",
@@ -49,7 +59,7 @@ def test_member_licence_is_a_copy_of_the_root_licence(member: Path):
     )
 
 
-@pytest.mark.parametrize("member", MEMBERS, ids=lambda m: m.name)
+@pytest.mark.parametrize("member", MODULE_MEMBERS, ids=lambda m: m.name)
 def test_member_ships_one_namespace_module(member: Path):
     module = _project(member)["tool"]["uv"]["build-backend"]["module-name"]
     namespace, _, name = module.partition(".")
@@ -80,14 +90,14 @@ def test_installed_versions_match_pyproject():
 def test_pyright_checks_every_package_source_tree():
     include = set(_project(ROOT)["tool"]["pyright"]["include"])
 
-    expected = {str((m / "src").relative_to(ROOT)) for m in MEMBERS}
+    expected = {str((m / "src").relative_to(ROOT)) for m in MODULE_MEMBERS}
 
     assert include == expected, (
         "pyright must list each package's src/ explicitly: glob patterns matched no files"
     )
 
 
-@pytest.mark.parametrize("member", MEMBERS, ids=lambda m: m.name)
+@pytest.mark.parametrize("member", MODULE_MEMBERS, ids=lambda m: m.name)
 def test_member_ships_a_py_typed_marker(member: Path):
     module = _project(member)["tool"]["uv"]["build-backend"]["module-name"]
     package_dir = member / "src" / Path(*module.split("."))
@@ -168,6 +178,21 @@ def test_members_share_one_build_backend_requirement():
     assert len({tuple(r) for r in requirements.values()}) == 1, (
         f"every package builds with the same backend bounds: {requirements}"
     )
+
+
+def test_the_deepcontrail_package_installs_the_whole_library():
+    project = _project(ROOT / "packages" / "deepcontrail")["project"]
+    major, minor = project["version"].split(".")[:2]
+    bound = f">={major}.{minor},<{major}.{int(minor) + 1}"
+
+    assert sorted(project["dependencies"]) == sorted(
+        [
+            f"deepcontrail-core{bound}",
+            f"deepcontrail-segmentation{bound}",
+            f"deepcontrail-instance[map,scores]{bound}",
+        ]
+    ), "pip install deepcontrail gives every library package, at the same release"
+    assert not (ROOT / "packages" / "deepcontrail" / "src").exists(), "it has no code"
 
 
 def _python_versions_tested_in_ci() -> dict[str, set[str]]:
