@@ -15,7 +15,11 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from deepcontrail.core.contract import read_band_manifest, read_dataset_info, scene_stems
-from deepcontrail.core.false_color import check_false_color, load_spectral_false_color
+from deepcontrail.core.false_color import (
+    check_false_color,
+    false_color_from_spectral,
+    load_spectral_false_color,
+)
 from deepcontrail.core.readers import (
     binarize_mask,
     load_mask,
@@ -30,6 +34,18 @@ if TYPE_CHECKING:
     import albumentations as A
 
     from deepcontrail.segmentation.config import SegmentationDataConfig
+
+
+def tile_origins(size: int, tile: int, stride: int) -> list[int]:
+    """Start offsets covering 0..size with windows of ``tile``.
+
+    0, stride, ..., and a last one at ``size - tile`` so the final window ends at the edge (no
+    duplicates).
+    """
+    origins = list(range(0, size - tile + 1, stride))
+    if not origins or origins[-1] != size - tile:
+        origins.append(size - tile)
+    return origins
 
 
 class SegmentationDataset:
@@ -70,10 +86,29 @@ class SegmentationDataset:
 
         self._stem_dirs: dict[str, tuple[Path, Path]] = {}
         self.stems = self._discover_stems()
-        self.native_size = self._native_size()
+        self.scene_size = self._native_size()
+        if config.crop_size is not None and config.crop_size > self.scene_size:
+            msg = (
+                f"crop_size {config.crop_size} is larger than the scenes "
+                f"({self.scene_size} px) of {self._root}"
+            )
+            raise ValueError(msg)
+        # The model's native size is the crop when cropping, otherwise the whole scene.
+        self.native_size = config.crop_size or self.scene_size
         self._aug_transform, self._resize_transform = self._build_transform()
         # DataLoader worker the augmentation was last reseeded for (None: main process).
         self._augmentation_worker: int | None = None
+        # Non-overlapping tiles covering each scene, for validation/test with crop_size:
+        # (stem index, row0, col0). Empty unless cropping and the split is not "train".
+        self._tiles: list[tuple[int, int, int]] = []
+        if config.crop_size is not None and config.split != "train":
+            origins = tile_origins(self.scene_size, config.crop_size, config.crop_size)
+            for stem_index, _stem in enumerate(self.stems):
+                for row0 in origins:
+                    for col0 in origins:
+                        self._tiles.append((stem_index, row0, col0))
+        # Random-crop stream for training with crop_size (reseeded per DataLoader worker).
+        self._crop_rng = np.random.default_rng(config.seed)
 
     def _reseed_augmentation_in_worker(self) -> None:
         """Give each DataLoader worker its own augmentation stream.
@@ -93,7 +128,11 @@ class SegmentationDataset:
             return
         from deepcontrail.segmentation.transforms import seed_augmentation
 
-        seed_augmentation(self._aug_transform, info.seed)  # type: ignore[arg-type]
+        # Without augmentation there is nothing to seed, but the random-crop stream still needs
+        # its own per-worker generator so workers do not draw the same crops.
+        if self._aug_transform is not None:
+            seed_augmentation(self._aug_transform, info.seed)  # type: ignore[arg-type]
+        self._crop_rng = np.random.default_rng(info.seed)
         self._augmentation_worker = info.id
 
     def _warn_on_pixel_shift_mismatch(self) -> None:
@@ -175,6 +214,46 @@ class SegmentationDataset:
         arr = np.load(self._image_dir / f"{self.stems[0]}.npy", mmap_mode="r")
         return arr.shape[0]
 
+    def _load_window(
+        self, stem: str, img_dir: Path, mask_dir: Path, r0: int, c0: int, size: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Read one square window of a scene and build its ``(image, mask)`` pair.
+
+        The bands are memory-mapped and sliced to the window *before* the composite is built, so
+        a large frame (e.g. 1024 px) is never fully read into memory. On a crop the pixel shift's
+        edge padding falls at the crop edge rather than the scene edge.
+
+        Parameters
+        ----------
+        stem
+            Scene id, without extension.
+        img_dir, mask_dir
+            Directories holding the scene's spectral bands and its mask.
+        r0, c0
+            Row and column of the window's top-left corner.
+        size
+            Side of the square window (``self.native_size``).
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray]
+            ``(image, mask)``: a float32 ``(size, size, 3)`` composite in ``[0, 1]`` and its
+            ``(size, size)`` mask (binary uint8, or float32 probabilities).
+        """
+        bands = np.load(img_dir / f"{stem}.npy", mmap_mode="r")[r0 : r0 + size, c0 : c0 + size]
+        bands = np.asarray(bands, dtype=np.float32)
+        image = false_color_from_spectral(bands, self.config.false_color, self.manifest)
+        if self.config.pixel_shift != 0.0:
+            image = shift_image(image, self.config.pixel_shift)
+        if self.config.mask_type == "probability":
+            mask_full = np.load(mask_dir / f"{stem}.npy", mmap_mode="r")
+            mask = np.asarray(mask_full[r0 : r0 + size, c0 : c0 + size], dtype=np.float32)
+        else:
+            mask = binarize_mask(load_mask(mask_dir / f"{stem}.png"))[
+                r0 : r0 + size, c0 : c0 + size
+            ]
+        return image, mask
+
     def _needs_resize(self) -> bool:
         """Whether images must be resized to match ``image_size``.
 
@@ -221,7 +300,14 @@ class SegmentationDataset:
         return augmentation, image_resize
 
     def __len__(self) -> int:
-        """Return the number of image/mask pairs in this split."""
+        """Return the number of items in this split.
+
+        With ``crop_size`` on a non-train split, each scene contributes one item per
+        covering tile, so the count is the number of tiles. Otherwise it is the number
+        of stems (training, and non-cropped splits, included).
+        """
+        if self._tiles:
+            return len(self._tiles)
         return len(self.stems)
 
     def __getitem__(self, index: int) -> tuple[Any, Any]:
@@ -235,19 +321,32 @@ class SegmentationDataset:
         - ``image``: float32 ndarray, shape ``(H, W, C)``, in ``[0, 1]``.
         - ``mask``: uint8 ndarray, shape ``(H, W)``, values in ``{0, 1}``.
         """
-        stem = self.stems[index]
-
-        img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
-        image = load_spectral_false_color(
-            img_dir / f"{stem}.npy", self.config.false_color, self.manifest
-        )
-        if self.config.pixel_shift != 0.0:
-            image = shift_image(image, self.config.pixel_shift)
-        if self.config.mask_type == "probability":
-            mask = np.load(mask_dir / f"{stem}.npy")
+        if self._tiles:
+            # Validation/test with crop_size: the non-overlapping tiles covering each scene.
+            stem_index, r0, c0 = self._tiles[index]
+            stem = self.stems[stem_index]
+            img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
+            image, mask = self._load_window(stem, img_dir, mask_dir, r0, c0, self.native_size)
+        elif self.config.crop_size is not None:
+            # Training with crop_size: one random crop per scene and item.
+            stem = self.stems[index]
+            img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
+            self._reseed_augmentation_in_worker()
+            r0, c0 = self._crop_rng.integers(0, self.scene_size - self.native_size + 1, size=2)
+            image, mask = self._load_window(stem, img_dir, mask_dir, r0, c0, self.native_size)
         else:
-            mask = load_mask(mask_dir / f"{stem}.png")
-            mask = binarize_mask(mask)
+            stem = self.stems[index]
+            img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
+            image = load_spectral_false_color(
+                img_dir / f"{stem}.npy", self.config.false_color, self.manifest
+            )
+            if self.config.pixel_shift != 0.0:
+                image = shift_image(image, self.config.pixel_shift)
+            if self.config.mask_type == "probability":
+                mask = np.load(mask_dir / f"{stem}.npy")
+            else:
+                mask = load_mask(mask_dir / f"{stem}.png")
+                mask = binarize_mask(mask)
 
         assert image.shape[:2] == mask.shape, (
             f"spatial mismatch at native resolution: image {image.shape[:2]} vs mask {mask.shape}"

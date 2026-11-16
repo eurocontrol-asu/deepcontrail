@@ -72,6 +72,11 @@ class SegmentationDataConfig(DatasetConfig):
         soft-label training.
     image_size
         Expected spatial size of images (height and width).
+    crop_size
+        Side of the square window the model sees, in native pixels. Set it for scenes larger
+        than the training window: training reads one random crop per scene and item, validation
+        and test read the non-overlapping tiles covering each scene (the last row/column of
+        tiles is moved back to end at the scene edge). ``None`` (default) uses whole scenes.
     batch_size
         Batch size for the DataLoader (not used by the Dataset itself).
     num_workers
@@ -88,6 +93,7 @@ class SegmentationDataConfig(DatasetConfig):
 
     mask_type: Literal["binary", "probability"] = "binary"
     image_size: Annotated[int, Field(gt=0)] = 256
+    crop_size: Annotated[int, Field(gt=0)] | None = None
     batch_size: Annotated[int, Field(gt=0)] = 16
     num_workers: Annotated[int, Field(ge=0)] = 4
     augmentation: AugmentationConfig | None = None

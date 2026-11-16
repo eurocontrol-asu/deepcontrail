@@ -16,6 +16,7 @@ from PIL import Image
 os.environ.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 # Band keys of the synthetic datasets; the tests' RECIPE builds its composite from them.
@@ -92,6 +93,41 @@ def synthetic_root(tmp_path: Path) -> Path:
             np.save(tmp_path / "probability_masks" / split / f"{stem}.npy", prob_mask)
 
     return tmp_path
+
+
+@pytest.fixture
+def scene_dataset(tmp_path: Path) -> Callable[..., Path]:
+    """Write a minimal single-split dataset root of small scenes for the crop_size tests.
+
+    Return a callable ``make(*, n_scenes, size, split, prefix)`` that writes ``n_scenes``
+    ``size``-square scenes (random bands, all-zero masks) into ``split`` and returns the
+    root. Tests that need controlled band/mask content overwrite the files afterwards.
+    The scenes are smaller than those of the fixtures above, which are fixed at 16x16.
+    """
+
+    def _make(
+        *,
+        n_scenes: int = 2,
+        size: int = 8,
+        split: str = "train",
+        prefix: str | None = None,
+    ) -> Path:
+        write_metadata(tmp_path)
+        stem_prefix = prefix or split
+        for i in range(1, n_scenes + 1):
+            stem = f"{stem_prefix}_{i:06d}"
+            write_bands(
+                tmp_path / "spectral_bands" / split / f"{stem}.npy",
+                np.random.RandomState(i),
+                (size, size),
+            )
+            write_mask(
+                tmp_path / "semantic_masks" / split / f"{stem}.png",
+                np.zeros((size, size), np.uint8),
+            )
+        return tmp_path
+
+    return _make
 
 
 @pytest.fixture

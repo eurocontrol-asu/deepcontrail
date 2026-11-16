@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 _SYNTH_SIZE = 16
@@ -1068,3 +1069,194 @@ def test_dataset_val_ids_selects_listed_scenes(synthetic_root: Path):
     assert set(train_ds.stems) == {f"train_{i:06d}" for i in range(1, 6)} - set(listed), (
         "train is the complement of the listed validation scenes"
     )
+
+
+# crop_size: crops for training, tiles for validation/test
+# ---------------------------------------------------------------------------
+
+
+def test_tile_origins_cover_the_scene_and_end_at_the_edge():
+    from deepcontrail.segmentation.dataset import tile_origins
+
+    assert tile_origins(10, 4, 4) == [0, 4, 6], (
+        "0, stride, ... then a last origin at size - tile so the final window ends at the edge"
+    )
+    assert tile_origins(8, 4, 4) == [0, 4]
+    assert tile_origins(4, 4, 4) == [0]
+
+    for size, tile in [(10, 4), (8, 4), (4, 4), (17, 5)]:
+        origins = tile_origins(size, tile, tile)
+        assert origins[0] == 0, "tiling must start at the scene origin"
+        assert origins[-1] == size - tile, "the final tile must end exactly at the scene edge"
+        assert all(o >= 0 and o + tile <= size for o in origins), "no tile may leave the scene"
+        assert len(origins) == len(set(origins)), "origins must not repeat"
+
+
+def test_dataset_without_crop_size_is_unchanged(scene_dataset: Callable[..., Path]):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    root = scene_dataset(n_scenes=4, size=8, split="test")
+    cfg = SegmentationDataConfig(false_color=RECIPE, root=str(root), split="test", image_size=8)
+    ds = SegmentationDataset(cfg)
+
+    assert ds.scene_size == 8, "scene_size is the full scene side"
+    assert ds.native_size == 8, "without crop_size the native size is the scene size"
+    assert ds.native_resolution == 8
+    assert len(ds) == 4, "without crop_size the count is the number of scenes"
+    assert ds._tiles == [], "no tiles are built without crop_size"
+
+
+def test_dataset_crop_size_sets_native_size_to_the_crop(scene_dataset: Callable[..., Path]):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    root = scene_dataset(n_scenes=2, size=16, split="train")
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE, root=str(root), split="train", image_size=8, crop_size=8
+    )
+    ds = SegmentationDataset(cfg)
+
+    assert ds.scene_size == 16, "scene_size stays the full scene side"
+    assert ds.native_size == 8, "native_size becomes the crop size"
+    assert ds.native_resolution == 8
+
+
+def test_dataset_crop_size_larger_than_scene_raises(scene_dataset: Callable[..., Path]):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    root = scene_dataset(n_scenes=2, size=8, split="train")
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE, root=str(root), split="train", image_size=8, crop_size=16
+    )
+
+    with pytest.raises(ValueError, match="larger than the scenes"):
+        SegmentationDataset(cfg)
+
+
+def test_dataset_train_items_are_crops_of_the_crop_size(scene_dataset: Callable[..., Path]):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    root = scene_dataset(n_scenes=3, size=16, split="train")
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE, root=str(root), split="train", image_size=8, crop_size=8
+    )
+    ds = SegmentationDataset(cfg)
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, mask = ds[0]
+
+    assert image.shape == (8, 8, 3), "a training item is a crop of crop_size, HWC"
+    assert mask.shape == (8, 8), "the crop mask matches the crop size"
+
+
+def test_dataset_train_crop_matches_the_same_window_of_the_scene(
+    scene_dataset: Callable[..., Path],
+):
+    from deepcontrail.core.false_color import false_color_from_spectral
+    from deepcontrail.core.readers import binarize_mask
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    from .conftest import write_mask
+
+    scene, crop = 16, 8
+    full_mask = np.random.RandomState(123).choice([0, 255], size=(scene, scene)).astype(np.uint8)
+    # Several identical controlled scenes so the train split (which holds some stems back for
+    # validation) still has one, and ds[0] loads a scene with the content checked below.
+    root = scene_dataset(n_scenes=3, size=scene, split="train")
+    # Bands encode the (row, col) position so every window of the composite is unique:
+    # the blue channel ramps across columns, the red channel across rows.
+    rr, cc = np.mgrid[0:scene, 0:scene]
+    ir_105 = (243 + 60 * cc / 15).astype(np.float32)
+    ir_123 = (ir_105 - 4 + 6 * rr / 15).astype(np.float32)
+    ir_87 = (ir_105 - 0.5).astype(np.float32)
+    bands = np.stack([ir_87, ir_105, ir_123], axis=-1)  # manifest order: ir_87, ir_105, ir_123
+
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE, root=str(root), split="train", image_size=crop, crop_size=crop, seed=11
+    )
+    ds = SegmentationDataset(cfg)
+    for stem in ds.stems:
+        np.save(root / "spectral_bands" / "train" / f"{stem}.npy", bands)
+        write_mask(root / "semantic_masks" / "train" / f"{stem}.png", full_mask)
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, mask = ds[0]
+
+    full_image = false_color_from_spectral(bands, cfg.false_color, ds.manifest)
+    binarized = binarize_mask(full_mask)
+    matches = [
+        (r0, c0)
+        for r0 in range(scene - crop + 1)
+        for c0 in range(scene - crop + 1)
+        if np.array_equal(image, full_image[r0 : r0 + crop, c0 : c0 + crop])
+        and np.array_equal(mask, binarized[r0 : r0 + crop, c0 : c0 + crop])
+    ]
+    assert matches, "the returned crop must be a real window of the scene (image and mask)"
+    assert len(matches) == 1, f"the unique image window must pinpoint one origin, got {matches}"
+
+
+def test_dataset_val_items_are_the_tiles_of_each_scene(scene_dataset: Callable[..., Path]):
+    from deepcontrail.core.readers import binarize_mask, load_mask
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    from .conftest import write_mask
+
+    scene, crop = 8, 4
+    root = scene_dataset(n_scenes=2, size=scene, split="test")
+    quadrants = {
+        "test_000001": (slice(0, 4), slice(0, 4)),
+        "test_000002": (slice(4, 8), slice(4, 8)),
+    }
+    for stem, quad in quadrants.items():
+        mask = np.zeros((scene, scene), np.uint8)
+        mask[quad[0], quad[1]] = 255
+        write_mask(root / "semantic_masks" / "test" / f"{stem}.png", mask)
+
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE, root=str(root), split="test", image_size=crop, crop_size=crop
+    )
+    ds = SegmentationDataset(cfg)
+
+    assert len(ds) == 4 * 2, "each 8x8 scene contributes 4 tiles of size 4"
+    assert ds.stems == ["test_000001", "test_000002"], "tiles keep stems in scene order"
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        for k, stem in enumerate(ds.stems):
+            tiles = [ds[k * 4 + j][0] for j in range(4)]  # numpy HWC crops, in tile order
+            masks = [
+                binarize_mask(load_mask(root / "semantic_masks" / "test" / f"{stem}.png"))[
+                    r0 : r0 + crop, c0 : c0 + crop
+                ]
+                for (r0, c0) in [(0, 0), (0, crop), (crop, 0), (crop, crop)]
+            ]
+            rebuilt = np.block([[masks[0], masks[1]], [masks[2], masks[3]]])
+            assert tiles[0].shape[:2] == (crop, crop), "each tile is crop_size square"
+            assert np.array_equal(
+                rebuilt,
+                binarize_mask(load_mask(root / "semantic_masks" / "test" / f"{stem}.png")),
+            ), f"the 4 tiles of {stem} must rebuild its scene mask"
+
+
+def test_dataset_crops_are_reproducible_with_the_same_seed(scene_dataset: Callable[..., Path]):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    root = scene_dataset(n_scenes=3, size=16, split="train")
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE, root=str(root), split="train", image_size=8, crop_size=8, seed=99
+    )
+
+    ds1 = SegmentationDataset(cfg)
+    ds2 = SegmentationDataset(cfg)
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        img1, mask1 = ds1[0]
+        img2, mask2 = ds2[0]
+
+    assert np.array_equal(img1, img2), "the same seed must draw the same crop"
+    assert np.array_equal(mask1, mask2), "the same crop carries the same mask window"
