@@ -23,7 +23,7 @@ from deepcontrail.core.readers import (
     to_numpy,
     validate_binary_mask,
 )
-from deepcontrail.core.splits import context_frames, partition_stems
+from deepcontrail.core.splits import context_frames, partition_stems, read_stem_list
 from deepcontrail.segmentation.tensors import to_tensors, to_tensors_soft
 
 if TYPE_CHECKING:
@@ -129,6 +129,7 @@ class SegmentationDataset:
             for stem in scanned:
                 self._stem_dirs[stem] = (img_dir, mask_dir)
             all_stems.extend(scanned)
+        val_ids_path = self.config.val_ids_path()
         return partition_stems(
             all_stems,
             self.config.split,
@@ -136,6 +137,7 @@ class SegmentationDataset:
             val_fraction=self.config.val_fraction,
             fold=self.config.fold,
             num_folds=self.config.num_folds,
+            val_stems=read_stem_list(val_ids_path) if val_ids_path is not None else None,
         )
 
     def _scan_stems(self, image_dir: Path, mask_dir: Path) -> list[str]:

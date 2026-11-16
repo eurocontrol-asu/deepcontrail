@@ -71,3 +71,31 @@ def test_dataset_config_requires_a_false_color_recipe():
 
     with pytest.raises(ValidationError, match="false_color"):
         DatasetConfig(root="/data")  # type: ignore[call-arg]
+
+
+def test_dataset_config_val_ids_path_resolves_relative_to_root():
+    from pathlib import Path
+
+    from deepcontrail.core.config import DatasetConfig
+
+    cfg = DatasetConfig(root="/data/foo", false_color=RECIPE, val_ids="splits/val.txt")
+
+    assert cfg.val_ids_path() == Path("/data/foo/splits/val.txt"), (
+        "a relative val_ids is resolved against root"
+    )
+
+
+def test_dataset_config_val_ids_path_keeps_absolute_path():
+    from pathlib import Path
+
+    from deepcontrail.core.config import DatasetConfig
+
+    cfg = DatasetConfig(root="/data/foo", false_color=RECIPE, val_ids="/elsewhere/val.txt")
+
+    assert cfg.val_ids_path() == Path("/elsewhere/val.txt"), "an absolute val_ids is kept as-is"
+
+
+def test_dataset_config_val_ids_path_is_none_by_default():
+    from deepcontrail.core.config import DatasetConfig
+
+    assert DatasetConfig(root="/data", false_color=RECIPE).val_ids_path() is None

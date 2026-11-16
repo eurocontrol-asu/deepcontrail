@@ -45,6 +45,10 @@ class DatasetConfig(BaseModel):
         K-fold cross-validation fold index, or ``None`` to disable CV.
     num_folds
         Total number of CV folds. Only used when ``fold`` is set.
+    val_ids
+        Path to a list of training scene ids (see ``read_stem_list``) that form the validation
+        split; a relative path is resolved against ``root``. When set it replaces ``fold`` and
+        ``val_fraction``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -57,6 +61,17 @@ class DatasetConfig(BaseModel):
     val_fraction: Annotated[float, Field(default=0.1, ge=0.0, lt=1.0)] = 0.1
     fold: int | None = None
     num_folds: Annotated[int, Field(default=4, ge=2)] = 4
+    val_ids: str | None = None
+
+    def val_ids_path(self) -> Path | None:
+        """Return the resolved path of ``val_ids``, or None.
+
+        A relative path is resolved against ``root``; an absolute one is kept as-is.
+        """
+        if self.val_ids is None:
+            return None
+        path = Path(self.val_ids)
+        return path if path.is_absolute() else Path(self.root) / path
 
     @model_validator(mode="after")
     def _validate_split_strategy(self) -> Self:

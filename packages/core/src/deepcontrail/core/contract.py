@@ -71,7 +71,13 @@ class BandChannel(BaseModel):
 
 
 class BandManifest(BaseModel):
-    """``spectral_bands/bands.json``: what each channel of the spectral arrays holds."""
+    """``spectral_bands/bands.json``: what each channel of the spectral arrays holds.
+
+    Parameters
+    ----------
+    nodata
+        ``"nan"``: NaN marks pixels without data; otherwise every value must be finite.
+    """
 
     model_config = ConfigDict(frozen=True, extra="allow")
 
@@ -80,6 +86,7 @@ class BandManifest(BaseModel):
     dtype: Literal["float32"]
     channels: Annotated[tuple[BandChannel, ...], Field(min_length=1)]
     description: str | None = None
+    nodata: Literal["nan"] | None = None
 
     @property
     def keys(self) -> tuple[str, ...]:

@@ -253,7 +253,10 @@ def _check_scene(
         msg = f"expected float32 (H, W, {n}), got {bands.dtype} {bands.shape}"
         issues.append(Issue(band_path, "bands", msg))
         return issues, None
-    if not np.isfinite(bands).all():
+    if manifest.nodata == "nan":
+        if np.isinf(bands).any():
+            issues.append(Issue(band_path, "bands", "contains infinite values"))
+    elif not np.isfinite(bands).all():
         issues.append(Issue(band_path, "bands", "contains NaN or infinite values"))
     hw = tuple(bands.shape[:2])
 

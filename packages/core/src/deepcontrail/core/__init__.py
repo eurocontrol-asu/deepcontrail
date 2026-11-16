@@ -20,7 +20,12 @@ from deepcontrail.core.false_color import (
     load_spectral_false_color,
 )
 from deepcontrail.core.metrics import dice_coefficient, iou_score
-from deepcontrail.core.splits import context_frames, partition_stems, split_fingerprint
+from deepcontrail.core.splits import (
+    context_frames,
+    partition_stems,
+    read_stem_list,
+    split_fingerprint,
+)
 from deepcontrail.core.validate import Issue, ValidationReport, validate_dataset
 
 __version__ = version("deepcontrail-core")
@@ -45,6 +50,7 @@ __all__ = [
     "partition_stems",
     "read_band_manifest",
     "read_dataset_info",
+    "read_stem_list",
     "scene_stems",
     "split_fingerprint",
     "validate_dataset",

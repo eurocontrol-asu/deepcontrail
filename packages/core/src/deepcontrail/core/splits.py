@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Collection, Iterable
 
 # ``<scene>_b<k>`` / ``<scene>_a<k>``: frame k steps before / after a scene, in temporal datasets.
 _CONTEXT_FRAME = re.compile(r"(?P<scene>.+)_[ab]\d+")
@@ -46,6 +47,22 @@ def context_frames(stems: Iterable[str], *, temporal: bool | None) -> set[str]:
     }
 
 
+def read_stem_list(path: str | Path) -> list[str]:
+    """Read a list of scene ids: one per line; blank and ``#`` lines are skipped."""
+    ids: list[str] = []
+    seen: set[str] = set()
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        id_ = line.strip()
+        if not id_ or id_.startswith("#"):
+            continue
+        if id_ in seen:
+            msg = f"duplicate id {id_!r} in {path}"
+            raise ValueError(msg)
+        seen.add(id_)
+        ids.append(id_)
+    return ids
+
+
 def partition_stems(
     stems: list[str],
     split: Literal["train", "val", "test"],
@@ -54,6 +71,7 @@ def partition_stems(
     val_fraction: float,
     fold: int | None,
     num_folds: int,
+    val_stems: Collection[str] | None = None,
 ) -> list[str]:
     """Return the stems of ``split``, sorted.
 
@@ -65,11 +83,29 @@ def partition_stems(
     * Otherwise ``val_fraction`` determines the split — stems are
       shuffled with ``seed`` and the first ``val_fraction * N`` go to
       validation, the rest to training.
+
+    When ``val_stems`` is set (for ``"train"``/``"val"`` only), it replaces the
+    above: the validation split is exactly those scene ids, in sorted order, and
+    training is their complement. Every id of ``val_stems`` must be among
+    ``stems``. ``fold``, ``val_fraction`` and ``seed`` are then ignored — useful
+    for a fixed validation set of whole days, which a random frame-level split
+    would leak near-duplicates from.
     """
     stems = sorted(stems)
 
     if split == "test":
         return stems
+
+    if val_stems is not None:
+        val = set(val_stems)
+        present = set(stems)
+        missing = [s for s in val_stems if s not in present]
+        if missing:
+            msg = f"val_stems reference ids not in the dataset: {missing[:5]}"
+            raise ValueError(msg)
+        if split == "val":
+            return [s for s in stems if s in val]
+        return [s for s in stems if s not in val]
 
     if fold is not None:
         if split == "val":

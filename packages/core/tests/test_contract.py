@@ -305,3 +305,29 @@ def test_band_manifest_index_of_unknown_key_lists_available_keys():
 
     with pytest.raises(DatasetContractError, match=r"cloud_top.*data_11um, data_12um, btd"):
         manifest.index_of("cloud_top")
+
+
+# --- nodata ---------------------------------------------------------------------------
+
+
+def test_band_manifest_nodata_defaults_to_none():
+    from deepcontrail.core.contract import BandManifest
+
+    assert BandManifest.model_validate(_manifest()).nodata is None, (
+        "GOES datasets declare nothing, so NaN stays forbidden"
+    )
+
+
+def test_band_manifest_accepts_nodata_nan():
+    from deepcontrail.core.contract import BandManifest
+
+    manifest = BandManifest.model_validate(_manifest(nodata="nan"))
+
+    assert manifest.nodata == "nan", "a satellite may declare that NaN marks no-data pixels"
+
+
+def test_band_manifest_rejects_unknown_nodata_value():
+    from deepcontrail.core.contract import BandManifest
+
+    with pytest.raises(ValueError, match="nodata"):
+        BandManifest.model_validate(_manifest(nodata="zero"))

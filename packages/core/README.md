@@ -31,7 +31,9 @@ the [converter](https://github.com/eurocontrol-asu/deepcontrail/tree/main/tools/
 
 - **Splits.** `test/` is a holdout. The validation set is drawn from `train/` at load time:
   the sorted ids are shuffled with the seed and the first `val_fraction` go to validation (or
-  k-fold with `fold` / `num_folds`). Training runs record the exact lists and their fingerprints.
+  k-fold with `fold` / `num_folds`). `val_ids: <file>` fixes the validation scenes instead (one id
+  per line, relative to the root) — a whole-day list, so a frame-level split cannot leak
+  near-duplicates. Training runs record the exact lists and their fingerprints.
 - **Ids** are unique across splits and used as written: any file name is a valid id.
 - **Context frames** (unlabelled neighbouring time steps of a scene) exist only in a dataset
   that declares `"temporal": true` in `dataset_info.json`. There, `<id>_b<k>.npy` /
@@ -66,6 +68,9 @@ directory this way.
 optional `sensor_band`, `wavelength_um`, `name` and `derived_from` (`[a, b]` for a channel
 stored as `a - b`) describe the band for people; the library never interprets them. Another
 sensor declares its own keys (for example `ir_105`, `ir_123` for MTG FCI).
+
+An optional `"nodata": "nan"` declares that NaN marks pixels without data (for example outside a
+satellite's view); otherwise every value must be finite.
 
 ### `metadata/dataset_info.json`
 
@@ -126,6 +131,9 @@ data:
 
 `false_color_from_spectral(bands, recipe, manifest)` builds it; a band key the dataset does not
 declare is an error listing the available keys.
+
+`nan_fill` (for example `0.0`) sets the composite where a band is NaN; without it NaN stays NaN
+and is rejected when training or predicting.
 
 ## Validation
 

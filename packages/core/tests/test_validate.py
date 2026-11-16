@@ -275,6 +275,45 @@ def test_non_finite_bands_are_reported(tmp_path: Path):
     assert "bands" in _rules(report)
 
 
+def test_validate_deep_accepts_nan_when_manifest_declares_nodata(tmp_path: Path):
+    root = _make_root(tmp_path)
+    manifest = root / "spectral_bands" / "bands.json"
+    payload = json.loads(manifest.read_text()) | {"nodata": "nan"}
+    manifest.write_text(json.dumps(payload))
+    bands = np.full((*SIZE, 3), 250.0, np.float32)
+    bands[0, 0, 0] = np.nan
+    np.save(root / "spectral_bands" / "test" / "21.npy", bands)
+
+    report = _validate(root, deep=True)
+
+    assert "bands" not in _rules(report), "a declared nodata: nan allows NaN pixels"
+
+
+def test_validate_deep_rejects_inf_even_with_nodata(tmp_path: Path):
+    root = _make_root(tmp_path)
+    manifest = root / "spectral_bands" / "bands.json"
+    payload = json.loads(manifest.read_text()) | {"nodata": "nan"}
+    manifest.write_text(json.dumps(payload))
+    bands = np.full((*SIZE, 3), 250.0, np.float32)
+    bands[0, 0, 0] = np.inf
+    np.save(root / "spectral_bands" / "test" / "21.npy", bands)
+
+    report = _validate(root, deep=True)
+
+    assert "bands" in _rules(report), "infinite values are never allowed, even with nodata"
+
+
+def test_validate_deep_rejects_nan_without_nodata(tmp_path: Path):
+    root = _make_root(tmp_path)
+    bands = np.full((*SIZE, 3), 250.0, np.float32)
+    bands[0, 0, 0] = np.nan
+    np.save(root / "spectral_bands" / "test" / "21.npy", bands)
+
+    report = _validate(root, deep=True)
+
+    assert "bands" in _rules(report), "NaN without a declared nodata is rejected"
+
+
 def test_scene_size_mismatch_is_reported(tmp_path: Path):
     root = _make_root(tmp_path)
     np.save(root / "probability_masks" / "train" / "12.npy", np.zeros((4, 4), np.float32))

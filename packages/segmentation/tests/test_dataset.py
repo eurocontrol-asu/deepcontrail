@@ -1031,3 +1031,40 @@ def test_dataloader_workers_draw_different_augmentations(tmp_path: Path):
     assert ops[0::2] != ops[1::2], (
         f"each worker must draw its own augmentations, not replay the other's: {ops}"
     )
+
+
+# ---------------------------------------------------------------------------
+# val_ids: an explicit validation list
+# ---------------------------------------------------------------------------
+
+
+def test_dataset_val_ids_selects_listed_scenes(synthetic_root: Path):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    listed = ["train_000002", "train_000004"]
+    (synthetic_root / "val_scenes.txt").write_text("\n".join(listed) + "\n")
+
+    train_ds = SegmentationDataset(
+        SegmentationDataConfig(
+            false_color=RECIPE,
+            root=str(synthetic_root),
+            split="train",
+            image_size=_SYNTH_SIZE,
+            val_ids="val_scenes.txt",
+        )
+    )
+    val_ds = SegmentationDataset(
+        SegmentationDataConfig(
+            false_color=RECIPE,
+            root=str(synthetic_root),
+            split="val",
+            image_size=_SYNTH_SIZE,
+            val_ids="val_scenes.txt",
+        )
+    )
+
+    assert val_ds.stems == listed, "val is exactly the listed scenes, sorted"
+    assert set(train_ds.stems) == {f"train_{i:06d}" for i in range(1, 6)} - set(listed), (
+        "train is the complement of the listed validation scenes"
+    )

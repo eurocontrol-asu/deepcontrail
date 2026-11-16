@@ -45,11 +45,18 @@ class FalseColorConfig(BaseModel):
     There is no default recipe: band keys belong to the dataset, so the recipe is
     always written in the config (e.g. the standard ash RGB in
     ``configs/experiment.yaml``).
+
+    Parameters
+    ----------
+    nan_fill
+        Composite value written where a band is NaN (no data), e.g. 0.0 for black. None
+        (default) keeps NaN, which ``predict`` and training reject.
     """
 
     model_config = ConfigDict(frozen=True)
 
     channels: tuple[FalseColorChannel, FalseColorChannel, FalseColorChannel]
+    nan_fill: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
 
 
 def check_false_color(config: FalseColorConfig, manifest: BandManifest) -> None:
@@ -108,7 +115,10 @@ def false_color_from_spectral(
             value = value - bands[..., manifest.index_of(channel.bands[1])]
         lo, hi = channel.bounds
         channels.append((value - lo) / (hi - lo))
-    return np.clip(np.stack(channels, axis=-1), 0, 1).astype(np.float32)
+    result = np.clip(np.stack(channels, axis=-1), 0, 1)
+    if config.nan_fill is not None:
+        result = np.nan_to_num(result, nan=config.nan_fill)
+    return result.astype(np.float32)
 
 
 def load_spectral_false_color(

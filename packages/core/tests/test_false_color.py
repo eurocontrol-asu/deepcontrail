@@ -29,18 +29,22 @@ def _manifest(keys: tuple[str, ...] = _KEYS) -> BandManifest:
     )
 
 
-def _ash(green: tuple[str, ...] = ("ir_105", "ir_87")) -> FalseColorConfig:
+def _ash(
+    green: tuple[str, ...] = ("ir_105", "ir_87"),
+    nan_fill: float | None = None,
+) -> FalseColorConfig:
     from deepcontrail.core.false_color import FalseColorConfig
 
-    return FalseColorConfig.model_validate(
-        {
-            "channels": [
-                {"bands": ["ir_123", "ir_105"], "bounds": [-4, 2]},
-                {"bands": list(green), "bounds": [-4, 5]},
-                {"bands": ["ir_105"], "bounds": [243, 303]},
-            ]
-        }
-    )
+    payload = {
+        "channels": [
+            {"bands": ["ir_123", "ir_105"], "bounds": [-4, 2]},
+            {"bands": list(green), "bounds": [-4, 5]},
+            {"bands": ["ir_105"], "bounds": [243, 303]},
+        ]
+    }
+    if nan_fill is not None:
+        payload["nan_fill"] = nan_fill
+    return FalseColorConfig.model_validate(payload)
 
 
 def _bands(**values: float) -> np.ndarray:
@@ -135,3 +139,41 @@ def test_false_color_channel_rejects_more_than_two_bands():
 
     with pytest.raises(ValidationError):
         FalseColorChannel(bands=("a", "b", "c"), bounds=(0.0, 1.0))  # type: ignore[arg-type]
+
+
+# --- nan_fill -------------------------------------------------------------------------
+
+
+def test_false_color_nan_fill_replaces_nan_pixels():
+    from deepcontrail.core.false_color import false_color_from_spectral
+
+    bands = _bands()
+    bands[0, 0, _KEYS.index("ir_105")] = np.nan  # ir_105 is NaN at pixel (0, 0) only
+
+    filled = false_color_from_spectral(bands, _ash(nan_fill=0.0), _manifest())
+    unfilled = false_color_from_spectral(bands, _ash(), _manifest())
+
+    assert np.isfinite(filled).all(), "nan_fill removes every NaN from the composite"
+    assert np.isnan(unfilled[0, 0]).all(), "without nan_fill the NaN stays NaN in the composite"
+
+    finite = np.ones((2, 2), bool)
+    finite[0, 0] = False
+    np.testing.assert_allclose(
+        filled[finite], unfilled[finite], err_msg="finite pixels are unchanged by nan_fill"
+    )
+
+
+def test_false_color_without_nan_fill_keeps_nan():
+    from deepcontrail.core.false_color import false_color_from_spectral
+
+    bands = _bands()
+    bands[0, 0, _KEYS.index("ir_105")] = np.nan
+
+    fc = false_color_from_spectral(bands, _ash(), _manifest())
+
+    assert np.isnan(fc[0, 0]).all(), "without nan_fill, NaN in a band stays NaN in the composite"
+
+
+def test_false_color_nan_fill_out_of_range_is_rejected():
+    with pytest.raises(ValidationError, match="nan_fill"):
+        _ash(nan_fill=1.5)

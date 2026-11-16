@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _stems(n: int) -> list[str]:
@@ -140,3 +145,68 @@ def test_split_fingerprint_is_short_hex():
 
     assert len(fingerprint) == 12
     int(fingerprint, 16)
+
+
+# --- explicit validation list (val_stems) --------------------------------------------
+
+
+def test_partition_stems_with_val_stems_returns_exactly_the_listed_stems_as_val():
+    stems = _stems(10)
+
+    val = _partition(stems, "val", val_stems=["0003", "0007", "0001"])
+
+    assert val == ["0001", "0003", "0007"], "val must be exactly the listed stems, sorted"
+
+
+def test_partition_stems_with_val_stems_train_is_the_complement():
+    stems = _stems(10)
+
+    train = _partition(stems, "train", val_stems=["0003", "0007"])
+
+    assert train == [s for s in stems if s not in {"0003", "0007"}], (
+        "train must be every stem not listed for validation"
+    )
+
+
+def test_partition_stems_with_val_stems_ignores_val_fraction_and_fold():
+    stems = _stems(10)
+
+    val = _partition(stems, "val", fold=1, val_fraction=0.5, val_stems=["0002", "0005"])
+
+    assert val == ["0002", "0005"], "fold and val_fraction must be ignored when val_stems is set"
+
+
+def test_partition_stems_with_unknown_val_stem_raises():
+    stems = _stems(10)
+
+    with pytest.raises(ValueError, match="0099"):
+        _partition(stems, "val", val_stems=["0005", "0099"])
+
+
+def test_partition_stems_test_split_ignores_val_stems():
+    stems = ["c", "a", "b"]
+
+    result = _partition(stems, "test", val_stems=["a"])
+
+    assert result == ["a", "b", "c"], "test split must keep every stem regardless of val_stems"
+
+
+def test_read_stem_list_skips_blank_and_comment_lines(tmp_path: Path):
+    from deepcontrail.core.splits import read_stem_list
+
+    path = tmp_path / "val.txt"
+    path.write_text("0001\n\n# comment\n  0002  \n#another\n0003\n")
+
+    assert read_stem_list(path) == ["0001", "0002", "0003"], (
+        "blank and #-comment lines are skipped, surrounding whitespace stripped"
+    )
+
+
+def test_read_stem_list_with_duplicate_raises(tmp_path: Path):
+    from deepcontrail.core.splits import read_stem_list
+
+    path = tmp_path / "val.txt"
+    path.write_text("0001\n0002\n0001\n")
+
+    with pytest.raises(ValueError, match="0001"):
+        read_stem_list(path)
