@@ -54,6 +54,26 @@ def _composite(n: int | None = None, seed: int = 0) -> np.ndarray:
     return np.random.RandomState(seed).uniform(0, 1, shape).astype(np.float32)
 
 
+class _ConstantLogit(torch.nn.Module):
+    """A network whose logit is the same value for every pixel, whatever the input is.
+
+    ``predict`` applies the sigmoid, so it returns the corresponding probability everywhere;
+    a larger scene then exercises the tile blend, which must return that probability exactly
+    (the tent weights sum to one).
+    """
+
+    def __init__(self, probability: float) -> None:
+        super().__init__()
+        logit = float(np.log(probability / (1.0 - probability)))
+        self.register_buffer("logit", torch.tensor(logit, dtype=torch.float32))
+        # A parameter so Pretrained.device (which reads the first weight) has one to return;
+        # it is never used, the forward pass ignores the input entirely.
+        self.probe = torch.nn.Parameter(torch.zeros(1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.full((x.shape[0], 1, x.shape[2], x.shape[3]), self.logit, dtype=x.dtype)
+
+
 # --- bundle on disk ---------------------------------------------------------------------
 
 
@@ -243,14 +263,18 @@ def test_predict_rejects_a_composite_that_is_not_three_channels():
         predict(Pretrained(_model(), _config()), np.zeros((16, 16, 10), np.float32))
 
 
-@pytest.mark.parametrize("shape", [(32, 32, 3), (16, 24, 3), (2, 8, 8, 3)])
-def test_predict_rejects_scenes_of_another_size_than_the_training_scenes(shape):
+def test_predict_scene_smaller_than_native_raises():
     from deepcontrail.segmentation.pretrained import Pretrained, predict
 
-    composite = np.zeros(shape, dtype=np.float32)
+    with pytest.raises(ValueError, match="smaller than"):
+        predict(Pretrained(_model(), _config()), np.zeros((8, 8, 3), np.float32))
 
-    with pytest.raises(ValueError, match="16 x 16"):
-        predict(Pretrained(_model(), _config()), composite)
+
+def test_predict_batch_smaller_than_native_in_any_scene_raises():
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    with pytest.raises(ValueError, match="smaller than"):
+        predict(Pretrained(_model(), _config()), np.zeros((2, 8, 8, 3), np.float32))
 
 
 def test_predict_rejects_an_integer_composite():
@@ -292,6 +316,108 @@ def test_predict_rejects_a_batch_size_below_one():
 
     with pytest.raises(ValueError, match="batch_size"):
         predict(Pretrained(_model(), _config()), _composite(), batch_size=0)
+
+
+# --- larger scenes: tiled and blended ---------------------------------------------------
+
+
+def test_blend_weights_are_positive_and_peak_at_the_centre():
+    from deepcontrail.segmentation.pretrained import _blend_weights
+
+    weight = _blend_weights(16)
+
+    assert weight.dtype == np.float32
+    assert weight.shape == (16, 16)
+    assert weight.min() > 0.0, "edges must still contribute, so overlapping tiles always blend"
+    centre = weight.max()
+    assert weight[8, 8] == centre, "the tile centre counts most"
+    assert weight[0, 0] < centre, "an edge counts less than the centre"
+    np.testing.assert_allclose(weight, weight.T, err_msg="tent weights are symmetric")
+    np.testing.assert_allclose(weight, weight[::-1, ::-1], err_msg="and symmetric about the centre")
+
+
+def test_predict_native_size_output_is_unchanged():
+    from deepcontrail.segmentation.pretrained import (
+        Pretrained,
+        _AtInputSize,
+        _blend_weights,
+        _prepare,
+        predict,
+    )
+
+    pretrained = Pretrained(_model(), _config())
+    composite = _composite()  # exactly native size (16 x 16)
+    probs = predict(pretrained, composite, tta=False)
+
+    # A native scene is a single tile covering itself; blending that one full-cover tile (whose
+    # tent weights normalise to one) must return the same probabilities the native path returns.
+    network = _AtInputSize(pretrained.model, (16, 16)).eval()
+    with torch.no_grad():
+        tile = torch.sigmoid(network(_prepare(composite, pretrained.config, 0.0)[None]))[
+            0, 0
+        ].numpy()
+    blended = (_blend_weights(16).astype(np.float64) * tile) / _blend_weights(16).astype(np.float64)
+
+    assert probs.shape == (16, 16)
+    np.testing.assert_allclose(probs, blended, atol=1e-6, err_msg="native size is one full tile")
+
+
+def test_predict_larger_scene_returns_its_full_size():
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    composite = np.random.RandomState(0).uniform(0, 1, (40, 24, 3)).astype(np.float32)
+
+    probs = predict(Pretrained(_model(), _config()), composite)
+
+    assert probs.shape == (40, 24), "a larger scene comes back at its own size, not resized"
+    assert probs.dtype == np.float32
+    assert probs.min() >= 0.0
+    assert probs.max() <= 1.0
+
+
+def test_predict_larger_scene_of_a_constant_model_is_that_constant():
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    probability = 0.7
+    model = _ConstantLogit(probability)
+    pretrained = Pretrained(model, _config())
+    composite = np.random.RandomState(0).uniform(0, 1, (40, 24, 3)).astype(np.float32)
+
+    probs = predict(pretrained, composite, tta=False)
+
+    np.testing.assert_allclose(
+        probs, probability, atol=1e-6, err_msg="blended weights sum to one, so a constant stays"
+    )
+
+
+def test_predict_tiles_match_native_predictions_where_only_one_tile_covers():
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    pretrained = Pretrained(_model(), _config())
+    # native 16, scene 16 x 32: columns 0..7 are covered only by the leftmost tile.
+    composite = np.random.RandomState(1).uniform(0, 1, (16, 32, 3)).astype(np.float32)
+
+    blended = predict(pretrained, composite, tta=False)
+    left_tile = predict(pretrained, composite[:, :16], tta=False)
+
+    np.testing.assert_allclose(
+        blended[:, :8],
+        left_tile[:, :8],
+        atol=1e-6,
+        err_msg="a pixel covered by a single tile is that tile's prediction, unchanged",
+    )
+
+
+def test_predict_batch_of_larger_scenes_returns_a_batch():
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    batch = np.random.RandomState(2).uniform(0, 1, (2, 40, 24, 3)).astype(np.float32)
+    pretrained = Pretrained(_model(), _config())
+
+    probs = predict(pretrained, batch, batch_size=2)
+
+    assert probs.shape == (2, 40, 24), "a batch of larger scenes comes back as a batch"
+    np.testing.assert_allclose(probs[1], predict(pretrained, batch[1]), atol=1e-6)
 
 
 def test_predict_accepts_a_float64_composite_in_range():

@@ -37,6 +37,7 @@ from safetensors.torch import load_model, save_model
 from deepcontrail.core.false_color import FalseColorConfig  # noqa: TC001
 from deepcontrail.core.readers import shift_image
 from deepcontrail.segmentation.config import NormalizeConfig
+from deepcontrail.segmentation.dataset import tile_origins
 from deepcontrail.segmentation.models import ModelConfig, build_model
 from deepcontrail.segmentation.tensors import _norm_tensors
 from deepcontrail.segmentation.training.tta import tta_predict
@@ -172,6 +173,18 @@ class _AtInputSize(torch.nn.Module):
         return output
 
 
+def _blend_weights(tile: int) -> np.ndarray:
+    """Tent weights: tile centres count most, edges (less context) least, never zero.
+
+    A ``(tile, tile)`` float32 array whose value at a pixel is the product of a 1-D ramp
+    along each axis. Used to blend overlapping native-size tiles: a pixel shared by several
+    tiles is a weighted average whose weights sum to one, so a pixel covered by a single tile
+    is returned unchanged.
+    """
+    ramp = np.minimum(np.arange(tile) + 0.5, tile - np.arange(tile) - 0.5) / (tile / 2)
+    return np.outer(ramp, ramp).astype(np.float32)
+
+
 def _prepare(composite: np.ndarray, config: PretrainedConfig, pixel_shift: float) -> torch.Tensor:
     """Composite (H, W, 3) in [0, 1] -> normalised (3, image_size, image_size) tensor.
 
@@ -206,8 +219,11 @@ def predict(
         A model from ``load_pretrained``.
     composite
         ``(H, W, 3)`` or ``(N, H, W, 3)`` float array in ``[0, 1]``, built from the
-        bands with ``pretrained.config.false_color``. ``H`` and ``W`` must equal
+        bands with ``pretrained.config.false_color``. ``H`` and ``W`` must be at least
         ``pretrained.config.native_size``, the size of the scenes the model was trained on.
+        A scene exactly that size is predicted as-is; a larger one is predicted in
+        ``native_size`` tiles overlapping by half and blended with tent weights (centres
+        weigh most), so the pixel scale never changes.
     tta
         Average the 8 D4 transforms. ``None`` (default) follows ``pretrained.config.tta``,
         the setting the model was evaluated with; ``True`` or ``False`` overrides it.
@@ -225,13 +241,13 @@ def predict(
     Raises
     ------
     ValueError
-        If the composite is not 3-channel, or its scenes are not ``native_size`` square:
-        resizing another size to the network's input would change the pixel scale the model
-        was trained on (larger scenes are not tiled yet). Also if the batch is empty,
-        ``batch_size`` is below one, the composite is not a float array (the model expects
-        ``[0, 1]`` floats, as built by ``false_color_from_spectral``), or it holds a NaN,
-        an infinite or an out-of-range value: any of these turns every output NaN or gives
-        meaningless probabilities.
+        If the composite is not 3-channel, or its scenes are smaller than
+        ``pretrained.config.native_size``: a scene that small cannot be cut into
+        ``native_size`` tiles, and resizing it to the network's input would change the pixel
+        scale the model was trained on. Also if the batch is empty, ``batch_size`` is below
+        one, the composite is not a float array (the model expects ``[0, 1]`` floats, as built
+        by ``false_color_from_spectral``), or it holds a NaN, an infinite or an out-of-range
+        value: any of these turns every output NaN or gives meaningless probabilities.
     """
     single = composite.ndim == 3
     batch = composite[None] if single else composite
@@ -239,10 +255,11 @@ def predict(
         msg = f"expected a (H, W, 3) or (N, H, W, 3) composite, got shape {composite.shape}"
         raise ValueError(msg)
     size = pretrained.config.native_size
-    if batch.shape[1:3] != (size, size):
+    height, width = batch.shape[1], batch.shape[2]
+    if height < size or width < size:
         msg = (
-            f"the model was trained on {size} x {size} scenes, got {batch.shape[1]} x "
-            f"{batch.shape[2]}: other sizes would change the pixel scale (tiling is not supported)"
+            f"the model was trained on {size} x {size} scenes, got {height} x {width}: a scene "
+            f"smaller than the model's native size cannot be cut into native-size tiles"
         )
         raise ValueError(msg)
     if len(batch) == 0:
@@ -263,13 +280,49 @@ def predict(
 
     if tta is None:
         tta = pretrained.config.tta
-    network = _AtInputSize(pretrained.model, (batch.shape[1], batch.shape[2])).eval()
-    outputs: list[np.ndarray] = []
-    for start in range(0, len(batch), batch_size):
+    if height == size and width == size:
+        # Native scenes: unchanged path, bit-identical to predicting the composite directly.
+        network = _AtInputSize(pretrained.model, (height, width)).eval()
+        outputs: list[np.ndarray] = []
+        for start in range(0, len(batch), batch_size):
+            window = batch[start : start + batch_size]
+            images = torch.stack([_prepare(c, pretrained.config, pixel_shift) for c in window]).to(
+                pretrained.device
+            )
+            if tta:
+                probs = tta_predict(network, images)
+            else:
+                probs = torch.sigmoid(network(images)).squeeze(1)
+            outputs.append(probs.float().cpu().numpy())
+        result: np.ndarray[Any, Any] = np.concatenate(outputs).astype(np.float32)
+        return result[0] if single else result
+
+    # Larger scenes: cut native_size tiles overlapping by half, run each tile through the same
+    # per-batch code as a native scene (same _prepare, TTA rule and batch_size batching), then
+    # blend the tile probabilities with tent weights into an (H, W) map. The tiles of every
+    # scene are batched together, so a batch of scenes returns a batch of blended maps.
+    row_origins = tile_origins(height, size, size // 2)
+    col_origins = tile_origins(width, size, size // 2)
+    offsets = [(r0, c0) for r0 in row_origins for c0 in col_origins]
+    tiles = [scene[r0 : r0 + size, c0 : c0 + size] for scene in batch for (r0, c0) in offsets]
+    network = _AtInputSize(pretrained.model, (size, size)).eval()
+    tile_probs: list[np.ndarray] = []
+    for start in range(0, len(tiles), batch_size):
         images = torch.stack(
-            [_prepare(c, pretrained.config, pixel_shift) for c in batch[start : start + batch_size]]
+            [_prepare(t, pretrained.config, pixel_shift) for t in tiles[start : start + batch_size]]
         ).to(pretrained.device)
         probs = tta_predict(network, images) if tta else torch.sigmoid(network(images)).squeeze(1)
-        outputs.append(probs.float().cpu().numpy())
-    result: np.ndarray[Any, Any] = np.concatenate(outputs).astype(np.float32)
+        tile_probs.append(probs.float().cpu().numpy())
+    all_probs = np.concatenate(tile_probs)
+    weight = _blend_weights(size).astype(np.float64)
+    result = np.empty((len(batch), height, width), dtype=np.float32)
+    per_scene = len(offsets)
+    for index in range(len(batch)):
+        total = np.zeros((height, width), dtype=np.float64)
+        norm = np.zeros((height, width), dtype=np.float64)
+        for j, (r0, c0) in enumerate(offsets):
+            prob = all_probs[index * per_scene + j]
+            total[r0 : r0 + size, c0 : c0 + size] += weight * prob
+            norm[r0 : r0 + size, c0 : c0 + size] += weight
+        result[index] = (total / norm).astype(np.float32)
     return result[0] if single else result
