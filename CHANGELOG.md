@@ -6,7 +6,7 @@ All notable changes to DeepContrail are listed here. The format follows
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-11-13
+## [0.3.0] - 2026-11-16
 
 Instance segmentation leaves preview, and the PyPI package `deepcontrail` installs the whole
 library. The pretrained model is unchanged (Hugging Face revision `v0.1.0`); its instance files
