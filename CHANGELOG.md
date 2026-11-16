@@ -26,7 +26,8 @@ library. The pretrained model is unchanged (Hugging Face revision `v0.1.0`); its
   straightness, so its value is the square of the old one (defaults 0.00613 and, for the
   consensus settings, 0.00299; detections are unchanged). `instance_pipeline.yaml` and
   `score_model.json` move to format version 2; version-1 files, such as those of the published
-  model `v0.1.0`, are still read and converted.
+  model `v0.1.0`, are still read and converted, as is a hand-written file without `format_version`
+  that uses `min_r_score`.
 - `instance_pipeline.yaml` and `score_model.json` written by a newer `deepcontrail-instance` (a
   higher `format_version`) are refused with a message to upgrade. Any new field, or change of
   meaning, in these files raises their `format_version`.
@@ -43,8 +44,8 @@ library. The pretrained model is unchanged (Hugging Face revision `v0.1.0`); its
   instead of raising a `TypeError`; a malformed config or score-model file gets a `ValueError`
   that names the file.
 - The instance training and tuning scripts skip hidden files, like the rest of the library.
-- The line-filter widths `sigma1` and `sigma_delta` are documented in their real units (about
-  half a pixel each), not in pixels.
+- The line-filter widths `sigma1` and `sigma_delta` are documented in their real units: one
+  unit is about half a pixel (the default `sigma1` of 3.39 is about 1.6 px), not one pixel.
 
 ### Removed
 

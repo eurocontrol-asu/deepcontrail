@@ -30,9 +30,9 @@ masks, scores = detect_instances_from_probabilities(probs)
 
 The scores rank the detections; they are not probabilities. Without a score model, a score is
 the contrail's straightness × tanh(size / saturation) × its mean probability; with one (see
-[Learned scores](#learned-scores)), it is the predicted overlap (mean best IoU) with the
-annotators' contrails. Every detection is returned, without a score cut: to trade recall for
-precision, drop the low scores, with a cut chosen on your own validation scenes.
+"Learned scores" below), it is the predicted overlap (mean best IoU) with the annotators'
+contrails. Every detection is returned, without a score cut: to trade recall for precision,
+drop the low scores, with a cut chosen on your own validation scenes.
 
 The pipeline thresholds the map (at 0.465), splits the mask into straight contrails with a
 Mannstein-style detection, grows each contrail by one pixel into neighbours with probability above

@@ -54,7 +54,9 @@ def _read_sections(path: str | Path) -> dict[str, Any]:
             f"{path}: format_version {version} comes from a newer deepcontrail-instance (this one "
             f"reads version {FORMAT_VERSION}); upgrade deepcontrail-instance"
         )
-    if version == 1:
+    # A file without format_version that still uses min_r_score predates format 2.
+    legacy = "format_version" not in raw and "min_r_score" in (raw.get("mannstein") or {})
+    if version == 1 or legacy:
         if isinstance(raw.get("mannstein"), dict):
             raw["mannstein"] = _upgrade_mannstein_v1(raw["mannstein"])
     elif version != FORMAT_VERSION:
