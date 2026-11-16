@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from deepcontrail.segmentation.models import ModelConfig
+
 RECIPE = {
     "channels": [
         {"bands": ["ir_123", "ir_105"], "bounds": [-4, 2]},
@@ -145,6 +147,107 @@ def test_default_run_name_names_the_model_and_time():
     name = default_run_name(ModelConfig(architecture="Unet", encoder_name="resnet18"))
 
     assert name.startswith("Unet-resnet18-")
+
+
+# --- initial weights (fine-tuning) -----------------------------------------------------
+
+
+def _tiny_model_cfg() -> ModelConfig:
+    return ModelConfig(
+        architecture="Unet",
+        encoder_name="resnet18",
+        encoder_weights=None,
+        in_channels=3,
+        classes=1,
+    )
+
+
+def _save_bundle(tmp_path: Path, model_cfg, *, native_size: int = 16) -> Path:
+    """Save a pretrained bundle holding a freshly built model's weights."""
+    from deepcontrail.segmentation.models import build_model
+    from deepcontrail.segmentation.pretrained import PretrainedConfig, save_pretrained
+
+    weights = build_model(model_cfg)
+    config = PretrainedConfig(
+        format_version=1,
+        model=model_cfg,
+        false_color=RECIPE,
+        image_size=32,
+        native_size=native_size,
+    )
+    directory = tmp_path / "bundle"
+    save_pretrained(weights, config, directory)
+    return directory, weights
+
+
+def test_load_initial_weights_from_bundle_copies_every_weight(tmp_path: Path) -> None:
+    import torch
+
+    from deepcontrail.segmentation.models import build_model
+    from deepcontrail.segmentation.training.run import load_initial_weights
+
+    model_cfg = _tiny_model_cfg()
+    directory, source = _save_bundle(tmp_path, model_cfg)
+    target = build_model(model_cfg)
+
+    load_initial_weights(target, str(directory))
+
+    after = target.state_dict()
+    for key, tensor in source.state_dict().items():
+        assert torch.equal(after[key], tensor), f"weight {key} must come from the bundle"
+
+
+def test_load_initial_weights_from_ckpt_strips_the_model_prefix(tmp_path: Path) -> None:
+    import torch
+
+    from deepcontrail.segmentation.models import build_model
+    from deepcontrail.segmentation.training.run import load_initial_weights
+
+    model_cfg = _tiny_model_cfg()
+    source = build_model(model_cfg)
+    # A Lightning checkpoint keeps the module's weights under a "model." prefix.
+    state_dict = {f"model.{key}": value for key, value in source.state_dict().items()}
+    checkpoint = tmp_path / "model.ckpt"
+    torch.save({"state_dict": state_dict}, checkpoint)
+    target = build_model(model_cfg)
+
+    load_initial_weights(target, str(checkpoint))
+
+    after = target.state_dict()
+    for key, value in state_dict.items():
+        assert torch.equal(after[key.removeprefix("model.")], value), (
+            "the 'model.' prefix must be stripped before loading the checkpoint's weights"
+        )
+
+
+def test_load_initial_weights_with_other_architecture_raises(tmp_path: Path) -> None:
+    from deepcontrail.segmentation.models import build_model
+    from deepcontrail.segmentation.training.run import load_initial_weights
+
+    model_cfg = _tiny_model_cfg()
+    directory, _source = _save_bundle(tmp_path, model_cfg)
+    target = build_model(model_cfg.model_copy(update={"classes": 2}))
+
+    with pytest.raises(RuntimeError, match=r"size mismatch|Unexpected key|Missing key"):
+        load_initial_weights(target, str(directory))
+
+
+def test_prepare_training_with_init_from_starts_from_those_weights(
+    tmp_path: Path, synthetic_root: Path
+) -> None:
+    import torch
+
+    from deepcontrail.segmentation.training import prepare_training
+
+    model_cfg = _tiny_model_cfg()
+    directory, source = _save_bundle(tmp_path, model_cfg)
+    config = _config(tmp_path, synthetic_root, init_from=str(directory))
+
+    run = prepare_training(config, output_dir=tmp_path / "runs", run_name="ft", accelerator="cpu")
+
+    after = run.module.model.state_dict()
+    for key, tensor in source.state_dict().items():
+        assert torch.equal(after[key], tensor), f"the module must start from the bundle's {key}"
 
 
 # --- loggers ---------------------------------------------------------------------------

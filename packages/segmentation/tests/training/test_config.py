@@ -62,6 +62,18 @@ def test_training_config_default_gradient_clip_val_is_none() -> None:
     assert cfg.gradient_clip_val is None
 
 
+def test_training_config_init_from_defaults_to_none() -> None:
+    cfg = TrainingConfig()
+
+    assert cfg.init_from is None, "training starts from the encoder's weights by default"
+    assert cfg.init_revision is None
+
+
+def test_training_config_init_revision_without_init_from_raises() -> None:
+    with pytest.raises(ValidationError, match="init_from"):
+        TrainingConfig(init_revision="v0.1.0")  # a revision needs something to revise
+
+
 # --- Frozen ---
 
 

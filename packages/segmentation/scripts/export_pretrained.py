@@ -215,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.score_model is not None and args.instance_pipeline is None:
         parser.error("--score-model needs --instance-pipeline: it is valid only for its pipeline")
 
-    data_cfg, _, _, model_cfg, *_ = load_configs(args.config)
+    data_cfg, _, _, model_cfg, _loss_cfg, training_cfg, *_ = load_configs(args.config)
     checkpoint: dict[str, Any] = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
     weights = {
         k.removeprefix("model."): v
@@ -231,6 +231,10 @@ def main(argv: list[str] | None = None) -> int:
         "run_name": args.run_name or args.checkpoint.parent.name,
         "deepcontrail_version": version("deepcontrail-segmentation"),
     }
+    if training_cfg.init_from is not None:
+        provenance["init_from"] = training_cfg.init_from
+    if training_cfg.init_revision is not None:
+        provenance["init_revision"] = training_cfg.init_revision
     try:
         info = read_dataset_info(data_cfg.root)
         provenance |= {"data_source": info.source, "data_export": str(info.export)}

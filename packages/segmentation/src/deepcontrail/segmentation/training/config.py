@@ -45,6 +45,13 @@ class TrainingConfig(BaseModel):
     logger
         Where Lightning logs metrics: ``"csv"`` (default, no extra package) or
         ``"mlflow"`` (extra ``deepcontrail-segmentation[mlflow]``).
+    init_from
+        Weights to start from instead of the encoder's ImageNet weights: a pretrained bundle
+        (a local folder or a Hugging Face repo id, as accepted by ``load_pretrained``) or a
+        Lightning ``.ckpt`` file of this package. The architecture in ``model`` must match;
+        weights load strictly.
+    init_revision
+        Hub revision (tag, branch or commit) when ``init_from`` is a repo id.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -59,6 +66,8 @@ class TrainingConfig(BaseModel):
     precision: str = "32-true"
     gradient_clip_val: float | None = None
     logger: Literal["csv", "mlflow"] = "csv"
+    init_from: str | None = None
+    init_revision: str | None = None
 
     @model_validator(mode="after")
     def _check_warmup(self) -> TrainingConfig:
@@ -68,6 +77,13 @@ class TrainingConfig(BaseModel):
                 f"warmup_epochs ({self.warmup_epochs}) must be smaller than epochs ({self.epochs})"
             )
             raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _check_init_revision(self) -> TrainingConfig:
+        """Require ``init_from`` whenever ``init_revision`` is given."""
+        if self.init_revision is not None and self.init_from is None:
+            raise ValueError("init_revision needs init_from")
         return self
 
     @classmethod

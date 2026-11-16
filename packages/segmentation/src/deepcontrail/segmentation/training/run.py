@@ -209,6 +209,41 @@ def _record_split(
         trainer.logger.log_hyperparams(fingerprints)
 
 
+def load_initial_weights(model: torch.nn.Module, source: str, revision: str | None = None) -> None:
+    """Load ``source`` weights into ``model`` in place (strict). See TrainingConfig.init_from.
+
+    Parameters
+    ----------
+    model
+        The freshly built network to load the weights into.
+    source
+        A pretrained bundle (a local folder or a Hugging Face repo id, as accepted by
+        ``load_pretrained``) or a Lightning ``.ckpt`` file of this package.
+    revision
+        Hub revision (tag, branch or commit) when ``source`` is a repo id.
+
+    Raises
+    ------
+    RuntimeError
+        If the weights' architecture does not match ``model``: the message is the one from
+        ``load_state_dict`` (a size or key mismatch).
+    """
+    if source.endswith(".ckpt"):
+        checkpoint = torch.load(source, map_location="cpu", weights_only=True)
+        # A Lightning checkpoint keeps the module's weights under a "model." prefix.
+        weights = {
+            key.removeprefix("model."): value
+            for key, value in checkpoint["state_dict"].items()
+            if key.startswith("model.")
+        }
+        model.load_state_dict(weights, strict=True)
+        return
+    from deepcontrail.segmentation.pretrained import load_pretrained
+
+    pretrained = load_pretrained(source, revision=revision)
+    model.load_state_dict(pretrained.model.state_dict(), strict=True)
+
+
 def prepare_training(
     config_path: str | Path,
     *,
@@ -257,8 +292,16 @@ def prepare_training(
     # Masks stay at the dataset's native resolution; the module resizes its output
     # back to it, so the loss runs at mask resolution even when images are upscaled.
     native_size = train_loader.dataset.native_size  # type: ignore[attr-defined]
+    model = build_model(model_cfg)
+    if training_cfg.init_from is not None:
+        # Fine-tuning: start from a pretrained bundle or a Lightning checkpoint, not scratch.
+        load_initial_weights(model, training_cfg.init_from, training_cfg.init_revision)
+        message = f"Initial weights: {training_cfg.init_from}"
+        if training_cfg.init_revision is not None:
+            message += f" (revision {training_cfg.init_revision})"
+        print(message)
     module = SegmentationModule(
-        model=build_model(model_cfg),
+        model=model,
         loss_fn=build_loss(loss_cfg),
         lr=training_cfg.lr,
         weight_decay=training_cfg.weight_decay,
