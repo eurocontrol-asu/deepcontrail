@@ -469,3 +469,75 @@ def test_evaluate_without_new_options_is_unchanged():
     assert (r["tp"], r["fp"], r["fn"]) == (3, 0, 0)
     assert r["n_samples"] == 2
     assert r["n_skipped_empty"] == 0
+
+
+# --- coco_map_from_rles (the RLE entry point the streaming script reuses) ---
+
+
+@requires_map
+def test_coco_map_from_rles_equals_dense_evaluation():
+    """Encoding the masks and calling the RLE function matches the dense per-annotator metric."""
+    import pycocotools.mask as mask_utils
+
+    from deepcontrail.instance.metrics import (
+        DEFAULT_IOU_THRESHOLDS,
+        coco_map_from_rles,
+        evaluate_annotator_samples,
+    )
+
+    rng = np.random.default_rng(0)
+    h = w = 24
+
+    def dots() -> list[np.ndarray]:
+        masks = []
+        for _ in range(int(rng.integers(0, 4))):
+            m = np.zeros((h, w), dtype=bool)
+            m[rng.integers(0, h), rng.integers(0, w)] = True
+            masks.append(m)
+        return masks
+
+    preds, gts, scores = [], [], []
+    for _ in range(8):
+        p, g = dots(), dots()
+        preds.append(p)
+        gts.append(g)
+        scores.append([float(rng.random()) for _ in p])
+
+    # include_empty keeps every sample, so the dense metric pools exactly the samples we pass.
+    dense = evaluate_annotator_samples(preds, gts, scores, include_empty=True)
+
+    def enc(m: np.ndarray) -> dict:
+        return mask_utils.encode(np.asfortranarray(m.astype(np.uint8)))
+
+    rle_map, rle_ap = coco_map_from_rles(
+        [[enc(m) for m in p] for p in preds],
+        [[enc(m) for m in g] for g in gts],
+        scores,
+        [(h, w)] * len(preds),
+    )
+
+    assert rle_map == pytest.approx(dense["map"])
+    expected_ap = np.array([dense["ap_per_threshold"][t] for t in DEFAULT_IOU_THRESHOLDS])
+    np.testing.assert_allclose(rle_ap, expected_ap, atol=1e-12)
+
+
+@requires_map
+def test_coco_map_from_rles_respects_max_detections():
+    """The per-sample detection cap truncates recall, exactly as in the dense metric."""
+    import pycocotools.mask as mask_utils
+
+    from deepcontrail.instance.metrics import coco_map_from_rles
+
+    def enc(m: np.ndarray) -> dict:
+        return mask_utils.encode(np.asfortranarray(m.astype(np.uint8)))
+
+    dots = _dots(150)  # 150 disjoint one-pixel contrails, all detected perfectly
+    gt = [enc(m) for m in dots]
+    pred = [enc(m) for m in dots]
+    scores = [[1.0] * 150]
+
+    capped = coco_map_from_rles([pred], [gt], scores, [(32, 32)])
+    assert capped[0] < 1.0, "the 100-detection cap cannot cover 150 contrails"
+
+    raised = coco_map_from_rles([pred], [gt], scores, [(32, 32)], max_detections=200)
+    assert raised[0] == pytest.approx(1.0), "raising the cap keeps every perfect detection"

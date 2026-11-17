@@ -5,6 +5,8 @@ The mAP needs the ``[map]`` extra (pycocotools); torch is never needed.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import warnings
 from typing import Any, cast
 
@@ -13,6 +15,23 @@ import numpy as np
 DEFAULT_IOU_THRESHOLDS = (0.25, 0.35, 0.45, 0.55, 0.65, 0.75)
 COCO_MAX_DETECTIONS = 100
 """Detections per sample kept by the COCO mAP (pycocotools default; extra ones are dropped)."""
+
+
+def _require_pycocotools() -> tuple[Any, Any, Any]:
+    """Import pycocotools' mask utilities, COCO and COCOeval, or name the ``[map]`` extra.
+
+    Shared by :func:`coco_map_from_rles` and :func:`_coco_ap_all_samples`, both of which need the
+    same three names and the same message pointing at the optional extra.
+    """
+    try:
+        import pycocotools.mask as mask_utils
+        from pycocotools.coco import COCO
+        from pycocotools.cocoeval import COCOeval
+    except ImportError as err:
+        raise ImportError(
+            "the COCO mAP needs pycocotools: pip install 'deepcontrail-instance[map]'"
+        ) from err
+    return mask_utils, COCO, COCOeval
 
 
 def _mask_bbox_area(mask: np.ndarray) -> tuple[int, int, int, int, int]:
@@ -280,50 +299,77 @@ def evaluate_annotator_samples(
     return result
 
 
-def _coco_ap_all_samples(
-    preds: list[list[np.ndarray]],
-    gts: list[list[np.ndarray]],
+def coco_map_from_rles(
+    preds: list[list[dict]],
+    gts: list[list[dict]],
     scores: list[list[float]] | None,
-    thresholds: list[float],
+    shapes: list[tuple[int, int]],
+    *,
+    iou_thresholds: tuple[float, ...] | list[float] = DEFAULT_IOU_THRESHOLDS,
     max_detections: int = COCO_MAX_DETECTIONS,
     gt_ignore: list[list[bool]] | None = None,
 ) -> tuple[float, np.ndarray]:
-    """Pooled mAP and AP per threshold, every sample registered in COCO (empty GT included).
+    """Pooled COCO segmentation mAP and AP per threshold from pycocotools RLEs.
 
-    Standard COCO segmentation AP (pycocotools: 101 recall points, area "all"), keeping at most
-    ``max_detections`` detections per sample, with ``thresholds`` as IoU thresholds. Zeros when
-    there is nothing to score. Ignored GTs (``gt_ignore[i][k]`` for sample ``i``) are registered
-    as ``iscrowd`` regions: pycocotools computes their IoU as the intersection over the
-    detection's area and does not penalise detections that fall inside them.
+    One list of RLEs per sample. One sample is one image: ``preds[i]`` and ``gts[i]`` are the
+    predicted and ground-truth masks
+    of sample ``i`` already encoded as pycocotools RLE dicts (``mask_utils.encode``), ``scores[i]``
+    their confidence (``None`` = 1.0 for all) and ``shapes[i]`` the ``(height, width)`` of the
+    image. Every sample is registered in COCO (one image per sample, single class) and pooled into
+    one segmentation mAP averaged over ``iou_thresholds``; there is no empty-skip here, so the
+    caller decides which samples to pass and empty-GT samples register their detections as false.
+
+    A ground-truth RLE whose flag in ``gt_ignore[i]`` is true is registered as an ``iscrowd``
+    region: pycocotools computes its IoU as the intersection over the detection's area and does
+    not penalise detections that fall inside it. The mAP is the standard COCO segmentation AP
+    (pycocotools: 101 recall points, area "all"), keeping at most ``max_detections`` detections
+    per sample. Zeros when there is no ground truth at all.
+
+    Parameters
+    ----------
+    preds
+        ``preds[i]`` is the list of predicted RLE dicts for sample ``i``.
+    gts
+        ``gts[i]`` is the list of GT RLE dicts of sample ``i``.
+    scores
+        Confidence per predicted RLE, aligned with ``preds``; ``None`` = 1.0 for all.
+    shapes
+        ``(height, width)`` of each sample's image, aligned with ``preds`` and ``gts``.
+    iou_thresholds
+        IoU thresholds averaged by the mAP. Defaults to 0.25, 0.35, ..., 0.75.
+    max_detections
+        Maximum detections per sample kept by the COCO mAP (pycocotools default 100).
+    gt_ignore
+        Optional per-GT ignore flags, nested like ``gts`` (``gt_ignore[i][k]`` registers
+        ``gts[i][k]`` as a crowd region).
+
+    Returns
+    -------
+    tuple[float, np.ndarray]
+        The pooled mAP and the AP at each ``iou_threshold``, in the same order.
+
+    Raises
+    ------
+    ImportError
+        If pycocotools is not installed (the ``[map]`` extra).
     """
-    import contextlib
-    import io
-
-    try:
-        import pycocotools.mask as mask_utils
-        from pycocotools.coco import COCO
-        from pycocotools.cocoeval import COCOeval
-    except ImportError as err:
-        raise ImportError(
-            "the COCO mAP needs pycocotools: pip install 'deepcontrail-instance[map]'"
-        ) from err
+    thresholds = list(iou_thresholds)
+    mask_utils, COCO, COCOeval = _require_pycocotools()
 
     images: list[dict[str, Any]] = []
     gt_anns: list[dict[str, Any]] = []
     dt_anns: list[dict[str, Any]] = []
     for image_id, (p, g) in enumerate(zip(preds, gts, strict=True)):
-        h, w = (g or p)[0].shape if (g or p) else (1, 1)
+        h, w = shapes[image_id]
         images.append({"id": image_id, "height": h, "width": w})
         ignore = gt_ignore[image_id] if gt_ignore is not None else None
-        for k, m in enumerate(g):
-            rle = mask_utils.encode(np.asfortranarray(m.astype(np.uint8)))
+        for k, rle in enumerate(g):
             is_crowd = bool(ignore[k]) if ignore is not None and k < len(ignore) else False
             gt_anns.append(
                 {"id": len(gt_anns) + 1, "image_id": image_id, "category_id": 0,
                  "segmentation": rle, "area": float(mask_utils.area(rle)), "iscrowd": int(is_crowd)}
             )  # fmt: skip
-        for k, m in enumerate(p):
-            rle = mask_utils.encode(np.asfortranarray(m.astype(np.uint8)))
+        for k, rle in enumerate(p):
             score = 1.0 if scores is None else float(scores[image_id][k])
             dt_anns.append(
                 {"id": len(dt_anns) + 1, "image_id": image_id, "category_id": 0,
@@ -360,3 +406,41 @@ def _coco_ap_all_samples(
         return max(float(np.mean(valid)), 0.0) if valid.size else 0.0
 
     return summary(precision), np.array([summary(row) for row in precision])
+
+
+def _coco_ap_all_samples(
+    preds: list[list[np.ndarray]],
+    gts: list[list[np.ndarray]],
+    scores: list[list[float]] | None,
+    thresholds: list[float],
+    max_detections: int = COCO_MAX_DETECTIONS,
+    gt_ignore: list[list[bool]] | None = None,
+) -> tuple[float, np.ndarray]:
+    """Pooled mAP and AP per threshold, every sample registered in COCO (empty GT included).
+
+    Encodes each dense mask with :func:`pycocotools.mask.encode` and hands the RLEs, the per
+    sample shapes and the ignore flags to :func:`coco_map_from_rles`, which does the COCO
+    bookkeeping; see there for the segmentation AP itself. Ignored GTs
+    (``gt_ignore[i][k]`` for sample ``i``) are registered as ``iscrowd`` regions.
+    """
+    mask_utils, _, _ = _require_pycocotools()
+    shapes: list[tuple[int, int]] = []
+    pred_rles: list[list[dict]] = []
+    gt_rles: list[list[dict]] = []
+    for p, g in zip(preds, gts, strict=True):
+        reference = g[0] if g else (p[0] if p else None)
+        if reference is None:
+            shapes.append((1, 1))
+        else:
+            shapes.append((int(reference.shape[0]), int(reference.shape[1])))
+        pred_rles.append([mask_utils.encode(np.asfortranarray(m.astype(np.uint8))) for m in p])
+        gt_rles.append([mask_utils.encode(np.asfortranarray(m.astype(np.uint8))) for m in g])
+    return coco_map_from_rles(
+        pred_rles,
+        gt_rles,
+        scores,
+        shapes,
+        iou_thresholds=thresholds,
+        max_detections=max_detections,
+        gt_ignore=gt_ignore,
+    )
