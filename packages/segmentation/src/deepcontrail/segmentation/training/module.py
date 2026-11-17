@@ -168,15 +168,13 @@ class SegmentationModule(pl.LightningModule):
         ]
 
     def _report_trainable_counts(self) -> None:
-        """Print how many parameters train vs freeze (every run reports it)."""
-        names = [name for name, _ in self.model.named_parameters()]
-        if self.trainable is None:
-            trainable_names = names
-        else:
-            prefixes = self.trainable
-            trainable_names = [n for n in names if any(_prefix_matches(n, p) for p in prefixes)]
-        n_train = len(trainable_names)
-        n_total = len(names)
+        """Print how many weights (parameter elements) train vs freeze; every run reports it."""
+        prefixes = self.trainable
+        n_total = n_train = 0
+        for name, param in self.model.named_parameters():
+            n_total += param.numel()
+            if prefixes is None or any(_prefix_matches(name, p) for p in prefixes):
+                n_train += param.numel()
         n_frozen = n_total - n_train
         pct = 100.0 * n_train / n_total if n_total else 0.0
         print(f"Trainable weights: {n_train:,} of {n_total:,} ({pct:.1f}%), frozen {n_frozen:,}")
