@@ -200,6 +200,111 @@ def test_train_metrics_reset_between_epochs(monkeypatch) -> None:
     assert logged["train_dice"] == pytest.approx(1.0), "each epoch starts from zero counts"
 
 
+class _TwoPartModel(torch.nn.Module):
+    """A tiny SMP-style model with separate ``encoder`` and ``decoder`` submodules."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.encoder = torch.nn.Conv2d(3, 4, 3, padding=1)
+        self.decoder = torch.nn.Conv2d(4, 1, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.decoder(self.encoder(x))
+
+
+def _two_part_module(**overrides: object) -> SegmentationModule:
+    """Build a ``SegmentationModule`` wrapping a model that exposes ``.encoder``."""
+    defaults: dict[str, object] = {
+        "model": _TwoPartModel(),
+        "loss_fn": torch.nn.Identity(),
+        "lr": 1e-3,
+        "weight_decay": 0.0,
+        "scheduler": "CosineAnnealingLR",
+        "epochs": 10,
+        "native_size": 8,
+    }
+    defaults.update(overrides)
+    return SegmentationModule(**defaults)  # type: ignore[arg-type]
+
+
+def _set_epoch(module: SegmentationModule, epoch: int) -> None:
+    """Point the module's read-only ``current_epoch`` at a fake trainer (tests only)."""
+    from types import SimpleNamespace
+
+    module._trainer = SimpleNamespace(current_epoch=epoch)  # type: ignore[attr-defined]
+
+
+def test_configure_optimizers_default_has_one_param_group() -> None:
+    module = _two_part_module()
+
+    groups = module.configure_optimizers()["optimizer"].param_groups
+
+    assert len(groups) == 1, (
+        "encoder_lr_scale defaults to 1.0: a single param group, i.e. today's behaviour"
+    )
+
+
+def test_configure_optimizers_encoder_lr_scale_gives_two_groups_with_scaled_lr() -> None:
+    lr, scale = 1e-3, 0.1
+    module = _two_part_module(lr=lr, encoder_lr_scale=scale)
+
+    groups = module.configure_optimizers()["optimizer"].param_groups
+
+    assert len(groups) == 2, "a scaled encoder splits the parameters into two groups"
+    id_sets = [{id(p) for p in group["params"]} for group in groups]
+    assert id_sets[0].isdisjoint(id_sets[1]), "every parameter is in exactly one group"
+    assert id_sets[0] | id_sets[1] == {id(p) for p in module.model.parameters()}, (
+        "the two groups together cover every model parameter, none dropped"
+    )
+    base_lrs = sorted(group["initial_lr"] for group in groups)
+    assert base_lrs == [lr * scale, lr], (
+        f"the encoder group scales its base lr (lr*scale) and the rest keeps lr, got {base_lrs}"
+    )
+    encoder_ids = {id(p) for p in module._encoder_params()}
+    encoder_group = next(group for group in groups if group["initial_lr"] == lr * scale)
+    assert {id(p) for p in encoder_group["params"]} == encoder_ids, (
+        "the scaled group holds the encoder parameters"
+    )
+
+
+def test_freeze_encoder_epochs_stops_encoder_updates() -> None:
+    module = _two_part_module(freeze_encoder_epochs=2)
+    encoder = module.model.encoder
+
+    _set_epoch(module, 0)  # inside the frozen prefix
+    module.on_train_epoch_start()
+
+    assert all(not p.requires_grad for p in encoder.parameters()), (
+        "a frozen encoder receives no gradients"
+    )
+    assert not encoder.training, (
+        "a frozen encoder is in eval mode, so its BatchNorm/LayerNorm stats do not update"
+    )
+
+    _set_epoch(module, 2)  # reaching freeze_encoder_epochs thaws it
+    module.on_train_epoch_start()
+
+    assert all(p.requires_grad for p in encoder.parameters()), (
+        "once current_epoch reaches freeze_encoder_epochs the encoder trains again"
+    )
+
+
+def test_model_without_encoder_and_scale_raises() -> None:
+    module = SegmentationModule(
+        model=torch.nn.Conv2d(3, 1, 1),  # no ``.encoder`` attribute
+        loss_fn=torch.nn.Identity(),
+        lr=1e-3,
+        weight_decay=0.0,
+        scheduler="CosineAnnealingLR",
+        epochs=10,
+        native_size=8,
+        encoder_lr_scale=0.1,
+    )
+
+    with pytest.raises(ValueError, match="encoder"):
+        module.configure_optimizers()
+
+
 def test_training_step_creates_no_float64_tensor(monkeypatch) -> None:
     from torch.overrides import TorchFunctionMode
 

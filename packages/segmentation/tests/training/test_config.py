@@ -62,6 +62,20 @@ def test_training_config_default_gradient_clip_val_is_none() -> None:
     assert cfg.gradient_clip_val is None
 
 
+def test_training_config_default_encoder_lr_scale_is_one() -> None:
+    cfg = TrainingConfig()
+
+    assert cfg.encoder_lr_scale == 1.0, (
+        "scale 1.0 keeps one learning rate for all weights, i.e. today's behaviour"
+    )
+
+
+def test_training_config_default_freeze_encoder_epochs_is_zero() -> None:
+    cfg = TrainingConfig()
+
+    assert cfg.freeze_encoder_epochs == 0, "no freezing by default"
+
+
 def test_training_config_init_from_defaults_to_none() -> None:
     cfg = TrainingConfig()
 
@@ -268,6 +282,22 @@ def test_training_config_rejects_an_optimizer_or_scheduler_that_is_not_implement
 def test_training_config_rejects_a_warmup_as_long_as_the_training() -> None:
     with pytest.raises(ValidationError, match="warmup_epochs"):
         TrainingConfig.from_dict({"epochs": 5, "warmup_epochs": 5})
+
+
+def test_training_config_rejects_freezing_as_long_as_the_training() -> None:
+    with pytest.raises(ValidationError, match="freeze_encoder_epochs"):
+        TrainingConfig.from_dict({"epochs": 3, "freeze_encoder_epochs": 3})
+
+
+def test_training_config_allows_freezing_a_prefix_of_training() -> None:
+    cfg = TrainingConfig.from_dict({"epochs": 5, "freeze_encoder_epochs": 2})
+
+    assert cfg.freeze_encoder_epochs == 2, "freezing a strict prefix of the epochs is valid"
+
+
+def test_training_config_rejects_a_non_positive_encoder_lr_scale() -> None:
+    with pytest.raises(ValidationError, match="encoder_lr_scale"):
+        TrainingConfig.from_dict({"encoder_lr_scale": 0})
 
 
 def test_training_config_rejects_an_unknown_field() -> None:

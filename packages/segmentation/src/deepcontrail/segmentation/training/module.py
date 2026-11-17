@@ -34,6 +34,16 @@ class SegmentationModule(pl.LightningModule):
         Native mask resolution (height and width) the model output is resized
         back to before loss/metric computation. The dataset keeps masks at this
         size even when images are upscaled to ``image_size`` (``SegmentationDataset.native_size``).
+    encoder_lr_scale
+        The encoder's learning rate is ``lr * encoder_lr_scale``; ``1.0`` (default) keeps one
+        learning rate for all weights (a single optimizer param group, unchanged). Any other
+        value splits the parameters into an ``encoder`` group and "the rest", each with its
+        own learning rate (warm-up and cosine then scale each group's own lr).
+    freeze_encoder_epochs
+        The number of first epochs during which the encoder is frozen (``requires_grad`` False
+        and ``model.encoder`` in eval mode, so its BatchNorm/LayerNorm statistics are not
+        updated); ``0`` (default) never freezes. The encoder thaws once ``current_epoch``
+        reaches this value.
     """
 
     def __init__(
@@ -49,6 +59,8 @@ class SegmentationModule(pl.LightningModule):
         scheduler_interval: str = "epoch",
         steps_per_epoch: int = 1,
         optimizer: str = "AdamW",
+        encoder_lr_scale: float = 1.0,
+        freeze_encoder_epochs: int = 0,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["model", "loss_fn"])
@@ -63,6 +75,8 @@ class SegmentationModule(pl.LightningModule):
         self.steps_per_epoch = steps_per_epoch
         self.optimizer_name = optimizer
         self.native_size = native_size
+        self.encoder_lr_scale = encoder_lr_scale
+        self.freeze_encoder_epochs = freeze_encoder_epochs
 
         self._val_preds: list[torch.Tensor] = []
         self._val_targets: list[torch.Tensor] = []
@@ -70,6 +84,27 @@ class SegmentationModule(pl.LightningModule):
         # train Dice/IoU at constant memory. A plain attribute, not a buffer, so the
         # state_dict (and loading existing checkpoints) is unchanged.
         self._train_counts: torch.Tensor | None = None
+
+    def _encoder(self) -> torch.nn.Module:
+        """Return the ``model.encoder`` module (for Unet++ it also holds the added conv stem).
+
+        Raises
+        ------
+        ValueError
+            If the model has no ``encoder`` attribute while an encoder-specific option is set
+            (a non-unit ``encoder_lr_scale`` or a positive ``freeze_encoder_epochs``).
+        """
+        encoder = getattr(self.model, "encoder", None)
+        if encoder is None:
+            raise ValueError(
+                f"model {type(self.model).__name__} has no 'encoder' attribute; "
+                "encoder_lr_scale and freeze_encoder_epochs need an SMP-style model"
+            )
+        return encoder
+
+    def _encoder_params(self) -> list[torch.nn.Parameter]:
+        """Every parameter of the encoder, in one list (used for scaling and freezing)."""
+        return list(self._encoder().parameters())
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass, resizing model output back to native mask resolution.
@@ -107,6 +142,31 @@ class SegmentationModule(pl.LightningModule):
                 counts if self._train_counts is None else self._train_counts + counts
             )
         return loss
+
+    def on_train_epoch_start(self) -> None:
+        """Freeze the encoder for the first ``freeze_encoder_epochs`` epochs, then thaw it.
+
+        While frozen the encoder's parameters have ``requires_grad`` False (so AdamW skips
+        them; they stay in the optimizer and are simply not updated) and ``model.encoder`` is
+        put in eval mode so its BatchNorm/LayerNorm statistics are not updated. The thaw happens
+        once, when ``current_epoch`` reaches ``freeze_encoder_epochs``; afterwards the encoder
+        trains normally (Lightning already put the module in train mode at the epoch start).
+        Does nothing when ``freeze_encoder_epochs`` is 0, so the default path never touches the
+        encoder.
+        """
+        if self.freeze_encoder_epochs == 0:
+            return
+        if self.current_epoch < self.freeze_encoder_epochs:
+            for param in self._encoder_params():
+                param.requires_grad = False
+            # Lightning puts the whole module in train mode before this hook; put the encoder
+            # back in eval mode here so its norm statistics stay frozen while it is not trained.
+            self._encoder().eval()
+            print("encoder frozen")
+        elif self.current_epoch == self.freeze_encoder_epochs:
+            for param in self._encoder_params():
+                param.requires_grad = True
+            print("encoder unfrozen")
 
     def on_train_epoch_end(self) -> None:
         """Log global train Dice and IoU (threshold 0.5) for the epoch, then reset."""
@@ -153,8 +213,25 @@ class SegmentationModule(pl.LightningModule):
             raise ValueError(
                 f"unknown optimizer {self.optimizer_name!r}; expected {list(optimizers)}"
             )
+        if self.encoder_lr_scale == 1.0:
+            # Default: one flat param iterable, exactly as before — same optimizer, same result.
+            params: Any = self.parameters()
+        else:
+            # Separate the encoder into its own param group at a scaled learning rate; every
+            # parameter ends up in exactly one group. The schedulers scale each group's own lr.
+            encoder_ids = {id(p) for p in self._encoder_params()}
+            params = [
+                {
+                    "params": [p for p in self.model.parameters() if id(p) in encoder_ids],
+                    "lr": self.lr * self.encoder_lr_scale,
+                },
+                {
+                    "params": [p for p in self.parameters() if id(p) not in encoder_ids],
+                    "lr": self.lr,
+                },
+            ]
         optimizer = optimizers[self.optimizer_name](
-            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+            params, lr=self.lr, weight_decay=self.weight_decay
         )
 
         per_step = self.scheduler_interval == "step"

@@ -52,6 +52,13 @@ class TrainingConfig(BaseModel):
         weights load strictly.
     init_revision
         Hub revision (tag, branch or commit) when ``init_from`` is a repo id.
+    encoder_lr_scale
+        The encoder's learning rate is ``lr * encoder_lr_scale`` (warm-up and cosine apply to
+        both groups). ``1.0`` (default) keeps one learning rate for all weights, unchanged.
+    freeze_encoder_epochs
+        The encoder's weights are not updated during the first N epochs (``requires_grad``
+        False, BatchNorm/LayerNorm statistics frozen too: eval mode), then train normally.
+        ``0`` (default) never freezes; must be smaller than ``epochs``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -62,6 +69,8 @@ class TrainingConfig(BaseModel):
     scheduler: Literal["CosineAnnealingLR"] = "CosineAnnealingLR"
     warmup_epochs: int = Field(default=0, ge=0)
     scheduler_interval: Literal["epoch", "step"] = "epoch"
+    encoder_lr_scale: float = Field(default=1.0, gt=0)
+    freeze_encoder_epochs: int = Field(default=0, ge=0)
     weight_decay: float = Field(default=1e-4, ge=0)
     precision: str = "32-true"
     gradient_clip_val: float | None = None
@@ -75,6 +84,17 @@ class TrainingConfig(BaseModel):
         if self.warmup_epochs >= self.epochs:
             msg = (
                 f"warmup_epochs ({self.warmup_epochs}) must be smaller than epochs ({self.epochs})"
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _check_freeze_encoder(self) -> TrainingConfig:
+        """Freezing must leave epochs of normal training after the encoder thaws."""
+        if self.freeze_encoder_epochs >= self.epochs:
+            msg = (
+                f"freeze_encoder_epochs ({self.freeze_encoder_epochs}) must be smaller than "
+                f"epochs ({self.epochs})"
             )
             raise ValueError(msg)
         return self
