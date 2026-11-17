@@ -470,6 +470,6 @@ def test_trainable_reports_the_frozen_count(capsys: pytest.CaptureFixture[str]) 
 
     printed = capsys.readouterr().out
 
-    assert "Trainable weights: 2 of 10 (20.0%), frozen 8" in printed, (
+    assert "Trainable weights: 5 of 283 (1.8%), frozen 278" in printed, (
         "every run reports how many weights it trains and how many it freezes"
     )
