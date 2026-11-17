@@ -157,7 +157,11 @@ def _run(args: argparse.Namespace, pipeline_cfg: InstancePipelineConfig) -> dict
 
     gts = [s.gt for s in samples]
     metrics = evaluate_annotator_samples(
-        preds, gts, None if args.uniform_scores else scores, match_iou=args.match_iou
+        preds,
+        gts,
+        None if args.uniform_scores else scores,
+        match_iou=args.match_iou,
+        max_detections=args.max_detections,
     )
     evaluated = [p for p, g in zip(preds, gts, strict=True) if g]
     result: dict[str, Any] = {
@@ -169,6 +173,7 @@ def _run(args: argparse.Namespace, pipeline_cfg: InstancePipelineConfig) -> dict
         "semantic_threshold": pipeline_cfg.semantic_threshold,
         "grow_steps": pipeline_cfg.grow_steps,
         "uniform_scores": args.uniform_scores,
+        "max_detections": args.max_detections,
         "n_scenes": len(stems),
         "n_annotator_samples": len(samples),
         "n_pred_instances_per_evaluated_sample": (
@@ -186,6 +191,7 @@ def _run(args: argparse.Namespace, pipeline_cfg: InstancePipelineConfig) -> dict
             None if args.uniform_scores else scores,
             match_iou=args.match_iou,
             include_empty=True,
+            max_detections=args.max_detections,
         )
     if args.consensus_gt:
         result["consensus"] = {
@@ -194,6 +200,7 @@ def _run(args: argparse.Namespace, pipeline_cfg: InstancePipelineConfig) -> dict
                 consensus,
                 None if args.uniform_scores else [per_scene[stem][1] for stem in stems],
                 match_iou=args.match_iou,
+                max_detections=args.max_detections,
             ),
             "n_instances": sum(len(c) for c in consensus),
         }
@@ -204,6 +211,7 @@ def _run(args: argparse.Namespace, pipeline_cfg: InstancePipelineConfig) -> dict
                 None if args.uniform_scores else [per_scene[stem][1] for stem in stems],
                 match_iou=args.match_iou,
                 include_empty=True,
+                max_detections=args.max_detections,
             )
     _print_report(result, args)
     if args.output:
@@ -325,6 +333,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--include-empty",
         action="store_true",
         help="Also report the metrics with empty samples kept (their detections are false).",
+    )
+    parser.add_argument(
+        "--max-detections",
+        type=int,
+        default=100,
+        help=(
+            "Max detections per sample kept by the COCO mAP (default: 100). Raise on crowded "
+            "frames with more labelled contrails, or the cap truncates recall."
+        ),
     )
     parser.add_argument(
         "--consensus-gt",

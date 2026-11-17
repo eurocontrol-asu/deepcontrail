@@ -323,3 +323,149 @@ def test_evaluate_annotator_samples_without_pycocotools_names_the_extra(monkeypa
 
     with pytest.raises(ImportError, match=r"deepcontrail-instance\[map\]"):
         evaluate_annotator_samples([[m]], [[m]], [[0.9]])
+
+
+# --- large frames: fast matching, detection cap, ignored ground truth ---
+
+
+def _pixel(row: int, col: int, size: int = 16) -> np.ndarray:
+    mask = np.zeros((size, size), dtype=bool)
+    mask[row, col] = True
+    return mask
+
+
+def _brute_force_match(
+    pred_masks: list[np.ndarray], gt_masks: list[np.ndarray], iou_threshold: float
+) -> tuple[int, int, int]:
+    """Reproduce the historical double loop over full masks, greedy by IoU (the reference)."""
+    n_pred, n_gt = len(pred_masks), len(gt_masks)
+    pairs: list[tuple[float, int, int]] = []
+    for i, pred in enumerate(pred_masks):
+        for j, gt in enumerate(gt_masks):
+            intersection = np.logical_and(pred, gt).sum()
+            union = np.logical_or(pred, gt).sum()
+            iou = float(intersection / union) if union else 0.0
+            if iou >= iou_threshold:
+                pairs.append((iou, i, j))
+    pairs.sort(key=lambda pair: pair[0], reverse=True)
+    matched_pred = [False] * n_pred
+    matched_gt = [False] * n_gt
+    tp = 0
+    for _iou, i, j in pairs:
+        if not matched_pred[i] and not matched_gt[j]:
+            matched_pred[i] = True
+            matched_gt[j] = True
+            tp += 1
+    return tp, n_pred - tp, n_gt - tp
+
+
+def test_match_instances_fast_path_equals_brute_force():
+    rng = np.random.default_rng(0)
+    h = w = 64
+
+    def rect() -> np.ndarray:
+        mask = np.zeros((h, w), dtype=bool)
+        mask[
+            rng.integers(0, 40) : rng.integers(0, 40) + rng.integers(6, 30),
+            rng.integers(0, 40) : rng.integers(0, 40) + rng.integers(6, 30),
+        ] = True
+        return mask
+
+    preds = [rect() for _ in range(15)]
+    gts = [rect() for _ in range(12)]
+
+    for threshold in (0.0, 0.5, 0.75):
+        assert match_instances(preds, gts, threshold) == _brute_force_match(
+            preds, gts, threshold
+        ), f"the fast bbox matching must return the exact brute-force (tp, fp, fn) at {threshold}"
+
+
+def test_match_instances_disjoint_boxes_never_match():
+    pred = _hline(16, 16, 2, 2, 6)  # row 2, cols 2-5
+    gt = _hline(16, 16, 13, 10, 14)  # row 13, cols 10-13: no box overlap at all
+
+    tp, fp, fn = match_instances([pred], [gt], iou_threshold=0.5)
+
+    assert (tp, fp, fn) == (0, 1, 1), "masks in non-overlapping boxes cannot share a pixel"
+
+
+def test_match_instances_empty_masks_never_match():
+    empty = np.zeros((16, 16), dtype=bool)
+    line = _hline(16, 16, 3, 2, 8)
+
+    tp, fp, fn = match_instances([empty, line], [empty, line], iou_threshold=0.5)
+
+    assert (tp, fp, fn) == (1, 1, 1), "an empty mask has area 0 and never matches anything"
+
+
+@requires_map
+def test_evaluate_max_detections_keeps_more_than_100():
+    from deepcontrail.instance.metrics import evaluate_annotator_samples
+
+    gt = _dots(150)  # 150 disjoint one-pixel contrails, all detected perfectly
+
+    with pytest.warns(UserWarning, match="more than 100"):
+        default = evaluate_annotator_samples([list(gt)], [gt], per_threshold=False)
+    assert default["map"] < 1.0, "the 100-detection cap cannot cover 150 contrails"
+
+    raised = evaluate_annotator_samples([list(gt)], [gt], max_detections=200, per_threshold=False)
+    assert raised["map"] == pytest.approx(1.0), "raising the cap keeps every perfect detection"
+
+
+def test_evaluate_max_detections_below_one_raises():
+    from deepcontrail.instance.metrics import evaluate_annotator_samples
+
+    with pytest.raises(ValueError, match="at least 1"):
+        evaluate_annotator_samples([[_hline(16, 16, 3)]], [[_hline(16, 16, 3)]], max_detections=0)
+
+
+@requires_map
+def test_evaluate_gt_ignore_detection_on_ignored_contrail_is_not_a_false_positive():
+    from deepcontrail.instance.metrics import evaluate_annotator_samples
+
+    a, b = _pixel(2, 2), _pixel(10, 10)
+    preds, scores = [[a, b]], [[0.8, 0.9]]  # the detection on b is ranked first
+
+    flagged = evaluate_annotator_samples(preds, [[a, b]], scores, gt_ignore=[[False, True]])
+    absent = evaluate_annotator_samples(preds, [[a]], scores)
+
+    assert flagged["map"] == pytest.approx(1.0), (
+        "a detection on an ignored contrail is neither a hit nor a false positive"
+    )
+    assert absent["map"] < 1.0, "the same detection is a false positive once that GT is gone"
+
+
+@requires_map
+def test_evaluate_sample_with_only_ignored_gt_counts_as_empty():
+    from deepcontrail.instance.metrics import evaluate_annotator_samples
+
+    line = _hline(16, 16, 3, 2, 8)
+    preds = gts = [[line], [line]]
+    scores = [[0.9], [0.9]]
+
+    without = evaluate_annotator_samples(preds, gts, scores)
+    r = evaluate_annotator_samples(preds, gts, scores, gt_ignore=[[], [True]])
+
+    assert r["n_samples"] == 1, "a sample whose only GT is ignored is treated as empty"
+    assert r["n_skipped_empty"] == 1
+    assert without["n_samples"] == 2, "the same sample is kept once nothing is ignored"
+
+
+@requires_map
+def test_evaluate_without_new_options_is_unchanged():
+    from deepcontrail.instance.metrics import evaluate_annotator_samples
+
+    gts = [[_hline(H, W, 3, 2, 10), _hline(H, W, 9, 2, 10)], [_hline(H, W, 5, 2, 12)]]
+    preds = [list(gts[0]), list(gts[1])]
+    scores = [[0.9, 0.8], [0.7]]
+
+    r = evaluate_annotator_samples(preds, gts, scores)
+
+    assert r["map"] == pytest.approx(1.0)
+    assert all(v == pytest.approx(1.0) for v in r["ap_per_threshold"].values())
+    assert r["precision"] == pytest.approx(1.0)
+    assert r["recall"] == pytest.approx(1.0)
+    assert r["f1"] == pytest.approx(1.0)
+    assert (r["tp"], r["fp"], r["fn"]) == (3, 0, 0)
+    assert r["n_samples"] == 2
+    assert r["n_skipped_empty"] == 0
