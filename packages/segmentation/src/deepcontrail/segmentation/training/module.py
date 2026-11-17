@@ -11,6 +11,21 @@ import torch.nn.functional as F
 from deepcontrail.core.metrics import dice_coefficient, iou_score
 
 
+def _prefix_matches(param_name: str, prefix: str) -> bool:
+    """Match a parameter name against a prefix: equal, or starting with ``prefix + "."``."""
+    return param_name == prefix or param_name.startswith(prefix + ".")
+
+
+def _name_hint(param_name: str) -> str:
+    """Return the first two name components, as a hint of the available prefixes."""
+    return ".".join(param_name.split(".")[:2])
+
+
+def _any_matches(names: list[str], prefix: str) -> bool:
+    """Whether ``prefix`` matches at least one of ``names``."""
+    return any(_prefix_matches(name, prefix) for name in names)
+
+
 class SegmentationModule(pl.LightningModule):
     """Thin Lightning wrapper around a plain ``nn.Module`` segmentation model.
 
@@ -44,6 +59,11 @@ class SegmentationModule(pl.LightningModule):
         and ``model.encoder`` in eval mode, so its BatchNorm/LayerNorm statistics are not
         updated); ``0`` (default) never freezes. The encoder thaws once ``current_epoch``
         reaches this value.
+    trainable
+        Prefixes of the network's parameter names (as in ``model.named_parameters()``) that
+        train; every other parameter is frozen for the whole run (``requires_grad`` False and
+        its modules in eval mode, so normalisation statistics and dropout are frozen too).
+        ``None`` (default) trains everything. Each prefix must match at least one parameter.
     """
 
     def __init__(
@@ -61,6 +81,7 @@ class SegmentationModule(pl.LightningModule):
         optimizer: str = "AdamW",
         encoder_lr_scale: float = 1.0,
         freeze_encoder_epochs: int = 0,
+        trainable: list[str] | None = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["model", "loss_fn"])
@@ -77,6 +98,16 @@ class SegmentationModule(pl.LightningModule):
         self.native_size = native_size
         self.encoder_lr_scale = encoder_lr_scale
         self.freeze_encoder_epochs = freeze_encoder_epochs
+        self.trainable = trainable
+
+        # Partial freezing for fine-tuning: freeze every parameter not under a trainable prefix.
+        # The prefixes are validated here (each must match a real parameter) and the names of the
+        # permanently frozen modules are computed once, to be put in eval mode each epoch.
+        self._frozen_module_names: list[str] = []
+        if trainable is not None:
+            self._freeze_non_trainable()
+        # Every run reports how many weights it trains, frozen or not.
+        self._report_trainable_counts()
 
         self._val_preds: list[torch.Tensor] = []
         self._val_targets: list[torch.Tensor] = []
@@ -105,6 +136,50 @@ class SegmentationModule(pl.LightningModule):
     def _encoder_params(self) -> list[torch.nn.Parameter]:
         """Every parameter of the encoder, in one list (used for scaling and freezing)."""
         return list(self._encoder().parameters())
+
+    def _freeze_non_trainable(self) -> None:
+        """Validate the trainable prefixes, freeze every other parameter, cache frozen modules.
+
+        Raises
+        ------
+        ValueError
+            If a prefix matches no parameter of ``self.model``; the message lists the unknown
+            prefixes and, as a hint, the distinct first two name components available.
+        """
+        assert self.trainable is not None  # only called when trainable is set
+        names = [name for name, _ in self.model.named_parameters()]
+        unknown = [prefix for prefix in self.trainable if not _any_matches(names, prefix)]
+        if unknown:
+            hint = sorted({_name_hint(n) for n in names})
+            msg = (
+                f"trainable prefixes {unknown} match no parameter of {type(self.model).__name__}; "
+                f"parameter names start with {hint}"
+            )
+            raise ValueError(msg)
+        trainable_names = {n for n in names if any(_prefix_matches(n, p) for p in self.trainable)}
+        for name, param in self.model.named_parameters():
+            param.requires_grad = name in trainable_names
+        # A module is frozen when no trainable parameter lives inside it (and it is not the root
+        # ""): put it in eval mode each epoch so its norm statistics and dropout stay frozen.
+        self._frozen_module_names = [
+            module_name
+            for module_name, _ in self.model.named_modules()
+            if module_name and not any(tn.startswith(module_name + ".") for tn in trainable_names)
+        ]
+
+    def _report_trainable_counts(self) -> None:
+        """Print how many parameters train vs freeze (every run reports it)."""
+        names = [name for name, _ in self.model.named_parameters()]
+        if self.trainable is None:
+            trainable_names = names
+        else:
+            prefixes = self.trainable
+            trainable_names = [n for n in names if any(_prefix_matches(n, p) for p in prefixes)]
+        n_train = len(trainable_names)
+        n_total = len(names)
+        n_frozen = n_total - n_train
+        pct = 100.0 * n_train / n_total if n_total else 0.0
+        print(f"Trainable weights: {n_train:,} of {n_total:,} ({pct:.1f}%), frozen {n_frozen:,}")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass, resizing model output back to native mask resolution.
@@ -151,22 +226,26 @@ class SegmentationModule(pl.LightningModule):
         put in eval mode so its BatchNorm/LayerNorm statistics are not updated. The thaw happens
         once, when ``current_epoch`` reaches ``freeze_encoder_epochs``; afterwards the encoder
         trains normally (Lightning already put the module in train mode at the epoch start).
-        Does nothing when ``freeze_encoder_epochs`` is 0, so the default path never touches the
-        encoder.
+        Does nothing for the encoder when ``freeze_encoder_epochs`` is 0. Afterwards the
+        permanently frozen submodules (partial freezing via ``trainable``) are put back in eval
+        mode too, so their statistics stay frozen for the whole run.
         """
-        if self.freeze_encoder_epochs == 0:
-            return
-        if self.current_epoch < self.freeze_encoder_epochs:
-            for param in self._encoder_params():
-                param.requires_grad = False
-            # Lightning puts the whole module in train mode before this hook; put the encoder
-            # back in eval mode here so its norm statistics stay frozen while it is not trained.
-            self._encoder().eval()
-            print("encoder frozen")
-        elif self.current_epoch == self.freeze_encoder_epochs:
-            for param in self._encoder_params():
-                param.requires_grad = True
-            print("encoder unfrozen")
+        if self.freeze_encoder_epochs > 0:
+            if self.current_epoch < self.freeze_encoder_epochs:
+                for param in self._encoder_params():
+                    param.requires_grad = False
+                # Lightning puts the whole module in train mode before this hook; put the encoder
+                # back in eval mode here so its norm statistics stay frozen while it is not trained.
+                self._encoder().eval()
+                print("encoder frozen")
+            elif self.current_epoch == self.freeze_encoder_epochs:
+                for param in self._encoder_params():
+                    param.requires_grad = True
+                print("encoder unfrozen")
+        # Lightning put the whole module in train mode before this hook; put the permanently
+        # frozen submodules back in eval mode so their norm statistics and dropout stay frozen.
+        for module_name in self._frozen_module_names:
+            self.model.get_submodule(module_name).eval()
 
     def on_train_epoch_end(self) -> None:
         """Log global train Dice and IoU (threshold 0.5) for the epoch, then reset."""
@@ -214,13 +293,17 @@ class SegmentationModule(pl.LightningModule):
                 f"unknown optimizer {self.optimizer_name!r}; expected {list(optimizers)}"
             )
         if self.encoder_lr_scale == 1.0:
-            # Default: one flat param iterable, exactly as before — same optimizer, same result.
-            params: Any = self.parameters()
+            if self.trainable is None:
+                # Default: one flat param iterable, exactly as before — same optimizer, same result.
+                params: Any = self.parameters()
+            else:
+                # Partial freezing: only the trainable parameters go into the optimizer.
+                params = [p for p in self.parameters() if p.requires_grad]
         else:
             # Separate the encoder into its own param group at a scaled learning rate; every
             # parameter ends up in exactly one group. The schedulers scale each group's own lr.
             encoder_ids = {id(p) for p in self._encoder_params()}
-            params = [
+            groups = [
                 {
                     "params": [p for p in self.model.parameters() if id(p) in encoder_ids],
                     "lr": self.lr * self.encoder_lr_scale,
@@ -230,6 +313,16 @@ class SegmentationModule(pl.LightningModule):
                     "lr": self.lr,
                 },
             ]
+            if self.trainable is not None:
+                # Partial freezing keeps the grouping but drops frozen params and empty groups.
+                kept = []
+                for group in groups:
+                    trainable = [p for p in group["params"] if p.requires_grad]
+                    if trainable:
+                        group["params"] = trainable
+                        kept.append(group)
+                groups = kept
+            params = groups
         optimizer = optimizers[self.optimizer_name](
             params, lr=self.lr, weight_decay=self.weight_decay
         )

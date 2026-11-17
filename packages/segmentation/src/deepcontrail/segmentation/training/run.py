@@ -314,6 +314,7 @@ def prepare_training(
         optimizer=training_cfg.optimizer,
         encoder_lr_scale=training_cfg.encoder_lr_scale,
         freeze_encoder_epochs=training_cfg.freeze_encoder_epochs,
+        trainable=training_cfg.trainable,
     )
 
     name = run_name or default_run_name(model_cfg)

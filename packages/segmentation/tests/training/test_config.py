@@ -76,6 +76,12 @@ def test_training_config_default_freeze_encoder_epochs_is_zero() -> None:
     assert cfg.freeze_encoder_epochs == 0, "no freezing by default"
 
 
+def test_training_config_default_trainable_is_none() -> None:
+    cfg = TrainingConfig()
+
+    assert cfg.trainable is None, "training every parameter is the default, unchanged behaviour"
+
+
 def test_training_config_init_from_defaults_to_none() -> None:
     cfg = TrainingConfig()
 
@@ -293,6 +299,24 @@ def test_training_config_allows_freezing_a_prefix_of_training() -> None:
     cfg = TrainingConfig.from_dict({"epochs": 5, "freeze_encoder_epochs": 2})
 
     assert cfg.freeze_encoder_epochs == 2, "freezing a strict prefix of the epochs is valid"
+
+
+def test_training_config_rejects_an_empty_trainable_list() -> None:
+    with pytest.raises(ValidationError, match="trainable"):
+        TrainingConfig.from_dict({"trainable": []})  # an empty list trains nothing, an error
+
+
+def test_training_config_rejects_trainable_together_with_encoder_freezing() -> None:
+    with pytest.raises(ValidationError, match="freezing option"):
+        TrainingConfig.from_dict(
+            {"epochs": 5, "trainable": ["decoder"], "freeze_encoder_epochs": 2}
+        )
+
+
+def test_training_config_allows_trainable_alone() -> None:
+    cfg = TrainingConfig.from_dict({"epochs": 5, "trainable": ["decoder"]})
+
+    assert cfg.trainable == ["decoder"], "a trainable list without encoder freezing is valid"
 
 
 def test_training_config_rejects_a_non_positive_encoder_lr_scale() -> None:

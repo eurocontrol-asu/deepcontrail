@@ -59,6 +59,13 @@ class TrainingConfig(BaseModel):
         The encoder's weights are not updated during the first N epochs (``requires_grad``
         False, BatchNorm/LayerNorm statistics frozen too: eval mode), then train normally.
         ``0`` (default) never freezes; must be smaller than ``epochs``.
+    trainable
+        Prefixes of the network's parameter names (as in ``model.named_parameters()``, e.g.
+        ``decoder`` or ``encoder.encoder.model.stages_0``) that train; every other parameter is
+        frozen for the whole run (``requires_grad`` False, its modules in eval mode so
+        normalisation statistics and dropout are frozen too). ``None`` (default) trains
+        everything. Mutually exclusive with ``freeze_encoder_epochs`` (choose one freezing
+        option); an empty list is an error.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -71,6 +78,7 @@ class TrainingConfig(BaseModel):
     scheduler_interval: Literal["epoch", "step"] = "epoch"
     encoder_lr_scale: float = Field(default=1.0, gt=0)
     freeze_encoder_epochs: int = Field(default=0, ge=0)
+    trainable: list[str] | None = None
     weight_decay: float = Field(default=1e-4, ge=0)
     precision: str = "32-true"
     gradient_clip_val: float | None = None
@@ -97,6 +105,15 @@ class TrainingConfig(BaseModel):
                 f"epochs ({self.epochs})"
             )
             raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _check_trainable(self) -> TrainingConfig:
+        """Trainable must name at least one prefix and not clash with encoder freezing."""
+        if self.trainable is not None and len(self.trainable) == 0:
+            raise ValueError("trainable must list at least one parameter-name prefix")
+        if self.trainable is not None and self.freeze_encoder_epochs > 0:
+            raise ValueError("choose one freezing option")
         return self
 
     @model_validator(mode="after")

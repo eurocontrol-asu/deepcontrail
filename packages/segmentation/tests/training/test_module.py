@@ -331,3 +331,145 @@ def test_training_step_creates_no_float64_tensor(monkeypatch) -> None:
     assert torch.float64 not in recorder.dtypes, (
         "Apple MPS devices have no float64: a training step must not create float64 tensors"
     )
+
+
+# --- trainable (partial freezing) ------------------------------------------------------
+
+
+class _NamedSubmoduleModel(torch.nn.Module):
+    """A tiny SMP-style model whose parameter names mirror the real one.
+
+    ``encoder.stem`` (a conv) and ``encoder.body`` (a BatchNorm then a conv) feed ``decoder``
+    and ``segmentation_head`` (convs); ``forward`` chains them so shapes work at any resolution.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.encoder = torch.nn.ModuleDict(
+            {
+                "stem": torch.nn.Conv2d(3, 4, 3, padding=1),
+                "body": torch.nn.Sequential(
+                    torch.nn.BatchNorm2d(4), torch.nn.Conv2d(4, 4, 3, padding=1)
+                ),
+            }
+        )
+        self.decoder = torch.nn.Conv2d(4, 1, 1)
+        self.segmentation_head = torch.nn.Conv2d(1, 1, 3, padding=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.encoder["stem"](x)
+        x = self.encoder["body"](x)
+        x = self.decoder(x)
+        return self.segmentation_head(x)
+
+
+def _named_module(**overrides: object) -> SegmentationModule:
+    """Build a ``SegmentationModule`` around ``_NamedSubmoduleModel`` (encoder/decoder/head)."""
+    defaults: dict[str, object] = {
+        "model": _NamedSubmoduleModel(),
+        "loss_fn": torch.nn.Identity(),
+        "lr": 1e-3,
+        "weight_decay": 0.0,
+        "scheduler": "CosineAnnealingLR",
+        "epochs": 5,
+        "native_size": 8,
+    }
+    defaults.update(overrides)
+    return SegmentationModule(**defaults)  # type: ignore[arg-type]
+
+
+def test_trainable_none_keeps_every_parameter_trainable_and_one_group() -> None:
+    module = _named_module()
+
+    assert all(p.requires_grad for p in module.model.parameters()), (
+        "trainable None must leave every parameter trainable, i.e. today's behaviour"
+    )
+
+    groups = module.configure_optimizers()["optimizer"].param_groups
+    assert len(groups) == 1, "trainable None keeps the single optimizer param group"
+    covered = {id(p) for group in groups for p in group["params"]}
+    assert covered == {id(p) for p in module.model.parameters()}, (
+        "every parameter stays in the one group when nothing is frozen"
+    )
+
+
+def test_trainable_prefixes_only_those_get_gradients() -> None:
+    module = _named_module(trainable=["decoder"])
+    module.train()
+    images = torch.randn(2, 3, 8, 8)
+
+    module.model(images).sum().backward()
+
+    assert module.model.decoder.weight.grad is not None, "a trainable parameter receives gradients"
+    stem = module.model.encoder["stem"]
+    assert not stem.weight.requires_grad, "a frozen parameter has requires_grad False"
+    assert stem.weight.grad is None, "a frozen parameter receives no gradients"
+
+
+def test_trainable_unknown_prefix_raises() -> None:
+    with pytest.raises(ValueError, match="decoder_typo"):
+        _named_module(trainable=["decoder_typo"])  # a prefix must match a real parameter
+
+
+def test_trainable_prefix_matches_whole_name_components() -> None:
+    with pytest.raises(ValueError, match="decod"):
+        _named_module(trainable=["decod"])  # "decod" must NOT match "decoder.weight"
+
+
+def test_trainable_frozen_modules_are_in_eval_mode_after_epoch_start() -> None:
+    module = _named_module(trainable=["decoder", "segmentation_head"])
+    batch_norm = module.model.encoder["body"][0]  # a BatchNorm under the frozen encoder
+    module.train()  # Lightning sets the whole module to train mode at every epoch start
+    with torch.no_grad():  # non-zero running stats: a train-mode pass would move them
+        batch_norm.running_mean.fill_(1.0)
+        batch_norm.running_var.fill_(2.0)
+
+    module.on_train_epoch_start()
+
+    assert not batch_norm.training, (
+        "a module under a frozen prefix is put in eval mode, so its stats do not update"
+    )
+    assert module.model.decoder.training, "a trainable module stays in train mode"
+
+    module(torch.randn(2, 3, 8, 8))  # a forward pass in train mode
+
+    assert torch.equal(batch_norm.running_mean, torch.full_like(batch_norm.running_mean, 1.0)), (
+        "an eval-mode BatchNorm keeps its running statistics through a forward pass"
+    )
+
+
+def test_configure_optimizers_trainable_holds_only_trainable_params() -> None:
+    module = _named_module(trainable=["decoder"])
+
+    params = module.configure_optimizers()["optimizer"].param_groups[0]["params"]
+    held = {id(p) for p in params}
+
+    assert held == {id(p) for p in module.model.decoder.parameters()}, (
+        "only the trainable (decoder) parameters go into the optimizer"
+    )
+    assert all(p.requires_grad for p in params), "every held parameter is trainable"
+    assert held.isdisjoint({id(p) for p in module.model.encoder.parameters()}), (
+        "no frozen (encoder) parameter is in the optimizer"
+    )
+
+
+def test_configure_optimizers_trainable_and_encoder_lr_scale_drops_empty_groups() -> None:
+    module = _two_part_module(trainable=["decoder"], encoder_lr_scale=0.1)
+
+    groups = module.configure_optimizers()["optimizer"].param_groups
+
+    assert len(groups) == 1, "an all-frozen encoder group is dropped, leaving the trainable one"
+    held = {id(p) for p in groups[0]["params"]}
+    assert held == {id(p) for p in module.model.decoder.parameters()}, (
+        "the surviving group holds only the trainable decoder parameters"
+    )
+
+
+def test_trainable_reports_the_frozen_count(capsys: pytest.CaptureFixture[str]) -> None:
+    _named_module(trainable=["decoder"])
+
+    printed = capsys.readouterr().out
+
+    assert "Trainable weights: 2 of 10 (20.0%), frozen 8" in printed, (
+        "every run reports how many weights it trains and how many it freezes"
+    )
