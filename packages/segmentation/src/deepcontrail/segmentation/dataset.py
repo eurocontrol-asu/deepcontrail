@@ -303,11 +303,15 @@ class SegmentationDataset:
         """Return the number of items in this split.
 
         With ``crop_size`` on a non-train split, each scene contributes one item per
-        covering tile, so the count is the number of tiles. Otherwise it is the number
-        of stems (training, and non-cropped splits, included).
+        covering tile, so the count is the number of tiles. With ``crop_size`` on the
+        train split, each scene contributes ``crops_per_scene`` independent random crops,
+        so the count is scenes x crops_per_scene. Otherwise it is the number of stems
+        (training without crop_size, and non-cropped splits, included).
         """
         if self._tiles:
             return len(self._tiles)
+        if self.config.crop_size is not None:
+            return len(self.stems) * self.config.crops_per_scene
         return len(self.stems)
 
     def __getitem__(self, index: int) -> tuple[Any, Any]:
@@ -328,8 +332,11 @@ class SegmentationDataset:
             img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
             image, mask = self._load_window(stem, img_dir, mask_dir, r0, c0, self.native_size)
         elif self.config.crop_size is not None:
-            # Training with crop_size: one random crop per scene and item.
-            stem = self.stems[index]
+            # Training with crop_size: crops_per_scene independent random crops per scene.
+            # Index maps to a scene by // crops_per_scene; the remainder is unused — every
+            # item draws a fresh random origin from self._crop_rng, so the crops differ.
+            crops = self.config.crops_per_scene
+            stem = self.stems[index // crops]
             img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
             self._reseed_augmentation_in_worker()
             r0, c0 = self._crop_rng.integers(0, self.scene_size - self.native_size + 1, size=2)

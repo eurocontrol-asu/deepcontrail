@@ -1260,3 +1260,149 @@ def test_dataset_crops_are_reproducible_with_the_same_seed(scene_dataset: Callab
 
     assert np.array_equal(img1, img2), "the same seed must draw the same crop"
     assert np.array_equal(mask1, mask2), "the same crop carries the same mask window"
+
+
+# ---------------------------------------------------------------------------
+# crops_per_scene: independent random crops of each training scene per epoch
+# ---------------------------------------------------------------------------
+
+
+def test_dataset_crops_per_scene_multiplies_the_training_length(scene_dataset: Callable[..., Path]):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    root = scene_dataset(n_scenes=3, size=16, split="train")
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE,
+        root=str(root),
+        split="train",
+        image_size=8,
+        crop_size=8,
+        crops_per_scene=4,
+    )
+    ds = SegmentationDataset(cfg)
+
+    assert len(ds) == 4 * len(ds.stems), (
+        "crops_per_scene multiplies the training length: scenes x crops_per_scene"
+    )
+
+
+def test_dataset_crops_per_scene_items_cover_every_scene(scene_dataset: Callable[..., Path]):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    crops, scene, crop, n_scenes = 3, 16, 8, 5
+    root = scene_dataset(n_scenes=n_scenes, size=scene, split="train")
+    # Each scene's probability mask is a constant unique to that scene, so any crop of the
+    # scene carries a value that pins down which scene it came from.
+    stems_all = [f"train_{i:06d}" for i in range(1, n_scenes + 1)]
+    constants = {stem: round(0.1 * (i + 1), 4) for i, stem in enumerate(stems_all)}
+    prob_dir = root / "probability_masks" / "train"
+    prob_dir.mkdir(parents=True, exist_ok=True)
+    for stem, value in constants.items():
+        np.save(prob_dir / f"{stem}.npy", np.full((scene, scene), value, dtype=np.float32))
+
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE,
+        root=str(root),
+        split="train",
+        image_size=crop,
+        crop_size=crop,
+        crops_per_scene=crops,
+        mask_type="probability",
+        seed=3,
+    )
+    ds = SegmentationDataset(cfg)
+
+    assert len(ds) == crops * len(ds.stems), "len = scenes x crops_per_scene"
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        for i in range(len(ds)):
+            mask = ds[i][1]
+            expected = constants[ds.stems[i // crops]]
+            assert round(float(mask.mean()), 4) == expected, (
+                f"item {i} must come from scene {ds.stems[i // crops]} "
+                f"(items {i // crops * crops}..{i // crops * crops + crops - 1}), "
+                f"got mask mean {mask.mean()} != {expected}"
+            )
+
+
+def test_dataset_crops_per_scene_draws_different_crops_of_one_scene(
+    scene_dataset: Callable[..., Path],
+):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    from .conftest import write_mask
+
+    scene, crop, crops, n_scenes = 16, 8, 4, 3
+    root = scene_dataset(n_scenes=n_scenes, size=scene, split="train")
+    # Bands encode the (row, col) position so every window of the composite is unique:
+    # the blue channel ramps across columns, the red channel across rows. Every scene gets
+    # the same content, so the check holds no matter which scene the first item maps to.
+    rr, cc = np.mgrid[0:scene, 0:scene]
+    ir_105 = (243 + 60 * cc / 15).astype(np.float32)
+    ir_123 = (ir_105 - 4 + 6 * rr / 15).astype(np.float32)
+    ir_87 = (ir_105 - 0.5).astype(np.float32)
+    bands = np.stack([ir_87, ir_105, ir_123], axis=-1)  # manifest order: ir_87, ir_105, ir_123
+    for i in range(1, n_scenes + 1):
+        stem = f"train_{i:06d}"
+        np.save(root / "spectral_bands" / "train" / f"{stem}.npy", bands)
+        write_mask(
+            root / "semantic_masks" / "train" / f"{stem}.png", np.zeros((scene, scene), np.uint8)
+        )
+
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE,
+        root=str(root),
+        split="train",
+        image_size=crop,
+        crop_size=crop,
+        crops_per_scene=crops,
+        seed=7,
+    )
+    ds = SegmentationDataset(cfg)
+
+    assert len(ds) == crops * len(ds.stems), "len = scenes x crops_per_scene"
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        images = [ds[j][0] for j in range(crops)]  # the crops of the first scene
+
+    identical = all(np.array_equal(images[0], img) for img in images[1:])
+    assert not identical, (
+        "the crops_per_scene items of one scene must be independent crops, not all identical"
+    )
+
+
+def test_dataset_crops_per_scene_does_not_change_validation_tiles(
+    scene_dataset: Callable[..., Path],
+):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    scene, crop, crops = 8, 4, 5
+    root = scene_dataset(n_scenes=2, size=scene, split="test")
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE,
+        root=str(root),
+        split="test",
+        image_size=crop,
+        crop_size=crop,
+        crops_per_scene=crops,
+    )
+    ds = SegmentationDataset(cfg)
+
+    assert len(ds) == 4 * 2, (
+        "crops_per_scene must not multiply validation tiles: 2 scenes x 4 tiles each, "
+        f"not scenes x crops_per_scene ({2 * crops})"
+    )
+    assert len(ds._tiles) == 4 * 2, "the tile list itself is unchanged by crops_per_scene"
+
+
+def test_config_crops_per_scene_without_crop_size_raises():
+    from pydantic import ValidationError
+
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+
+    with pytest.raises(ValidationError, match="crops_per_scene needs crop_size"):
+        SegmentationDataConfig(false_color=RECIPE, root="/tmp/fake", crops_per_scene=4)

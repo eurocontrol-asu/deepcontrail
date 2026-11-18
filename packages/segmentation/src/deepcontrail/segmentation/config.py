@@ -5,9 +5,9 @@ Uses only pydantic so that ``import deepcontrail.segmentation`` stays torch-free
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from deepcontrail.core.config import DatasetConfig
 
@@ -77,6 +77,12 @@ class SegmentationDataConfig(DatasetConfig):
         than the training window: training reads one random crop per scene and item, validation
         and test read the non-overlapping tiles covering each scene (the last row/column of
         tiles is moved back to end at the scene edge). ``None`` (default) uses whole scenes.
+    crops_per_scene
+        With ``crop_size``, the number of independent random crops each training scene yields
+        per epoch (the epoch length is scenes x crops_per_scene). Each item draws a fresh
+        random origin, so ``crops_per_scene = 4`` makes an epoch see four times as many steps
+        over the same data. Default 1 is today's behaviour. Ignored for validation and test,
+        which read tiles. Requires ``crop_size``: a value > 1 without it is an error.
     batch_size
         Batch size for the DataLoader (not used by the Dataset itself).
     num_workers
@@ -94,7 +100,16 @@ class SegmentationDataConfig(DatasetConfig):
     mask_type: Literal["binary", "probability"] = "binary"
     image_size: Annotated[int, Field(gt=0)] = 256
     crop_size: Annotated[int, Field(gt=0)] | None = None
+    crops_per_scene: Annotated[int, Field(ge=1)] = 1
     batch_size: Annotated[int, Field(gt=0)] = 16
     num_workers: Annotated[int, Field(ge=0)] = 4
     augmentation: AugmentationConfig | None = None
     normalize: NormalizeConfig = NormalizeConfig()
+
+    @model_validator(mode="after")
+    def _crops_per_scene_needs_crop_size(self) -> Self:
+        """Reject ``crops_per_scene`` > 1 when no ``crop_size`` is set."""
+        if self.crops_per_scene > 1 and self.crop_size is None:
+            msg = "crops_per_scene needs crop_size"
+            raise ValueError(msg)
+        return self
