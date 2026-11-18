@@ -33,15 +33,17 @@ class GroupStats:
     frames
         Frames that have an image (``npy`` is not ``None``).
     contrails
-        Contrails drawn on those frames.
+        Contrails drawn on those frames. In several-labeller mode the per-frame count is
+        AVERAGED over labellers, so it may be fractional; single-labeller counts are integers.
     low
-        Contrails whose confidence is ``"Low"``.
+        Contrails whose confidence is ``"Low"``; averaged over labellers in several-labeller
+        mode, so it may be fractional too.
     """
 
     project: str
     frames: int
-    contrails: int
-    low: int
+    contrails: float
+    low: float
 
 
 def day_groups(sequences: Sequence[labels.Sequence]) -> dict[str, str]:
@@ -261,14 +263,26 @@ def _group_stats(
         by_group[groups[seq.name]].append(seq)
     stats: dict[str, GroupStats] = {}
     for gid, members in by_group.items():
-        frames = contrails = low = 0
+        frames = 0
+        contrails: float = 0
+        low: float = 0
         for member in members:
             for frame in member.frames:
                 if frame.npy is None:
                     continue
                 frames += 1
-                contrails += len(frame.contrails)
-                low += sum(1 for c in frame.contrails if c.confidence == "Low")
+                if frame.annotators is not None:
+                    # several labellers drew on the frame: average their counts
+                    counts = [len(annotator) for annotator in frame.annotators]
+                    lows = [
+                        sum(1 for c in annotator if c.confidence == "Low")
+                        for annotator in frame.annotators
+                    ]
+                    contrails += sum(counts) / len(counts)
+                    low += sum(lows) / len(lows)
+                else:
+                    contrails += len(frame.contrails)
+                    low += sum(1 for c in frame.contrails if c.confidence == "Low")
         stats[gid] = GroupStats(
             project=members[0].project, frames=frames, contrails=contrails, low=low
         )
@@ -290,7 +304,7 @@ def _cost(
     density_all = tot_contrails / tot_frames
     low_all = (tot_low / tot_contrails) if tot_contrails else 0.0
 
-    def agg(split: str) -> tuple[int, int, int]:
+    def agg(split: str) -> tuple[int, float, float]:
         ids = [g for g, s in assignment.items() if s == split]
         frames = sum(stats[g].frames for g in ids)
         contrails = sum(stats[g].contrails for g in ids)
@@ -317,7 +331,7 @@ def _split_numbers(
     ids: list[str],
     stats: dict[str, GroupStats],
     tot_frames: int,
-    tot_contrails: int,
+    tot_contrails: float,
 ) -> dict:
     """JSON-serialisable summary numbers for a set of group ids."""
     frames = sum(stats[i].frames for i in ids)

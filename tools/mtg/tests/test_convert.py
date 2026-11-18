@@ -333,3 +333,211 @@ def test_convert_rejects_a_size_bigger_than_the_image(dataset: tuple[Path, Path]
     out = tmp_path / "out"
     with pytest.raises(ValueError, match="image side"):
         convert(dataset[0], dataset[1], out, size=16, workers=1)
+
+
+# ---------------------------------------------------------------------------
+# Several labellers per sequence
+# ---------------------------------------------------------------------------
+
+# Four 2x2 blocks on the 8x8 grid (pixel centres are (c + 0.5) / 8). Each covers exactly two
+# columns and two rows, chosen so their vote counts differ:
+#   _SHARED  rows 2-3, cols 2-3  drawn by L1, L2, L3  (3 votes)
+#   _ONLY_L1 rows 2-3, cols 5-6  drawn by L1          (1 vote)
+#   _ONLY_L2 rows 5-6, cols 2-3  drawn by L2          (1 vote)
+#   _TWO     rows 5-6, cols 5-6  drawn by L2, L3      (2 votes)
+_SHARED = [[0.28, 0.28], [0.45, 0.28], [0.45, 0.45], [0.28, 0.45]]
+_ONLY_L1 = [[0.62, 0.28], [0.85, 0.28], [0.85, 0.45], [0.62, 0.45]]
+_ONLY_L2 = [[0.28, 0.62], [0.45, 0.62], [0.45, 0.85], [0.28, 0.85]]
+_TWO = [[0.62, 0.62], [0.85, 0.62], [0.85, 0.85], [0.62, 0.85]]
+
+# Each labeller's contrails (keys differ across labellers: ids are not comparable).
+_LABELLER_POLYS = {
+    "L1": [("cS", _SHARED), ("cA1", _ONLY_L1)],
+    "L2": [("cS2", _SHARED), ("cA2", _ONLY_L2), ("cB2", _TWO)],
+    "L3": [("cS3", _SHARED), ("cB3", _TWO)],
+}
+# Two sequences on different days/zones (so two independent day-groups), same labellers each.
+_SEQUENCES = (
+    ("MTG_202506010800_202506011200_zone30_frame4", "MTG_A", "SEQA_frame0", "seqA.npy"),
+    ("MTG_202506040800_202506041200_zone40_frame4", "MTG_B", "SEQB_frame0", "seqB.npy"),
+)
+
+
+def _multi_labeller_json(sequence: str, project: str, title: str, npy: str, polys: dict) -> dict:
+    """One labeller's Encord export: one frame with ``polys`` as one polygon per contrail key."""
+    contrails = {key: [poly] for key, poly in polys.items()}
+    return {
+        "sequence": sequence,
+        "project_name": project,
+        "images": [
+            {
+                "image_title": f"{title}.png",
+                "image_npy": npy,
+                "width": _SIZE,
+                "height": _SIZE,
+                "contrails": contrails,
+            }
+        ],
+        "contrail_groups": {key: [f"t_{key}"] for key in polys},
+        "tracks": {f"t_{key}": {"static": {"Confidence Level": "High"}} for key in polys},
+    }
+
+
+def _build_multi_dataset(tmp_path: Path) -> tuple[Path, Path]:
+    """Write two sequences x three labellers of tiny labelled frames; return the dirs."""
+    labels_dir = tmp_path / "labels"
+    images_dir = tmp_path / "images"
+    labels_dir.mkdir(parents=True)
+    images_dir.mkdir(parents=True)
+
+    for sequence, base, title, npy in _SEQUENCES:
+        for labeller, polys in _LABELLER_POLYS.items():
+            data = _multi_labeller_json(sequence, f"{base}_{labeller}", title, npy, dict(polys))
+            (labels_dir / f"{base}_{labeller}.json").write_text(json.dumps(data), encoding="utf-8")
+        np.save(images_dir / npy, _image())
+    return labels_dir, images_dir
+
+
+def _label_dir(out: Path, stem: str, subdir: str) -> Path:
+    """Return ``out/<subdir>/<split>`` holding ``stem`` (val scenes live under train/ on disk)."""
+    scenes = json.loads((out / "metadata" / "scenes.json").read_text())
+    split = scenes[stem]["split"]
+    disk = "train" if split in ("train", "val") else split
+    return out / subdir / disk
+
+
+def test_convert_multi_writes_annotator_probability_and_majority_masks(tmp_path: Path):
+    from PIL import Image
+
+    from deepcontrail.core.validate import validate_dataset
+
+    labels_dir, images_dir = _build_multi_dataset(tmp_path)
+    out = tmp_path / "out"
+    summary = convert(labels_dir, images_dir, out, size=_SIZE, workers=1, seed=0, instances=False)
+
+    assert summary["several_labellers"] is True, "three labellers per sequence is multi mode"
+    info = json.loads((out / "metadata" / "dataset_info.json").read_text())
+    assert info["labels"] == ["semantic", "probability", "annotator"]
+    assert "annotators" not in info, "the unknown field stays out of dataset_info (warns on read)"
+    assert not (out / "instance_masks").exists(), "no instance masks in multi mode"
+
+    stem = "SEQA_frame0"
+    annot = np.load(_label_dir(out, stem, "annotator_masks") / f"{stem}.npy")
+    prob = np.load(_label_dir(out, stem, "probability_masks") / f"{stem}.npy")
+    png = np.array(Image.open(_label_dir(out, stem, "semantic_masks") / f"{stem}.png").convert("L"))
+
+    assert annot.shape == (_SIZE, _SIZE, 3), "one mask per labeller, in sorted L1, L2, L3 order"
+    assert annot.dtype == np.uint8
+    np.testing.assert_array_equal(annot[2, 2], [1, 1, 1], "_SHARED is drawn by all three")
+    np.testing.assert_array_equal(annot[2, 5], [1, 0, 0], "_ONLY_L1 is L1 only")
+    np.testing.assert_array_equal(annot[5, 5], [0, 1, 1], "_TWO is L2 + L3")
+    np.testing.assert_array_equal(annot[5, 2], [0, 1, 0], "_ONLY_L2 is L2 only")
+    np.testing.assert_array_equal(annot[0, 0], [0, 0, 0], "an undrawn pixel stays 0")
+
+    np.testing.assert_allclose(prob[2, 2], 1.0, atol=1e-6, err_msg="three of three agree -> 1.0")
+    np.testing.assert_allclose(prob[2, 5], 1 / 3, atol=1e-6, err_msg="one of three -> 1/3")
+    np.testing.assert_allclose(prob[5, 5], 2 / 3, atol=1e-6, err_msg="two of three -> 2/3")
+    np.testing.assert_allclose(prob[0, 0], 0.0, atol=1e-6)
+
+    assert png[2, 2] == 255, "_SHARED (3 votes) is drawn by the majority"
+    assert png[5, 5] == 255, "_TWO (2 votes) is drawn by the majority"
+    assert png[2, 5] == 0, "_ONLY_L1 (1 vote) is not a majority"
+    assert png[5, 2] == 0, "_ONLY_L2 (1 vote) is not a majority"
+
+    # the written reductions match an independent mean / majority over the annotator masks
+    np.testing.assert_allclose(prob, annot.mean(axis=2), atol=1e-6)
+    np.testing.assert_array_equal(png, (annot.sum(axis=2) * 2 > 3) * 255)
+
+    report = validate_dataset(out, task="segmentation", deep=True)
+    assert report.ok, report.summary(limit=None)
+
+    entry = json.loads((out / "metadata" / "scenes.json").read_text())["SEQA_frame0"]
+    assert entry["annotators"] == ["L1", "L2", "L3"]
+    assert set(entry["contrails_by_annotator"]) == {"L1", "L2", "L3"}
+
+
+def test_convert_multi_requires_no_instances(tmp_path: Path):
+    labels_dir, images_dir = _build_multi_dataset(tmp_path)
+    out = tmp_path / "out"
+    with pytest.raises(ValueError, match="several labellers"):
+        convert(labels_dir, images_dir, out, size=_SIZE, workers=1, instances=True)
+
+
+def test_convert_multi_rejects_mismatched_frame_lists(tmp_path: Path):
+    labels_dir, _images = _build_multi_dataset(tmp_path)
+    data = json.loads((labels_dir / "MTG_A_L2.json").read_text())
+    data["images"][0]["image_title"] = "SEQA_FRAME_DIFFERENT.png"  # a different frame list
+    (labels_dir / "MTG_A_L2.json").write_text(json.dumps(data), encoding="utf-8")
+
+    out = tmp_path / "out"
+    with pytest.raises(ValueError, match="frame title lists"):
+        convert(labels_dir, _images, out, size=_SIZE, workers=1, instances=False)
+
+
+def test_convert_split_from_reuses_the_frozen_assignment(
+    dataset: tuple[Path, Path], tmp_path: Path
+):
+    from deepcontrail.mtg.labels import read_sequence
+    from deepcontrail.mtg.split import day_groups, make_split
+
+    frozen_out = tmp_path / "frozen"
+    convert(dataset[0], dataset[1], frozen_out, size=_SIZE, workers=1, seed=0)
+    frozen = json.loads((frozen_out / "metadata" / "split.json").read_text())["groups"]
+
+    # A provably different assignment with the same group keys: split_from must apply it verbatim,
+    # not re-search one. (This data is one group per project, so make_split is seed-invariant.)
+    altered = dict(frozen)
+    target = next(iter(altered))
+    altered[target] = "train" if frozen[target] != "train" else "test"
+    assert altered != frozen
+
+    altered_meta = tmp_path / "altered"
+    (altered_meta / "metadata").mkdir(parents=True)
+    (altered_meta / "metadata" / "split.json").write_text(
+        json.dumps({"groups": altered}, indent=2), encoding="utf-8"
+    )
+
+    reused = tmp_path / "reused"
+    convert(
+        dataset[0],
+        dataset[1],
+        reused,
+        size=_SIZE,
+        workers=1,
+        seed=0,
+        split_from=altered_meta,
+    )
+    again = json.loads((reused / "metadata" / "split.json").read_text())["groups"]
+
+    sequences = [read_sequence(p) for p in sorted(dataset[0].glob("*.json"))]
+    groups = day_groups(sequences)
+    assert make_split(sequences, groups, seed=0) == frozen, (
+        "the seed alone reproduces the original split, not the altered one"
+    )
+    assert again == altered, "split_from reuses the frozen group -> split assignment verbatim"
+
+
+def test_convert_link_bands_from_hard_links_the_band_files(
+    dataset: tuple[Path, Path], tmp_path: Path
+):
+    src = tmp_path / "src"
+    convert(dataset[0], dataset[1], src, size=_SIZE, workers=1, seed=0)
+
+    dst = tmp_path / "dst"
+    convert(
+        dataset[0],
+        dataset[1],
+        dst,
+        size=_SIZE,
+        workers=1,
+        seed=0,
+        link_bands_from=src,
+        split_from=src,
+    )
+
+    for split in ("train", "test"):
+        for stem in _stems(src / "spectral_bands" / split):
+            source = (src / "spectral_bands" / split / f"{stem}.npy").stat()
+            linked = (dst / "spectral_bands" / split / f"{stem}.npy").stat()
+            assert linked.st_ino == source.st_ino, f"{split}/{stem} is hard-linked to the source"
+            assert linked.st_nlink > 1, f"{split}/{stem} has more than one link"

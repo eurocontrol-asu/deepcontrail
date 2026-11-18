@@ -103,6 +103,36 @@ def test_read_sequence_merges_fragments_into_one_contrail(tmp_path: Path):
     assert frame.labelled_size == 1024
 
 
+def test_read_sequence_reads_the_annotator_suffix(tmp_path: Path):
+    from deepcontrail.mtg.labels import read_sequence
+
+    path = _write_sequence(
+        tmp_path,
+        name="MTI1_20250205_1540_zone25_frame3",
+        images=[],
+        project="MTG_S10_L1",
+    )
+
+    seq = read_sequence(path)
+
+    assert seq.annotator == "L1", "the _L<k> suffix of project_name is the labeller id"
+
+
+def test_read_sequence_without_suffix_has_no_annotator(tmp_path: Path):
+    from deepcontrail.mtg.labels import read_sequence
+
+    path = _write_sequence(
+        tmp_path,
+        name="MTI1_20250205_1540_zone25_frame3",
+        images=[],
+        project="MTG_S1",
+    )
+
+    seq = read_sequence(path)
+
+    assert seq.annotator is None, "a project without a _L<k> suffix has no labeller"
+
+
 def test_read_sequence_drops_polygons_with_fewer_than_three_points(tmp_path: Path):
     from deepcontrail.mtg.labels import read_sequence
 

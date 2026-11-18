@@ -18,12 +18,14 @@ sequence of 48 frames, 10 minutes apart) and the matching per-frame `.npy` image
 
 ```bash
 deepcontrail-convert-mtg --labels <label_dir> --images <image_dir> --out <dataset_dir> \
-    [--size 1024] [--workers 8] [--seed 0] [--overwrite]
+    [--size 1024] [--workers 8] [--seed 0] [--overwrite] \
+    [--link-bands-from <dataset_dir>] [--split-from <dataset_dir>] [--no-instances]
 ```
 
 `--size` block-means larger images down to that side (the side must divide evenly). Frames are
 converted in parallel (`--workers`); a run resumes by skipping frames whose files already exist
-(`--overwrite` rewrites them).
+(`--overwrite` rewrites them). `--link-bands-from` and `--split-from` reuse an already converted
+dataset (see below).
 
 ## What is written
 
@@ -72,6 +74,40 @@ Frames 10 minutes apart are near-duplicates, so the split holds out **whole cale
 
 `val` scenes are written under `train/` on disk; use **`splits_val.txt`** as the data config's
 `val_ids` — a whole-day list, so a frame-level split cannot leak near-duplicates.
+
+## Several labellers
+
+The label folder can hold **one JSON per (sequence, labeller)**: the same `sequence` name once
+per person, each `project_name` ending in a different `_L<k>` (e.g. `MTG_S10_L1`,
+`MTG_S10_L3`) and the same frame list. Contrail ids are **not** comparable across people, so the
+labellers are combined at the **pixel** level — each frame gets, per labeller, the union of that
+labeller's polygons:
+
+- `annotator_masks/{split}/{id}.npy` — uint8 `(H, W, A)`, one binary union mask per labeller, in
+  the sorted labeller order (`L1`, `L2`, …).
+- `probability_masks/{split}/{id}.npy` — float32 `(H, W)`, the mean over labellers (their
+  agreement).
+- `semantic_masks/{split}/{id}.png` — the **majority**: a pixel is drawn when more than half
+  vote for it (`votes * 2 > A`), values `0 / 255`.
+
+`dataset_info.json` then declares `["semantic", "probability", "annotator"]` (no `instance`),
+so instance masks are **not** written — pass `--no-instances` (or they are implied); asking for
+instance masks with several labellers is an error. `scenes.json` records each labeller's kept
+contrails under `contrails_by_annotator` and the labeller order under `annotators`. All labellers
+of a sequence must share the same set of `_L<k>` suffixes and the same frame list, or the
+conversion fails. The split statistics average the per-frame contrail and low-confidence counts
+over labellers.
+
+## Reusing an already converted dataset
+
+Two options turn an existing dataset into the input of a new run instead of recomputing:
+
+- `--link-bands-from <dataset_dir>` hard-links `spectral_bands/<split>/<id>.npy` from that
+  dataset (rather than recomputing the bands from the images) and copies its `bands.json`. The
+  id must sit in the same `<split>` directory (`train`/`test`) as in the source.
+- `--split-from <dataset_dir>` reuses that dataset's `metadata/split.json` group assignment
+  instead of searching a new one (the report is still computed and written). Pair it with
+  `--link-bands-from` to reproduce a dataset's bands and split exactly.
 
 ## Not published on PyPI yet
 

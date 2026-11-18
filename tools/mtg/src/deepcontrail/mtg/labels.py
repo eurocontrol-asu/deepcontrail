@@ -19,6 +19,8 @@ CONFIDENCE_ORDER = ("Low", "Medium", "High")
 
 _MTG_NAME = re.compile(r"^MTG_(\d{12})_(\d{12})_zone(\d+)_frame(\d+)$")
 _MTI1_NAME = re.compile(r"^MTI1_(\d{8})_(\d{4})_zone(\d+)_frame(\d+)$")
+_ANNOTATOR_RE = re.compile(r"_(L\d+)$")
+"""The ``_L<k>`` labeller suffix of a ``project_name`` (e.g. ``"MTG_S10_L3"`` -> ``"L3"``)."""
 
 
 @dataclass(frozen=True)
@@ -55,18 +57,28 @@ class LabelledFrame:
     labelled_size
         The image width the labeller drew on (512 or 1024).
     contrails
-        Contrails on this frame, sorted by key.
+        Contrails on this frame, sorted by key. Used by the single-labeller converter.
+    annotators
+        In several-labeller mode, one tuple of contrails per labeller, in the sorted labeller
+        order (e.g. ``"L1"``, ``"L2"``, ``"L3"``); ``None`` in single-labeller mode, where
+        ``contrails`` holds the one labeller's contrails instead.
     """
 
     title: str
     npy: str | None
     labelled_size: int
     contrails: tuple[Contrail, ...]
+    annotators: tuple[tuple[Contrail, ...], ...] | None = None
 
 
 @dataclass(frozen=True)
 class Sequence:
-    """One labelled MTG/FCI sequence — a single Encord export."""
+    """One labelled MTG/FCI sequence — a single Encord export.
+
+    In several-labeller mode one logical sequence is labelled by several people, so it is
+    read from one export per labeller (its ``name`` repeats, ``project_name`` ends with a
+    different ``_L<k>`` each time); the converter merges those exports by ``name``.
+    """
 
     name: str
     project: str
@@ -75,6 +87,8 @@ class Sequence:
     start: datetime
     end: datetime
     frames: tuple[LabelledFrame, ...]
+    annotator: str | None = None
+    """The ``_L<k>`` labeller suffix of ``project`` (e.g. ``"L3"``), or ``None`` when absent."""
 
 
 def parse_sequence_name(name: str) -> tuple[datetime, datetime | None, int, int]:
@@ -168,7 +182,17 @@ def read_sequence(path: str | Path) -> Sequence:
         start=start,
         end=end,
         frames=frames,
+        annotator=annotator_of(str(data.get("project_name", ""))),
     )
+
+
+def annotator_of(project: str) -> str | None:
+    """Return the ``_L<k>`` labeller suffix of a ``project_name``, or ``None`` when absent.
+
+    ``"MTG_S10_L3"`` -> ``"L3"``; a project without the suffix (``"MTG_S1"``) has no labeller.
+    """
+    match = _ANNOTATOR_RE.search(project)
+    return match.group(1) if match else None
 
 
 def _without_extension(title: str) -> str:
