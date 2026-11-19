@@ -14,12 +14,16 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from deepcontrail.core.contract import read_band_manifest, read_dataset_info, scene_stems
-from deepcontrail.core.false_color import (
-    check_false_color,
-    false_color_from_spectral,
-    load_spectral_false_color,
+from deepcontrail.core.contract import (
+    NEIGHBOURS_PATH,
+    DatasetContractError,
+    context_ids,
+    read_band_manifest,
+    read_dataset_info,
+    read_neighbours,
+    scene_stems,
 )
+from deepcontrail.core.false_color import check_false_color, false_color_from_spectral
 from deepcontrail.core.readers import (
     binarize_mask,
     load_mask,
@@ -75,6 +79,20 @@ class SegmentationDataset:
         self.manifest = read_band_manifest(self._root)
         check_false_color(config.false_color, self.manifest)
         self._warn_on_pixel_shift_mismatch()
+
+        # Temporal context: stack the composites of the k frames before and after each scene.
+        # Read the neighbours once here; a context_frames > 0 config needs the file to exist.
+        self._context_k = config.context_frames
+        self._neighbours: dict[str, tuple[str | None, str | None]] = {}
+        if self._context_k > 0:
+            neighbours = read_neighbours(self._root)
+            if neighbours is None:
+                msg = (
+                    f"{self._root / NEIGHBOURS_PATH}: missing; context_frames={self._context_k} "
+                    "needs metadata/neighbours.json"
+                )
+                raise DatasetContractError(msg)
+            self._neighbours = neighbours
 
         img_subdir = "spectral_bands"
         mask_subdir = "probability_masks" if config.mask_type == "probability" else "semantic_masks"
@@ -214,25 +232,35 @@ class SegmentationDataset:
         arr = np.load(self._image_dir / f"{self.stems[0]}.npy", mmap_mode="r")
         return arr.shape[0]
 
+    def _composite_for(self, stem: str, img_dir: Path, r0: int, c0: int, size: int) -> np.ndarray:
+        """Build the 3-channel composite of one scene's ``[r0:r0+size, c0:c0+size]`` window.
+
+        The bands are memory-mapped and sliced to the window *before* the composite is built, so
+        a large frame (e.g. 1024 px) is never fully read into memory. On a crop the pixel shift's
+        edge padding falls at the crop edge rather than the scene edge. Neighbour frames are read
+        from the same split directory as the centre scene, so this takes only the image directory.
+        """
+        bands = np.load(img_dir / f"{stem}.npy", mmap_mode="r")[r0 : r0 + size, c0 : c0 + size]
+        bands = np.asarray(bands, dtype=np.float32)
+        image = false_color_from_spectral(bands, self.config.false_color, self.manifest)
+        if self.config.pixel_shift != 0.0:
+            image = shift_image(image, self.config.pixel_shift)
+        return image
+
+    def _mask_for(self, stem: str, mask_dir: Path, r0: int, c0: int, size: int) -> np.ndarray:
+        """Read one scene's ``[r0:r0+size, c0:c0+size]`` mask window.
+
+        Binary uint8 for ``semantic_masks``, float32 probabilities for ``probability_masks``.
+        """
+        if self.config.mask_type == "probability":
+            mask_full = np.load(mask_dir / f"{stem}.npy", mmap_mode="r")
+            return np.asarray(mask_full[r0 : r0 + size, c0 : c0 + size], dtype=np.float32)
+        return binarize_mask(load_mask(mask_dir / f"{stem}.png"))[r0 : r0 + size, c0 : c0 + size]
+
     def _load_window(
         self, stem: str, img_dir: Path, mask_dir: Path, r0: int, c0: int, size: int
     ) -> tuple[np.ndarray, np.ndarray]:
         """Read one square window of a scene and build its ``(image, mask)`` pair.
-
-        The bands are memory-mapped and sliced to the window *before* the composite is built, so
-        a large frame (e.g. 1024 px) is never fully read into memory. On a crop the pixel shift's
-        edge padding falls at the crop edge rather than the scene edge.
-
-        Parameters
-        ----------
-        stem
-            Scene id, without extension.
-        img_dir, mask_dir
-            Directories holding the scene's spectral bands and its mask.
-        r0, c0
-            Row and column of the window's top-left corner.
-        size
-            Side of the square window (``self.native_size``).
 
         Returns
         -------
@@ -240,18 +268,29 @@ class SegmentationDataset:
             ``(image, mask)``: a float32 ``(size, size, 3)`` composite in ``[0, 1]`` and its
             ``(size, size)`` mask (binary uint8, or float32 probabilities).
         """
-        bands = np.load(img_dir / f"{stem}.npy", mmap_mode="r")[r0 : r0 + size, c0 : c0 + size]
-        bands = np.asarray(bands, dtype=np.float32)
-        image = false_color_from_spectral(bands, self.config.false_color, self.manifest)
-        if self.config.pixel_shift != 0.0:
-            image = shift_image(image, self.config.pixel_shift)
-        if self.config.mask_type == "probability":
-            mask_full = np.load(mask_dir / f"{stem}.npy", mmap_mode="r")
-            mask = np.asarray(mask_full[r0 : r0 + size, c0 : c0 + size], dtype=np.float32)
-        else:
-            mask = binarize_mask(load_mask(mask_dir / f"{stem}.png"))[
-                r0 : r0 + size, c0 : c0 + size
-            ]
+        return (
+            self._composite_for(stem, img_dir, r0, c0, size),
+            self._mask_for(stem, mask_dir, r0, c0, size),
+        )
+
+    def _load_pair(
+        self, stem: str, img_dir: Path, mask_dir: Path, r0: int, c0: int, size: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return the ``(image, mask)`` of one item: a single composite, or a temporal stack.
+
+        With ``context_frames == 0`` the image is the centre scene's 3-channel composite. With
+        ``context_frames == k > 0`` it stacks the composites of the ``2k+1`` ids of
+        :func:`deepcontrail.core.contract.context_ids` (same window and pixel shift for every
+        frame) along the channel axis into ``(size, size, 3*(2k+1))``. The mask is always the
+        centre scene's, at the same window.
+        """
+        if self._context_k == 0:
+            return self._load_window(stem, img_dir, mask_dir, r0, c0, size)
+        ids = context_ids(stem, self._neighbours, self._context_k)
+        image = np.concatenate(
+            [self._composite_for(cid, img_dir, r0, c0, size) for cid in ids], axis=-1
+        )
+        mask = self._mask_for(stem, mask_dir, r0, c0, size)
         return image, mask
 
     def _needs_resize(self) -> bool:
@@ -330,7 +369,7 @@ class SegmentationDataset:
             stem_index, r0, c0 = self._tiles[index]
             stem = self.stems[stem_index]
             img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
-            image, mask = self._load_window(stem, img_dir, mask_dir, r0, c0, self.native_size)
+            image, mask = self._load_pair(stem, img_dir, mask_dir, r0, c0, self.native_size)
         elif self.config.crop_size is not None:
             # Training with crop_size: crops_per_scene independent random crops per scene.
             # Index maps to a scene by // crops_per_scene; the remainder is unused — every
@@ -340,20 +379,12 @@ class SegmentationDataset:
             img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
             self._reseed_augmentation_in_worker()
             r0, c0 = self._crop_rng.integers(0, self.scene_size - self.native_size + 1, size=2)
-            image, mask = self._load_window(stem, img_dir, mask_dir, r0, c0, self.native_size)
+            image, mask = self._load_pair(stem, img_dir, mask_dir, r0, c0, self.native_size)
         else:
+            # Whole scene (no crop_size): the window is the scene itself.
             stem = self.stems[index]
             img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
-            image = load_spectral_false_color(
-                img_dir / f"{stem}.npy", self.config.false_color, self.manifest
-            )
-            if self.config.pixel_shift != 0.0:
-                image = shift_image(image, self.config.pixel_shift)
-            if self.config.mask_type == "probability":
-                mask = np.load(mask_dir / f"{stem}.npy")
-            else:
-                mask = load_mask(mask_dir / f"{stem}.png")
-                mask = binarize_mask(mask)
+            image, mask = self._load_pair(stem, img_dir, mask_dir, 0, 0, self.scene_size)
 
         assert image.shape[:2] == mask.shape, (
             f"spatial mismatch at native resolution: image {image.shape[:2]} vs mask {mask.shape}"

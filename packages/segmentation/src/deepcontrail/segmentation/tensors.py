@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 if TYPE_CHECKING:
+    from torch import Tensor
+
     from deepcontrail.segmentation.config import NormalizeConfig
 
 
@@ -25,6 +27,27 @@ def _norm_tensors(mean: tuple[float, ...], std: tuple[float, ...]) -> tuple[Any,
     mean_t = torch.tensor(mean, dtype=torch.float32).view(3, 1, 1)
     std_t = torch.tensor(std, dtype=torch.float32).view(3, 1, 1)
     return mean_t, std_t
+
+
+def _normalized(image_t: Tensor, normalize: NormalizeConfig) -> Tensor:
+    """Normalize a CHW tensor, tiling the 3-value mean/std across channel groups of three.
+
+    A stacked temporal image has ``3*(2k+1)`` channels (see ``context_frames``), so the three
+    per-channel statistics are repeated once per composite. Any channel count that is neither 3
+    nor a multiple of 3 is rejected.
+    """
+    channels = image_t.shape[0]
+    mean, std = _norm_tensors(normalize.mean, normalize.std)
+    if channels == 3:
+        pass
+    elif channels % 3 == 0:
+        # mean/std are (3, 1, 1); tile them along the channel axis once per composite of three.
+        factor = channels // 3
+        mean, std = mean.repeat(factor, 1, 1), std.repeat(factor, 1, 1)
+    else:
+        msg = f"expected 3 or a multiple of 3 channels, got {channels}"
+        raise ValueError(msg)
+    return (image_t - mean) / std
 
 
 def to_tensors(
@@ -56,9 +79,7 @@ def to_tensors(
     else:
         image_f = image.astype(np.float32) / 255.0
     image_t = torch.from_numpy(image_f).permute(2, 0, 1)
-
-    mean, std = _norm_tensors(normalize.mean, normalize.std)
-    image_t = (image_t - mean) / std
+    image_t = _normalized(image_t, normalize)
 
     mask_t = torch.from_numpy(mask).long()
     return image_t, mask_t
@@ -96,9 +117,7 @@ def to_tensors_soft(
     else:
         image_f = image.astype(np.float32) / 255.0
     image_t = torch.from_numpy(image_f).permute(2, 0, 1)
-
-    mean, std = _norm_tensors(normalize.mean, normalize.std)
-    image_t = (image_t - mean) / std
+    image_t = _normalized(image_t, normalize)
 
     mask_t = torch.from_numpy(mask.astype(np.float32))
     return image_t, mask_t

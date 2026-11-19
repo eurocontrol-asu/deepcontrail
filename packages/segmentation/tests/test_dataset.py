@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+
 _SYNTH_SIZE = 16
 
 # Ash-style recipe over the synthetic datasets' band keys (see conftest.py).
@@ -1406,3 +1408,174 @@ def test_config_crops_per_scene_without_crop_size_raises():
 
     with pytest.raises(ValidationError, match="crops_per_scene needs crop_size"):
         SegmentationDataConfig(false_color=RECIPE, root="/tmp/fake", crops_per_scene=4)
+
+
+# ---------------------------------------------------------------------------
+# context_frames: stack the neighbouring frames of a scene in time
+# ---------------------------------------------------------------------------
+
+
+def _context_neighbours(stems: list[str]) -> dict[str, dict[str, str | None]]:
+    """prev/next links for one sequence of consecutive ``stems`` (null at each end)."""
+    return {
+        stem: {
+            "prev": stems[i - 1] if i > 0 else None,
+            "next": stems[i + 1] if i < len(stems) - 1 else None,
+        }
+        for i, stem in enumerate(stems)
+    }
+
+
+def _build_context_root(
+    tmp_path: Path,
+    *,
+    stems: list[str],
+    mask_on: set[str] | None = None,
+    split: str = "test",
+) -> Path:
+    """Write a one-sequence dataset with distinct per-scene bands and its ``neighbours.json``.
+
+    Each scene's bands are a constant level ``243 + 30 * i`` so its composite is distinct per
+    scene (the stacked channels are identifiable). ``mask_on`` names the scenes whose consensus
+    mask is drawn (value 255), so the centre scene's mask can be told apart from its neighbours'.
+    """
+    import json
+
+    from .conftest import write_mask, write_metadata
+
+    root = tmp_path
+    write_metadata(root)
+    (root / "spectral_bands" / split).mkdir(parents=True, exist_ok=True)
+    (root / "semantic_masks" / split).mkdir(parents=True, exist_ok=True)
+    for i, stem in enumerate(stems):
+        bands = np.full((_SYNTH_SIZE, _SYNTH_SIZE, 3), 243.0 + 30.0 * i, dtype=np.float32)
+        np.save(root / "spectral_bands" / split / f"{stem}.npy", bands)
+        on = 255 if stem in (mask_on or set()) else 0
+        write_mask(
+            root / "semantic_masks" / split / f"{stem}.png",
+            np.full((_SYNTH_SIZE, _SYNTH_SIZE), on, np.uint8),
+        )
+    (root / "metadata" / "neighbours.json").write_text(json.dumps(_context_neighbours(stems)))
+    return root
+
+
+def _context_config(root: Path, **overrides: object) -> SegmentationDataConfig:
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+
+    defaults: dict[str, object] = {
+        "false_color": RECIPE,
+        "root": str(root),
+        "split": "test",
+        "image_size": _SYNTH_SIZE,
+    }
+    defaults.update(overrides)  # an override (e.g. image_size) wins over the default
+    return SegmentationDataConfig(**defaults)
+
+
+def test_context_frames_stacks_three_consecutive_scenes_in_time_order(tmp_path: Path):
+    from deepcontrail.core.false_color import false_color_from_spectral
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems, mask_on={"seq_001"})
+    ds = SegmentationDataset(_context_config(root, context_frames=1))
+
+    def composite(stem: str) -> np.ndarray:
+        bands = np.load(root / "spectral_bands" / "test" / f"{stem}.npy")
+        return false_color_from_spectral(bands, ds.config.false_color, ds.manifest)
+
+    # the three per-scene composites are distinct, so the channel order below is meaningful
+    assert not np.array_equal(composite(stems[0]), composite(stems[1]))
+    assert not np.array_equal(composite(stems[1]), composite(stems[2]))
+
+    # without torch the item is a float32 HWC array, so the stacked channels index on the last axis
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        middle_image, middle_mask = ds[1]  # centre scene seq_001, a middle frame
+        assert middle_image.shape == (_SYNTH_SIZE, _SYNTH_SIZE, 9), (
+            "k=1 stacks 3*(2*1+1) = 9 channels"
+        )
+        np.testing.assert_array_equal(middle_image[..., 0:3], composite(stems[0]), err_msg="prev")
+        np.testing.assert_array_equal(middle_image[..., 3:6], composite(stems[1]), err_msg="centre")
+        np.testing.assert_array_equal(middle_image[..., 6:9], composite(stems[2]), err_msg="next")
+        assert middle_mask.mean() == 1.0, (
+            "the mask is the CENTRE scene's (seq_001 is drawn), not the neighbours' masks"
+        )
+
+        start_image, start_mask = ds[0]  # centre scene seq_000, a sequence start
+        assert start_image.shape == (_SYNTH_SIZE, _SYNTH_SIZE, 9)
+        np.testing.assert_array_equal(
+            start_image[..., 0:3],
+            start_image[..., 3:6],
+            "at a sequence start there is no prev, so the centre repeats itself",
+        )
+        np.testing.assert_array_equal(
+            start_image[..., 6:9], composite(stems[1]), err_msg="next frame"
+        )
+        assert start_mask.mean() == 0.0, "the start scene seq_000 has no drawn pixels"
+
+
+def test_context_frames_missing_neighbours_json_raises(tmp_path: Path):
+    from deepcontrail.core.contract import DatasetContractError
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems)
+    (root / "metadata" / "neighbours.json").unlink()
+
+    with pytest.raises(DatasetContractError, match="neighbours\\.json"):
+        SegmentationDataset(_context_config(root, context_frames=1))
+
+
+def test_context_frames_zero_keeps_the_three_channels(tmp_path: Path):
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems)
+    ds = SegmentationDataset(_context_config(root, context_frames=0))
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, _mask = ds[0]
+
+    assert image.shape == (_SYNTH_SIZE, _SYNTH_SIZE, 3), (
+        "context_frames=0 keeps the plain 3-channel image, today's behaviour"
+    )
+
+
+def test_context_frames_crops_use_the_same_window_for_all_frames(tmp_path: Path):
+    from deepcontrail.core.false_color import false_color_from_spectral
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    scene, crop = 16, 8
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems)
+    # Bands encode the (row, col) position plus a per-scene offset, so every window and every
+    # scene is unique: a check at one origin proves both the window and the frame identity.
+    rr, cc = np.mgrid[0:scene, 0:scene]
+    for i, stem in enumerate(stems):
+        ir_105 = (243 + 60 * cc / (scene - 1) + 10 * i).astype(np.float32)
+        ir_123 = (ir_105 - 4 + 6 * rr / (scene - 1)).astype(np.float32)
+        ir_87 = (ir_105 - 0.5).astype(np.float32)
+        np.save(
+            root / "spectral_bands" / "test" / f"{stem}.npy",
+            np.stack([ir_87, ir_105, ir_123], axis=-1),
+        )
+
+    ds = SegmentationDataset(
+        _context_config(root, context_frames=1, crop_size=crop, image_size=crop)
+    )
+
+    def composite(stem: str) -> np.ndarray:
+        bands = np.load(root / "spectral_bands" / "test" / f"{stem}.npy")
+        return false_color_from_spectral(bands, ds.config.false_color, ds.manifest)
+
+    # tiles: stem index 1 (seq_001, the middle frame) at origin (0, 0) is the 5th item. Without
+    # torch the item is a float32 HWC array, so the stacked channels index on the last axis.
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, _mask = ds[4]
+        assert image.shape == (crop, crop, 9), "each tiled item still stacks 9 channels"
+        for group, stem in enumerate((stems[0], stems[1], stems[2])):
+            np.testing.assert_array_equal(
+                image[..., group * 3 : group * 3 + 3],
+                composite(stem)[0:crop, 0:crop],
+                err_msg=f"frame {stem} uses the same (0,0) window as the centre scene",
+            )

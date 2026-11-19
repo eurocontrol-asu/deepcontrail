@@ -19,13 +19,15 @@ sequence of 48 frames, 10 minutes apart) and the matching per-frame `.npy` image
 ```bash
 deepcontrail-convert-mtg --labels <label_dir> --images <image_dir> --out <dataset_dir> \
     [--size 1024] [--workers 8] [--seed 0] [--overwrite] \
-    [--link-bands-from <dataset_dir>] [--split-from <dataset_dir>] [--no-instances]
+    [--link-bands-from <dataset_dir>] [--split-from <dataset_dir>] [--no-instances] \
+    [--neighbours-only]
 ```
 
 `--size` block-means larger images down to that side (the side must divide evenly). Frames are
 converted in parallel (`--workers`); a run resumes by skipping frames whose files already exist
 (`--overwrite` rewrites them). `--link-bands-from` and `--split-from` reuse an already converted
-dataset (see below).
+dataset (see below). `--neighbours-only` skips conversion and only (re)builds
+`metadata/neighbours.json` from `<dataset_dir>`'s `scenes.json` (see below).
 
 ## What is written
 
@@ -37,6 +39,7 @@ dataset (see below).
 ├── instance_masks/{train,test}/{id}.npy   int8 (N, H, W, 1), 1 inside contrail n, 0 outside
 ├── metadata/dataset_info.json             source, record counts, labels, pixel shift
 ├── metadata/scenes.json                   per-scene provenance and kept contrails
+├── metadata/neighbours.json               previous/next frame of each scene (temporal)
 ├── metadata/split.json                    the seeded split, its groups and a report
 ├── splits_train.txt / splits_test.txt     the ids written to each on-disk split
 └── splits_val.txt                         the val ids (they live under train/ on disk)
@@ -58,6 +61,13 @@ false_color:
 
 `metadata/dataset_info.json` declares both labels (`semantic`, `instance`),
 `recommended_pixel_shift: 0.0` and `temporal: false`.
+
+`metadata/neighbours.json` links each scene to the previous and next frame of its sequence, in
+time order (frames without an image are skipped). A sequence never spans two splits, so the two
+neighbours of a scene are always in the same on-disk split directory. A downstream data config
+can then set `context_frames: k` to stack the `2k+1` frames around each scene into
+`3*(2k+1)` channels; a scene at a sequence end repeats its nearest frame. Rebuild the file for an
+already converted root with `deepcontrail-convert-mtg --out <dataset_dir> --neighbours-only`.
 
 ## The split
 

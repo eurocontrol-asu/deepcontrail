@@ -12,6 +12,7 @@ out whole calendar days as the test set (near-duplicate sequences stay together,
         instance_masks/{train,test}/{id}.npy    int8 (N, H, W, 1), 1 inside contrail n
         metadata/dataset_info.json              source, record counts, labels, pixel shift
         metadata/scenes.json                    per-scene provenance and kept contrails
+        metadata/neighbours.json                previous/next frame of each scene (temporal)
         metadata/split.json                     the seeded split, its groups and a report
         splits_train.txt / splits_test.txt      the ids written to each on-disk split
         splits_val.txt                          the val ids (they live under train/ on disk)
@@ -59,7 +60,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from deepcontrail.core.contract import DatasetInfo
+from deepcontrail.core.contract import NEIGHBOURS_PATH, DatasetInfo
 from deepcontrail.mtg.bands import band_manifest, bands_from_composite
 from deepcontrail.mtg.labels import (
     Contrail,
@@ -699,6 +700,9 @@ def convert(
         bands_json_source=bands_json_source,
     )
 
+    # Temporal neighbours of every scene, from scenes.json (consecutive frames per sequence).
+    write_neighbours(output_dir)
+
     total = len(results)
     summary: dict[str, Any] = {
         "frames_written": frames_written,
@@ -788,6 +792,66 @@ def _write_split_list(path: Path, ids: list[str]) -> None:
     path.write_text("".join(f"{id_}\n" for id_ in ids), encoding="utf-8")
 
 
+def write_neighbours(output_dir: Path) -> int:
+    """(Re)build ``<output>/metadata/neighbours.json`` from the root's ``metadata/scenes.json``.
+
+    Links consecutive frames of the same sequence in time order (by each scene's ``time``), and
+    only within a sequence — a sequence never spans two splits, so neighbours always sit in the
+    same on-disk split directory. Frames without an image are absent from ``scenes.json`` and are
+    skipped. Every scene with a neighbour gets an entry ``{"prev": ..., "next": ...}``; a scene
+    whose sequence has no other frame gets none (readers treat scenes without an entry as having
+    no neighbours).
+
+    Parameters
+    ----------
+    output_dir
+        An existing converted dataset root (needs ``metadata/scenes.json``).
+
+    Returns
+    -------
+    int
+        The number of scenes written to the file (those with at least one neighbour).
+
+    Raises
+    ------
+    ValueError
+        If ``metadata/scenes.json`` is missing, is not valid JSON, or is not a mapping.
+    """
+    scenes_path = output_dir / "metadata" / "scenes.json"
+    try:
+        payload = json.loads(scenes_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        msg = f"{scenes_path} is missing: write_neighbours needs an existing converted root"
+        raise ValueError(msg) from None
+    except json.JSONDecodeError as exc:
+        msg = f"{scenes_path} is not valid JSON: {exc}"
+        raise ValueError(msg) from exc
+    if not isinstance(payload, dict):
+        msg = f"{scenes_path}: expected a mapping of scene id to its metadata"
+        raise ValueError(msg)
+
+    by_sequence: dict[str, list[str]] = defaultdict(list)
+    for scene_id, scene in payload.items():
+        by_sequence[scene["sequence"]].append(scene_id)
+
+    neighbours: dict[str, dict[str, str | None]] = {}
+    for ids in by_sequence.values():
+        ordered = sorted(ids, key=lambda scene_id: payload[scene_id]["time"])
+        for position, scene_id in enumerate(ordered):
+            prev_id = ordered[position - 1] if position > 0 else None
+            next_id = ordered[position + 1] if position < len(ordered) - 1 else None
+            if prev_id is None and next_id is None:
+                continue  # a sequence of one frame: no neighbours, so no entry
+            neighbours[scene_id] = {"prev": prev_id, "next": next_id}
+
+    path = output_dir / NEIGHBOURS_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _tmp_path(path)
+    tmp.write_text(json.dumps(neighbours, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+    return len(neighbours)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -799,10 +863,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         description=(__doc__ or "").partition("\n")[0],
     )
     parser.add_argument(
-        "--labels", type=Path, required=True, help="Directory of label *.json exports."
+        "--labels", type=Path, default=None, help="Directory of label *.json exports."
     )
     parser.add_argument(
-        "--images", type=Path, required=True, help="Directory of per-frame .npy images."
+        "--images", type=Path, default=None, help="Directory of per-frame .npy images."
     )
     parser.add_argument("--out", type=Path, required=True, help="Dataset root to write.")
     parser.add_argument(
@@ -835,7 +899,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=True,
         help="Do not write instance_masks (implied with several labellers).",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--neighbours-only",
+        dest="neighbours_only",
+        action="store_true",
+        help="Only (re)build metadata/neighbours.json from --out's metadata/scenes.json.",
+    )
+    args = parser.parse_args(argv)
+    if not args.neighbours_only and (args.labels is None or args.images is None):
+        parser.error("--labels and --images are required, or use --neighbours-only")
+    return args
 
 
 def _print_summary(summary: dict[str, Any]) -> None:
@@ -850,8 +923,15 @@ def _print_summary(summary: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Convert the exports and images to the DeepContrail layout; return 0 on success."""
+    """Convert the exports and images to the DeepContrail layout; return 0 on success.
+
+    With ``--neighbours-only`` it only rebuilds ``metadata/neighbours.json`` from ``--out``.
+    """
     args = _parse_args(argv)
+    if args.neighbours_only:
+        n = write_neighbours(args.out)
+        print(f"wrote neighbours for {n} scenes in {args.out}")
+        return 0
     summary = convert(
         args.labels,
         args.images,

@@ -331,3 +331,121 @@ def test_band_manifest_rejects_unknown_nodata_value():
 
     with pytest.raises(ValueError, match="nodata"):
         BandManifest.model_validate(_manifest(nodata="zero"))
+
+
+# --- neighbours.json (temporal context) ----------------------------------------------
+
+
+def _neighbours(root: Path, payload: dict[str, Any]) -> None:
+    """Write ``metadata/neighbours.json`` with ``payload``."""
+    _write(root, "metadata/neighbours.json", payload)
+
+
+def test_read_neighbours_absent_is_none(tmp_path: Path):
+    from deepcontrail.core.contract import read_neighbours
+
+    assert read_neighbours(tmp_path) is None, "no neighbours.json means no temporal context"
+
+
+def test_read_neighbours_reads_prev_and_next(tmp_path: Path):
+    from deepcontrail.core.contract import read_neighbours
+
+    _neighbours(tmp_path, {"s1": {"prev": None, "next": "s2"}, "s2": {"prev": "s1", "next": None}})
+
+    neighbours = read_neighbours(tmp_path)
+
+    assert neighbours == {"s1": (None, "s2"), "s2": ("s1", None)}, (
+        "each scene maps to its (prev, next) ids, null at a sequence end"
+    )
+
+
+def test_read_neighbours_rejects_a_non_mapping(tmp_path: Path):
+    from deepcontrail.core.contract import DatasetContractError, read_neighbours
+
+    _neighbours(tmp_path, ["s1"])
+
+    with pytest.raises(DatasetContractError, match="mapping"):
+        read_neighbours(tmp_path)
+
+
+def test_read_neighbours_rejects_an_entry_without_both_keys(tmp_path: Path):
+    from deepcontrail.core.contract import DatasetContractError, read_neighbours
+
+    _neighbours(tmp_path, {"s1": {"prev": None}})
+
+    with pytest.raises(DatasetContractError, match="both 'prev' and 'next'"):
+        read_neighbours(tmp_path)
+
+
+def test_read_neighbours_rejects_a_neighbour_that_is_not_a_string_or_null(tmp_path: Path):
+    from deepcontrail.core.contract import DatasetContractError, read_neighbours
+
+    _neighbours(tmp_path, {"s1": {"prev": 1, "next": None}})
+
+    with pytest.raises(DatasetContractError, match="string or null"):
+        read_neighbours(tmp_path)
+
+
+def test_read_neighbours_of_invalid_json_names_the_path(tmp_path: Path):
+    from deepcontrail.core.contract import DatasetContractError, read_neighbours
+
+    (tmp_path / "metadata").mkdir()
+    (tmp_path / "metadata" / "neighbours.json").write_text("{not json")
+
+    with pytest.raises(DatasetContractError, match="neighbours\\.json"):
+        read_neighbours(tmp_path)
+
+
+# --- context_ids ----------------------------------------------------------------------
+
+
+def _chain(a: str | None, b: str | None) -> tuple[str | None, str | None]:
+    return (a, b)
+
+
+def test_context_ids_middle_follows_the_chain():
+    from deepcontrail.core.contract import context_ids
+
+    neighbours = {"s0": _chain(None, "s1"), "s1": _chain("s0", "s2"), "s2": _chain("s1", None)}
+
+    assert context_ids("s1", neighbours, 1) == ["s0", "s1", "s2"], (
+        "k=1 around a middle frame is [prev, centre, next]"
+    )
+
+
+def test_context_ids_at_a_sequence_start_repeats_the_centre_as_prev():
+    from deepcontrail.core.contract import context_ids
+
+    neighbours = {"s0": _chain(None, "s1"), "s1": _chain("s0", "s2"), "s2": _chain("s1", None)}
+
+    assert context_ids("s0", neighbours, 1) == ["s0", "s0", "s1"], (
+        "at a start there is no prev, so the centre repeats itself"
+    )
+
+
+def test_context_ids_at_a_sequence_end_repeats_the_centre_as_next():
+    from deepcontrail.core.contract import context_ids
+
+    neighbours = {"s0": _chain(None, "s1"), "s1": _chain("s0", "s2"), "s2": _chain("s1", None)}
+
+    assert context_ids("s2", neighbours, 1) == ["s1", "s2", "s2"], (
+        "at an end there is no next, so the centre repeats itself"
+    )
+
+
+def test_context_ids_k2_repeats_the_nearest_frame_at_a_start():
+    from deepcontrail.core.contract import context_ids
+
+    neighbours = {"s0": _chain(None, "s1"), "s1": _chain("s0", "s2"), "s2": _chain("s1", None)}
+
+    assert context_ids("s0", neighbours, 2) == ["s0", "s0", "s0", "s1", "s2"], (
+        "k=2 at a start runs out of prev frames twice, so the centre repeats twice"
+    )
+
+
+def test_context_ids_of_a_scene_without_an_entry_repeats_itself():
+    from deepcontrail.core.contract import context_ids
+
+    assert context_ids("loner", {"loner": _chain(None, None)}, 1) == ["loner", "loner", "loner"], (
+        "a scene with no links has no neighbours and repeats itself"
+    )

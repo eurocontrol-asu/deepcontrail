@@ -83,6 +83,11 @@ class SegmentationDataConfig(DatasetConfig):
         random origin, so ``crops_per_scene = 4`` makes an epoch see four times as many steps
         over the same data. Default 1 is today's behaviour. Ignored for validation and test,
         which read tiles. Requires ``crop_size``: a value > 1 without it is an error.
+    context_frames
+        ``k`` frames before and after each scene are stacked with it, giving
+        ``3*(2k+1)`` channels in time order; needs ``metadata/neighbours.json`` (see
+        :func:`deepcontrail.core.contract.read_neighbours`), and missing neighbours repeat the
+        nearest frame. Default 0 keeps the plain 3-channel image.
     batch_size
         Batch size for the DataLoader (not used by the Dataset itself).
     num_workers
@@ -101,6 +106,7 @@ class SegmentationDataConfig(DatasetConfig):
     image_size: Annotated[int, Field(gt=0)] = 256
     crop_size: Annotated[int, Field(gt=0)] | None = None
     crops_per_scene: Annotated[int, Field(ge=1)] = 1
+    context_frames: Annotated[int, Field(ge=0)] = 0
     batch_size: Annotated[int, Field(gt=0)] = 16
     num_workers: Annotated[int, Field(ge=0)] = 4
     augmentation: AugmentationConfig | None = None

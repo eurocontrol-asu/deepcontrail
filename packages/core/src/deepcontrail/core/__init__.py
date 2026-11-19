@@ -8,8 +8,10 @@ from deepcontrail.core.contract import (
     BandManifest,
     DatasetContractError,
     DatasetInfo,
+    context_ids,
     read_band_manifest,
     read_dataset_info,
+    read_neighbours,
     scene_stems,
 )
 from deepcontrail.core.false_color import (
@@ -43,6 +45,7 @@ __all__ = [
     "__version__",
     "check_false_color",
     "context_frames",
+    "context_ids",
     "dice_coefficient",
     "false_color_from_spectral",
     "iou_score",
@@ -50,6 +53,7 @@ __all__ = [
     "partition_stems",
     "read_band_manifest",
     "read_dataset_info",
+    "read_neighbours",
     "read_stem_list",
     "scene_stems",
     "split_fingerprint",

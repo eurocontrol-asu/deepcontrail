@@ -102,3 +102,45 @@ def test_to_tensors_soft_accepts_float32_image():
     assert img_t.shape == (3, 8, 8)
     assert img_t.dtype == torch.float32
     assert img_t.abs().max() > 0.1, "float32 input must not be divided by 255"
+
+
+# ---------------------------------------------------------------------------
+# stacked temporal images: 3*(2k+1) channels
+# ---------------------------------------------------------------------------
+
+
+def test_to_tensors_tiles_mean_std_for_nine_channels():
+    torch = pytest.importorskip("torch")
+    from deepcontrail.segmentation.config import NormalizeConfig
+    from deepcontrail.segmentation.tensors import to_tensors
+
+    cfg = NormalizeConfig()
+    # Nine channels, each a distinct constant, so per-channel normalization is identifiable.
+    per_channel = np.arange(9, dtype=np.float32).reshape(1, 1, 9)
+    image = np.broadcast_to(per_channel, (8, 8, 9)).astype(np.uint8)
+    mask = np.zeros((8, 8), np.uint8)
+
+    img_t, _ = to_tensors(image, mask, cfg)
+
+    assert img_t.shape == (9, 8, 8), "the nine stacked channels are kept, not collapsed"
+    mean = np.array(cfg.mean + cfg.mean + cfg.mean)
+    std = np.array(cfg.std + cfg.std + cfg.std)
+    raw = np.broadcast_to(per_channel / 255.0, (8, 8, 9))
+    expected = torch.tensor((raw - mean) / std, dtype=torch.float32).permute(2, 0, 1)
+    # expected is built with the mean/std tiled once per composite of three channels, so matching
+    # it proves the tiling: channels (0,1,2), (3,4,5) and (6,7,8) each use the base (mean, std).
+    assert torch.allclose(img_t, expected), "mean/std are tiled once per composite of three"
+
+
+def test_to_tensors_raises_for_a_non_multiple_of_three_channels():
+    pytest.importorskip("torch")
+    from deepcontrail.segmentation.config import NormalizeConfig
+    from deepcontrail.segmentation.tensors import to_tensors, to_tensors_soft
+
+    image = np.zeros((8, 8, 5), np.uint8)
+    mask = np.zeros((8, 8), np.uint8)
+
+    with pytest.raises(ValueError, match="multiple of 3"):
+        to_tensors(image, mask, NormalizeConfig())
+    with pytest.raises(ValueError, match="multiple of 3"):
+        to_tensors_soft(image, np.zeros((8, 8), np.float32), NormalizeConfig())

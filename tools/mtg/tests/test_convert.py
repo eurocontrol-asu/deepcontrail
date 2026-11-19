@@ -541,3 +541,76 @@ def test_convert_link_bands_from_hard_links_the_band_files(
             linked = (dst / "spectral_bands" / split / f"{stem}.npy").stat()
             assert linked.st_ino == source.st_ino, f"{split}/{stem} is hard-linked to the source"
             assert linked.st_nlink > 1, f"{split}/{stem} has more than one link"
+
+
+# ---------------------------------------------------------------------------
+# neighbours.json (temporal context)
+# ---------------------------------------------------------------------------
+
+
+def _expected_neighbours(converted: Path) -> dict:
+    """Recompute, from scenes.json, the consecutive-frame links convert() should have written."""
+    scenes = json.loads((converted / "metadata" / "scenes.json").read_text())
+    by_sequence: dict[str, list[str]] = {}
+    for id_, scene in scenes.items():
+        by_sequence.setdefault(scene["sequence"], []).append(id_)
+    expected: dict[str, dict] = {}
+    for ids in by_sequence.values():
+        ordered = sorted(ids, key=lambda id_: scenes[id_]["time"])
+        for position, id_ in enumerate(ordered):
+            prev = ordered[position - 1] if position > 0 else None
+            nxt = ordered[position + 1] if position < len(ordered) - 1 else None
+            if prev is not None or nxt is not None:
+                expected[id_] = {"prev": prev, "next": nxt}
+    return expected
+
+
+def test_convert_writes_neighbours_consistent_with_the_frame_order(converted: Path):
+    neighbours = json.loads((converted / "metadata" / "neighbours.json").read_text())
+
+    assert neighbours == _expected_neighbours(converted), (
+        "neighbours.json links consecutive frames of each sequence, in time order"
+    )
+    # a frame without an image was never written, so it is skipped, not linked across
+    assert "MTG_ash_202506021200_zone30_frame4_f1" not in neighbours
+    # prev/next only ever point within the same sequence (and so the same split directory)
+    scenes = json.loads((converted / "metadata" / "scenes.json").read_text())
+    for id_, links in neighbours.items():
+        for key in ("prev", "next"):
+            other = links[key]
+            if other is not None:
+                assert scenes[other]["sequence"] == scenes[id_]["sequence"], (
+                    f"{id_}'s {key} must be in the same sequence"
+                )
+
+
+def test_write_neighbours_on_an_existing_root_reproduces_it(converted: Path):
+    from deepcontrail.mtg.convert import write_neighbours
+
+    before = (converted / "metadata" / "neighbours.json").read_text()
+
+    n = write_neighbours(converted)
+
+    after = (converted / "metadata" / "neighbours.json").read_text()
+    assert after == before, "write_neighbours rebuilds the very file convert() wrote"
+    assert n == len(json.loads(after)), "the returned count is the number of scenes written"
+
+
+def test_convert_neighbours_only_rebuilds_the_file_without_converting(
+    dataset: tuple[Path, Path], tmp_path: Path
+):
+    from deepcontrail.mtg.convert import main
+
+    converted = tmp_path / "converted"
+    convert(dataset[0], dataset[1], converted, size=_SIZE, workers=1, seed=0)
+    before = (converted / "metadata" / "neighbours.json").read_text()
+
+    # corrupt the file, then rebuild it with --neighbours-only (no labels/images needed)
+    (converted / "metadata" / "neighbours.json").write_text("{}")
+    assert main(["--out", str(converted), "--neighbours-only"]) == 0, (
+        "--neighbours-only runs without --labels/--images"
+    )
+
+    assert (converted / "metadata" / "neighbours.json").read_text() == before, (
+        "--neighbours-only rebuilds the file from scenes.json"
+    )

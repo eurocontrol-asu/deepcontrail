@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 FORMAT_VERSION = 1
 BAND_MANIFEST_PATH = "spectral_bands/bands.json"
 DATASET_INFO_PATH = "metadata/dataset_info.json"
+NEIGHBOURS_PATH = "metadata/neighbours.json"
 
 _Schema = TypeVar("_Schema", bound=BaseModel)
 
@@ -255,3 +256,93 @@ def read_dataset_info(root: str | Path) -> DatasetInfo:
         If the file is missing, is not JSON, or does not follow format v1.
     """
     return _read(root, DATASET_INFO_PATH, DatasetInfo)
+
+
+def read_neighbours(root: str | Path) -> dict[str, tuple[str | None, str | None]] | None:
+    """Read ``<root>/metadata/neighbours.json``: the previous/next frame of each scene.
+
+    Returns ``None`` when the file is absent — a dataset without temporal context, where every
+    scene stands alone. When present, each entry maps a scene id to ``(prev, next)``, the ids of
+    the frame one step before and after it in the same sequence (both ``None`` at a sequence end).
+    Scenes without an entry have no neighbours.
+
+    Parameters
+    ----------
+    root
+        A dataset root in the DeepContrail format.
+
+    Returns
+    -------
+    dict[str, tuple[str | None, str | None]] | None
+        ``{scene: (prev, next)}``, or ``None`` when the file is absent.
+
+    Raises
+    ------
+    DatasetContractError
+        If the file exists but is not valid JSON, is not a mapping, has an entry missing the
+        ``prev`` or ``next`` key, or has a ``prev``/``next`` value that is not a string or null.
+    """
+    path = Path(root) / NEIGHBOURS_PATH
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except UnicodeDecodeError as exc:
+        msg = f"{path}: must be UTF-8 encoded ({exc})"
+        raise DatasetContractError(msg) from exc
+    except json.JSONDecodeError as exc:
+        msg = f"{path}: not valid JSON ({exc})"
+        raise DatasetContractError(msg) from exc
+    if not isinstance(payload, dict):
+        msg = f"{path}: must be a mapping of scene id to {{'prev', 'next'}}"
+        raise DatasetContractError(msg)
+    neighbours: dict[str, tuple[str | None, str | None]] = {}
+    for scene, links in payload.items():
+        if not isinstance(links, dict) or "prev" not in links or "next" not in links:
+            msg = f"{path}: entry for {scene!r} must have both 'prev' and 'next' keys"
+            raise DatasetContractError(msg)
+        prev, nxt = links["prev"], links["next"]
+        for value in (prev, nxt):
+            if value is not None and not isinstance(value, str):
+                msg = f"{path}: a neighbour of {scene!r} must be a string or null, got {value!r}"
+                raise DatasetContractError(msg)
+        neighbours[scene] = (prev, nxt)  # type: ignore[assignment]
+    return neighbours
+
+
+def context_ids(
+    stem: str, neighbours: dict[str, tuple[str | None, str | None]], k: int
+) -> list[str]:
+    """Return the ``2k+1`` scene ids around ``stem`` in time order ``[t-k, ..., t, ..., t+k]``.
+
+    The chain follows the ``prev``/``next`` links of ``neighbours`` (as written by the MTG
+    converter or read by :func:`read_neighbours`). Where the chain ends — at a sequence start or
+    end — the nearest available id is repeated, so the window always has ``2k+1`` ids and the
+    centre is always ``stem`` itself. A scene with no entry (and thus no links) repeats itself.
+
+    Parameters
+    ----------
+    stem
+        The centre scene id (``t``).
+    neighbours
+        Scene id -> ``(prev, next)`` links (see :func:`read_neighbours`).
+    k
+        How many frames before and after the centre to include.
+
+    Returns
+    -------
+    list[str]
+        ``2k+1`` ids in time order, e.g. ``[t, t, t+1]`` for a sequence start with ``k=1``.
+    """
+    ids = [stem]
+    successor = stem
+    for _ in range(k):
+        nxt = neighbours.get(successor, (None, None))[1]
+        successor = nxt if nxt is not None else successor
+        ids.append(successor)
+    predecessor = stem
+    for _ in range(k):
+        prev = neighbours.get(predecessor, (None, None))[0]
+        predecessor = prev if prev is not None else predecessor
+        ids.insert(0, predecessor)
+    return ids

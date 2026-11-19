@@ -18,6 +18,7 @@ the [converter](https://github.com/eurocontrol-asu/deepcontrail/tree/main/tools/
 ```
 <root>/
 ├── metadata/dataset_info.json               required: source, record counts, labels, pixel shift
+├── metadata/neighbours.json                 optional: previous/next frame of each scene (temporal)
 ├── spectral_bands/bands.json                required: what each channel of the arrays holds
 ├── spectral_bands/{train,test}/<id>.npy     required: (H, W, C) float32, e.g. brightness temperatures (K)
 ├── semantic_masks/{train,test}/<id>.png     binary consensus mask: 0 background, 255 contrail (1 accepted)
@@ -40,6 +41,22 @@ the [converter](https://github.com/eurocontrol-asu/deepcontrail/tree/main/tools/
   `<id>_a<k>.npy` (k steps before / after scene `<id>`, which must exist) are context frames
   and need no labels. In any other dataset every file is a scene, so an id such as `tile_a1`
   is an ordinary scene.
+- **Temporal neighbours** are an alternative, link-based way to expose context, for datasets
+  whose scenes *are* the frames of a sequence (e.g. MTG sequences, 10 minutes apart). The
+  optional `metadata/neighbours.json` maps each scene to its previous and next frame in time:
+
+  ```json
+  {
+    "MTG_..._f0": {"prev": null, "next": "MTG_..._f1"},
+    "MTG_..._f1": {"prev": "MTG_..._f0", "next": "MTG_..._f2"}
+  }
+  ```
+
+  Links run only between scenes of the same sequence (which never spans two splits). A scene
+  without an entry has no neighbours; `read_neighbours(root)` returns `None` when the file is
+  absent. With `context_frames: k` a data config stacks the composites of the `2k+1` frames a
+  scene links to (`[t-k, …, t, …, t+k]`, the nearest frame repeated at a sequence end) into
+  `3*(2k+1)` channels; `context_ids(stem, neighbours, k)` returns that ordered list.
 - **Labels** are only required for the task at hand: `semantic` for segmentation, `instance`
   for instance segmentation. Every label kind declared in `dataset_info.json` must cover every
   labelled scene, at the size of its spectral array.
