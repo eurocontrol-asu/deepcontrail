@@ -250,6 +250,153 @@ def test_prepare_training_with_init_from_starts_from_those_weights(
         assert torch.equal(after[key], tensor), f"the module must start from the bundle's {key}"
 
 
+def test_load_initial_weights_widens_input_convs_on_the_centre_frame(tmp_path: Path) -> None:
+    import torch
+
+    from deepcontrail.segmentation.models import build_model
+    from deepcontrail.segmentation.training.run import load_initial_weights
+
+    source_cfg = _tiny_model_cfg().model_copy(update={"in_channels": 3})
+    target_cfg = _tiny_model_cfg().model_copy(update={"in_channels": 9})
+    directory, source = _save_bundle(tmp_path, source_cfg)
+    target = build_model(target_cfg)
+
+    load_initial_weights(target, str(directory))
+
+    after = target.state_dict()
+    for key, src in source.state_dict().items():
+        tgt = after[key]
+        if src.shape == tgt.shape:
+            assert torch.equal(tgt, src), f"non-temporal weight {key} must come from the bundle"
+        else:
+            # A widened input conv: the source on the centre block, exactly zero elsewhere.
+            m = tgt.shape[1] // src.shape[1]
+            half = m // 2
+            source_in = src.shape[1]
+            assert torch.equal(tgt[:, half * source_in : (half + 1) * source_in], src), (
+                f"the centre block of {key} must be the source weights"
+            )
+            left = tgt[:, : half * source_in]
+            right = tgt[:, (half + 1) * source_in :]
+            assert torch.count_nonzero(torch.cat([left, right], dim=1)) == 0, (
+                f"the neighbour frames of {key} must start at zero"
+            )
+
+
+def test_widened_model_gives_the_source_output_on_the_centre_frame(tmp_path: Path) -> None:
+    import numpy as np
+    import torch
+
+    from deepcontrail.segmentation.models import build_model
+    from deepcontrail.segmentation.training.run import load_initial_weights
+
+    source_cfg = _tiny_model_cfg().model_copy(update={"in_channels": 3})
+    target_cfg = _tiny_model_cfg().model_copy(update={"in_channels": 9})
+    directory, source = _save_bundle(tmp_path, source_cfg)
+    target = build_model(target_cfg)
+
+    load_initial_weights(target, str(directory))
+
+    # The centre frame is the same image whatever the two neighbour frames are: with the neighbour
+    # blocks zero-initialised, the stem conv — and so the whole network — sees only the centre.
+    centre = np.random.RandomState(0).uniform(0, 1, (16, 16, 3)).astype(np.float32)
+    stacked = np.concatenate(
+        [
+            np.random.RandomState(1).uniform(0, 1, (16, 16, 3)).astype(np.float32),
+            centre,
+            np.random.RandomState(2).uniform(0, 1, (16, 16, 3)).astype(np.float32),
+        ],
+        axis=-1,
+    )
+    source.eval()
+    target.eval()
+    centre_t = torch.from_numpy(centre).permute(2, 0, 1)[None]
+    stacked_t = torch.from_numpy(stacked).permute(2, 0, 1)[None]
+    with torch.no_grad():
+        from_source = torch.sigmoid(source(centre_t))
+        from_target = torch.sigmoid(target(stacked_t))
+    np.testing.assert_allclose(
+        from_target.numpy(),
+        from_source.numpy(),
+        atol=1e-5,
+        err_msg=(
+            "a 9-channel model initialised on the centre frame must match the 3-channel source on it"
+        ),
+    )
+
+
+def test_load_initial_weights_other_mismatch_still_raises(tmp_path: Path) -> None:
+    """An even channel multiple is not a temporal widening, so strict loading still rejects it."""
+    from deepcontrail.segmentation.models import build_model
+    from deepcontrail.segmentation.training.run import load_initial_weights
+
+    source_cfg = _tiny_model_cfg().model_copy(update={"in_channels": 3})
+    directory, _source = _save_bundle(tmp_path, source_cfg)
+    target = build_model(_tiny_model_cfg().model_copy(update={"in_channels": 6}))
+
+    with pytest.raises(RuntimeError, match=r"size mismatch|Unexpected key|Missing key"):
+        load_initial_weights(target, str(directory))
+
+
+def test_prepare_training_rejects_in_channels_not_matching_context(
+    tmp_path: Path, synthetic_root: Path
+) -> None:
+    """context_frames=1 needs in_channels=9; a 3-channel model is rejected before anything builds."""
+    import yaml
+
+    from deepcontrail.segmentation.training import prepare_training
+
+    config = {
+        "data": {
+            "root": str(synthetic_root),
+            "false_color": RECIPE,
+            "image_size": 32,
+            "context_frames": 1,
+        },
+        "model": {
+            "architecture": "Unet",
+            "encoder_name": "resnet18",
+            "encoder_weights": None,
+            "in_channels": 3,
+            "classes": 1,
+        },
+        "loss": {"name": "bce"},
+        "training": {"epochs": 1, "precision": "32-true"},
+    }
+    path = tmp_path / "experiment.yaml"
+    path.write_text(yaml.safe_dump(config))
+
+    with pytest.raises(ValueError, match="9"):
+        prepare_training(path, output_dir=tmp_path / "runs", accelerator="cpu")
+
+
+def test_prepare_training_rejects_a_non_three_channel_model_without_context(
+    tmp_path: Path, synthetic_root: Path
+) -> None:
+    """context_frames=0 needs in_channels=3; a 6-channel model is rejected with both numbers."""
+    import yaml
+
+    from deepcontrail.segmentation.training import prepare_training
+
+    config = {
+        "data": {"root": str(synthetic_root), "false_color": RECIPE, "image_size": 32},
+        "model": {
+            "architecture": "Unet",
+            "encoder_name": "resnet18",
+            "encoder_weights": None,
+            "in_channels": 6,
+            "classes": 1,
+        },
+        "loss": {"name": "bce"},
+        "training": {"epochs": 1, "precision": "32-true"},
+    }
+    path = tmp_path / "experiment.yaml"
+    path.write_text(yaml.safe_dump(config))
+
+    with pytest.raises(ValueError, match="3"):
+        prepare_training(path, output_dir=tmp_path / "runs", accelerator="cpu")
+
+
 # --- loggers ---------------------------------------------------------------------------
 
 

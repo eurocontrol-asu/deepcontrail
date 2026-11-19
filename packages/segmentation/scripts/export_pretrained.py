@@ -248,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         normalize=data_cfg.normalize,
         image_size=data_cfg.image_size,
         native_size=int(checkpoint["hyper_parameters"]["native_size"]),
+        context_frames=data_cfg.context_frames,
         threshold=args.threshold,
         tta=args.tta,
         metrics=dict(args.metric),

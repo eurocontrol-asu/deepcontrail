@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 import yaml
 
 if TYPE_CHECKING:
@@ -181,3 +182,97 @@ def test_export_limit_keeps_only_the_first_scenes(tmp_path: Path, synthetic_root
     assert sorted(p.name for p in out.glob("*.npy")) == ["test_000001.npy"]
     manifest = json.loads((out / "manifest.json").read_text())
     assert manifest["n_scenes"] == 1
+
+
+def _write_neighbours(root: Path) -> None:
+    """Link the two test scenes into one sequence, so k=1 resolves to existing frames."""
+    (root / "metadata").mkdir(parents=True, exist_ok=True)
+    (root / "metadata" / "neighbours.json").write_text(
+        json.dumps(
+            {
+                "test_000001": {"prev": None, "next": "test_000002"},
+                "test_000002": {"prev": "test_000001", "next": None},
+            }
+        )
+    )
+
+
+def _context_bundle(tmp_path: Path) -> Path:
+    """Build a k=1 bundle (9 input channels) with random weights, no network."""
+    from deepcontrail.core.false_color import FalseColorConfig
+    from deepcontrail.segmentation.models import ModelConfig, build_model
+    from deepcontrail.segmentation.pretrained import PretrainedConfig, save_pretrained
+
+    model_cfg = ModelConfig(
+        architecture="Unet", encoder_name="resnet18", encoder_weights=None, in_channels=9
+    )
+    config = PretrainedConfig(
+        format_version=1,
+        model=model_cfg,
+        false_color=FalseColorConfig(**RECIPE),
+        image_size=32,
+        native_size=8,
+        tta=True,
+        context_frames=1,
+    )
+    bundle = tmp_path / "bundle"
+    save_pretrained(build_model(model_cfg), config, bundle)
+    return bundle
+
+
+def test_export_stacks_context_frames_with_a_temporal_bundle(tmp_path: Path, synthetic_root: Path):
+    """A k=1 bundle reads neighbours and stacks the 2k+1 frames into a 9-channel composite."""
+    _write_neighbours(synthetic_root)
+    out = tmp_path / "preds"
+
+    code = _load_script().main(
+        [
+            "--bundle",
+            str(_context_bundle(tmp_path)),
+            "--config",
+            str(_config(tmp_path, synthetic_root)),
+            "--split",
+            "test",
+            "--out",
+            str(out),
+            "--no-tta",
+            "--device",
+            "cpu",
+        ]
+    )
+
+    assert code == 0
+    maps = sorted(p.name for p in out.glob("*.npy"))
+    assert maps == ["test_000001.npy", "test_000002.npy"], "one map per test scene"
+    for path in out.glob("*.npy"):
+        arr = np.load(path)
+        assert arr.shape == (16, 16)
+        assert arr.dtype == np.float32
+        assert arr.min() >= 0.0
+        assert arr.max() <= 1.0
+
+
+def test_export_temporal_bundle_without_neighbours_is_a_clear_error(
+    tmp_path: Path, synthetic_root: Path
+):
+    """A k=1 bundle over a dataset without neighbours.json fails loudly, not silently."""
+    from deepcontrail.core.contract import DatasetContractError
+
+    out = tmp_path / "preds"
+
+    with pytest.raises(DatasetContractError, match="neighbours"):
+        _load_script().main(
+            [
+                "--bundle",
+                str(_context_bundle(tmp_path)),
+                "--config",
+                str(_config(tmp_path, synthetic_root)),
+                "--split",
+                "test",
+                "--out",
+                str(out),
+                "--no-tta",
+                "--device",
+                "cpu",
+            ]
+        )

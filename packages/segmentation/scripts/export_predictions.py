@@ -37,7 +37,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import torch
 
-from deepcontrail.core.contract import read_band_manifest
+from deepcontrail.core.contract import (
+    NEIGHBOURS_PATH,
+    DatasetContractError,
+    context_ids,
+    read_band_manifest,
+    read_neighbours,
+)
 from deepcontrail.core.false_color import false_color_from_spectral
 from deepcontrail.segmentation import (
     SegmentationDataset,
@@ -47,6 +53,7 @@ from deepcontrail.segmentation import (
 from deepcontrail.segmentation.training import load_configs
 
 if TYPE_CHECKING:
+    from deepcontrail.core.contract import BandManifest
     from deepcontrail.segmentation import SegmentationDataConfig
 
 logger = logging.getLogger(__name__)
@@ -86,6 +93,48 @@ def _select_data_config(
     """
     train_cfg, val_cfg, test_cfg, *_ = load_configs(config_path, overrides)
     return (train_cfg, val_cfg, test_cfg)[_SPLIT_INDEX[split]]
+
+
+def _build_composite(
+    stem: str,
+    bands_dir: Path,
+    data_cfg: SegmentationDataConfig,
+    manifest: BandManifest,
+    *,
+    neighbours: dict[str, tuple[str | None, str | None]] | None,
+    context_k: int,
+) -> np.ndarray:
+    """Build the false-colour composite of ``stem``, stacking context frames when ``context_k > 0``.
+
+    With no context the composite is the scene's 3-channel false colour. With ``context_k == k`` it
+    stacks the composites of the ``2k+1`` ids of :func:`deepcontrail.core.contract.context_ids`
+    (the same recipe and split directory for every frame) along the channel axis into
+    ``3*(2k+1)`` channels, matching how the dataset built the training images.
+
+    Parameters
+    ----------
+    stem
+        The centre scene id.
+    bands_dir
+        The split's ``spectral_bands`` directory the frames are read from.
+    data_cfg
+        The split's data config, for its ``false_color`` recipe.
+    manifest
+        The dataset's band manifest, for ``false_color_from_spectral``.
+    neighbours
+        Scene id -> ``(prev, next)`` links (``read_neighbours``); unused when ``context_k == 0``.
+    context_k
+        How many frames before and after the centre to stack (the bundle's ``context_frames``).
+    """
+
+    def _composite(scene_stem: str) -> np.ndarray:
+        bands = np.load(bands_dir / f"{scene_stem}.npy")
+        return false_color_from_spectral(bands, data_cfg.false_color, manifest)
+
+    if context_k == 0:
+        return _composite(stem)
+    ids = context_ids(stem, neighbours, context_k)  # type: ignore[arg-type]
+    return np.concatenate([_composite(cid) for cid in ids], axis=-1)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -138,6 +187,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit is not None:
         stems = stems[: args.limit]
 
+    # A temporal bundle stacks the k context frames each side of every scene; read the links once
+    # and refuse a dataset that does not carry them, so each composite matches the training recipe.
+    context_k = pretrained.config.context_frames
+    neighbours: dict[str, tuple[str | None, str | None]] | None = None
+    if context_k > 0:
+        neighbours = read_neighbours(root)
+        if neighbours is None:
+            msg = (
+                f"{root / NEIGHBOURS_PATH}: missing; context_frames={context_k} "
+                "needs metadata/neighbours.json"
+            )
+            raise DatasetContractError(msg)
+
     args.out.mkdir(parents=True, exist_ok=True)
     n = len(stems)
     tta = args.tta if args.tta is not None else pretrained.config.tta
@@ -149,8 +211,14 @@ def main(argv: list[str] | None = None) -> int:
         if out_path.exists():  # resumable: keep the map already written
             done += 1
             continue
-        bands = np.load(bands_dir / f"{stem}.npy")
-        composite = false_color_from_spectral(bands, data_cfg.false_color, manifest)
+        composite = _build_composite(
+            stem,
+            bands_dir,
+            data_cfg,
+            manifest,
+            neighbours=neighbours,
+            context_k=context_k,
+        )
         probs = predict(
             pretrained,
             composite,

@@ -39,7 +39,7 @@ from deepcontrail.core.readers import shift_image
 from deepcontrail.segmentation.config import NormalizeConfig
 from deepcontrail.segmentation.dataset import tile_origins
 from deepcontrail.segmentation.models import ModelConfig, build_model
-from deepcontrail.segmentation.tensors import _norm_tensors
+from deepcontrail.segmentation.tensors import _normalized
 from deepcontrail.segmentation.training.tta import tta_predict
 
 WEIGHTS_FILE = "model.safetensors"
@@ -64,6 +64,11 @@ class PretrainedConfig(BaseModel):
     native_size
         Side length of the training scenes (and their masks); ``predict`` accepts only
         scenes of this size.
+    context_frames
+        ``k`` frames before and after the centre composite were stacked with it during training,
+        so ``predict`` accepts ``3*(2k+1)`` channels and the composite's frames must be built the
+        same way the training data stacked them (see
+        :func:`deepcontrail.core.contract.context_ids`). Default 0 is the plain 3-channel composite.
     threshold
         Probability above which a pixel is contrail.
     tta
@@ -82,6 +87,7 @@ class PretrainedConfig(BaseModel):
     normalize: NormalizeConfig = NormalizeConfig()
     image_size: Annotated[int, Field(gt=0)]
     native_size: Annotated[int, Field(gt=0)]
+    context_frames: Annotated[int, Field(ge=0)] = 0
     threshold: Annotated[float, Field(gt=0.0, lt=1.0)] = 0.5
     tta: bool = True
     metrics: dict[str, float] = {}
@@ -186,10 +192,12 @@ def _blend_weights(tile: int) -> np.ndarray:
 
 
 def _prepare(composite: np.ndarray, config: PretrainedConfig, pixel_shift: float) -> torch.Tensor:
-    """Composite (H, W, 3) in [0, 1] -> normalised (3, image_size, image_size) tensor.
+    """Composite (H, W, C) in [0, 1] -> normalised (C, image_size, image_size) tensor.
 
-    The same steps as ``SegmentationDataset``: pixel shift, albumentations resize,
-    channel normalisation.
+    The same steps as ``SegmentationDataset``: pixel shift, albumentations resize, channel
+    normalisation. ``C`` is ``3*(2k+1)`` when ``config.context_frames == k`` (a temporal stack),
+    and the mean/std are tiled across those channel groups by ``_normalized`` — the same helper the
+    dataset uses, so any channel count works.
     """
     image = composite.astype(np.float32)
     if pixel_shift:
@@ -198,8 +206,8 @@ def _prepare(composite: np.ndarray, config: PretrainedConfig, pixel_shift: float
         from deepcontrail.segmentation.transforms import build_image_resize
 
         image = build_image_resize(config.image_size)(image=image)["image"]
-    mean, std = _norm_tensors(config.normalize.mean, config.normalize.std)
-    return (torch.from_numpy(np.ascontiguousarray(image)).permute(2, 0, 1) - mean) / std
+    image_t = torch.from_numpy(np.ascontiguousarray(image)).permute(2, 0, 1)
+    return _normalized(image_t, config.normalize)
 
 
 @torch.no_grad()
@@ -218,12 +226,13 @@ def predict(
     pretrained
         A model from ``load_pretrained``.
     composite
-        ``(H, W, 3)`` or ``(N, H, W, 3)`` float array in ``[0, 1]``, built from the
-        bands with ``pretrained.config.false_color``. ``H`` and ``W`` must be at least
-        ``pretrained.config.native_size``, the size of the scenes the model was trained on.
-        A scene exactly that size is predicted as-is; a larger one is predicted in
-        ``native_size`` tiles overlapping by half and blended with tent weights (centres
-        weigh most), so the pixel scale never changes.
+        ``(H, W, C)`` or ``(N, H, W, C)`` float array in ``[0, 1]``, built from the
+        bands with ``pretrained.config.false_color``, where ``C`` is ``3*(2k+1)`` and matches
+        ``pretrained.config.context_frames == k`` (``k`` context frames stacked each side, as the
+        training data did). ``H`` and ``W`` must be at least ``pretrained.config.native_size``, the
+        size of the scenes the model was trained on. A scene exactly that size is predicted as-is;
+        a larger one is predicted in ``native_size`` tiles overlapping by half and blended with tent
+        weights (centres weigh most), so the pixel scale never changes.
     tta
         Average the 8 D4 transforms. ``None`` (default) follows ``pretrained.config.tta``,
         the setting the model was evaluated with; ``True`` or ``False`` overrides it.
@@ -241,18 +250,22 @@ def predict(
     Raises
     ------
     ValueError
-        If the composite is not 3-channel, or its scenes are smaller than
-        ``pretrained.config.native_size``: a scene that small cannot be cut into
-        ``native_size`` tiles, and resizing it to the network's input would change the pixel
-        scale the model was trained on. Also if the batch is empty, ``batch_size`` is below
-        one, the composite is not a float array (the model expects ``[0, 1]`` floats, as built
-        by ``false_color_from_spectral``), or it holds a NaN, an infinite or an out-of-range
+        If the composite's channel count is not ``3*(2*context_frames+1)`` (see ``composite``),
+        or its scenes are smaller than ``pretrained.config.native_size``: a scene that small
+        cannot be cut into ``native_size`` tiles, and resizing it to the network's input would
+        change the pixel scale the model was trained on. Also if the batch is empty, ``batch_size``
+        is below one, the composite is not a float array (the model expects ``[0, 1]`` floats, as
+        built by ``false_color_from_spectral``), or it holds a NaN, an infinite or an out-of-range
         value: any of these turns every output NaN or gives meaningless probabilities.
     """
     single = composite.ndim == 3
     batch = composite[None] if single else composite
-    if batch.ndim != 4 or batch.shape[-1] != 3:
-        msg = f"expected a (H, W, 3) or (N, H, W, 3) composite, got shape {composite.shape}"
+    channels = 3 * (2 * pretrained.config.context_frames + 1)
+    if batch.ndim != 4 or batch.shape[-1] != channels:
+        msg = (
+            f"expected a composite with {channels} channels "
+            f"(3 x {2 * pretrained.config.context_frames + 1} frames), got shape {composite.shape}"
+        )
         raise ValueError(msg)
     size = pretrained.config.native_size
     height, width = batch.shape[1], batch.shape[2]

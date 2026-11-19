@@ -212,6 +212,12 @@ def _record_split(
 def load_initial_weights(model: torch.nn.Module, source: str, revision: str | None = None) -> None:
     """Load ``source`` weights into ``model`` in place (strict). See TrainingConfig.init_from.
 
+    A 3-channel model initialises a temporal model: the weights go on the centre frame and the
+    neighbour frames start at zero, so before training the model gives exactly the source model's
+    output on the centre frame. Every input convolution whose channel count is an odd multiple
+    greater than one of the source's is widened this way (its neighbour blocks zeroed); every other
+    weight is copied as-is, and any other shape mismatch still raises (strict load).
+
     Parameters
     ----------
     model
@@ -236,12 +242,90 @@ def load_initial_weights(model: torch.nn.Module, source: str, revision: str | No
             for key, value in checkpoint["state_dict"].items()
             if key.startswith("model.")
         }
-        model.load_state_dict(weights, strict=True)
-        return
-    from deepcontrail.segmentation.pretrained import load_pretrained
+    else:
+        from deepcontrail.segmentation.pretrained import load_pretrained
 
-    pretrained = load_pretrained(source, revision=revision)
-    model.load_state_dict(pretrained.model.state_dict(), strict=True)
+        weights = load_pretrained(source, revision=revision).model.state_dict()
+    _widen_temporal_inputs(model, weights)
+    model.load_state_dict(weights, strict=True)
+
+
+def _centre_widening_factor(
+    source_shape: tuple[int, ...], target_shape: tuple[int, ...]
+) -> int | None:
+    """Return ``m`` when ``target_shape`` widens ``source_shape`` by ``m`` on the input axis.
+
+    ``m`` is the factor by which dimension 1 (a convolution weight's input-channel axis) grows, and
+    is returned only when the shapes are identical everywhere else and ``m`` is an odd integer
+    greater than one — the ``3*(2k+1)`` stacking of an odd number of frames. ``None`` means the
+    shapes are not a temporal widening (equal, or a mismatch that strict loading must reject).
+    """
+    if len(source_shape) < 2 or len(source_shape) != len(target_shape):
+        return None
+    if source_shape[0] != target_shape[0] or source_shape[2:] != target_shape[2:]:
+        return None
+    source_in, target_in = source_shape[1], target_shape[1]
+    if source_in == 0 or target_in % source_in != 0:
+        return None
+    factor = target_in // source_in
+    return factor if factor > 1 and factor % 2 == 1 else None
+
+
+def _widen_temporal_inputs(model: torch.nn.Module, weights: dict[str, torch.Tensor]) -> None:
+    """Widen a 3-channel model's input convolutions to initialise a temporal model.
+
+    For every weight present in both ``weights`` (the source) and ``model`` whose shape is a
+    temporal widening on the input axis, replace it with a zero tensor of the target shape holding
+    the source weights on the centre frame (see :func:`_centre_widening_factor`); the neighbour
+    frames start at zero, so before training the model gives exactly the source model's output on
+    the centre frame. One line is printed per widened key. Weights that are not a temporal widening
+    are left untouched, so a plain 3-channel load is unchanged.
+    """
+    target_state = model.state_dict()
+    for key, source in weights.items():
+        target = target_state.get(key)
+        if target is None:
+            continue
+        factor = _centre_widening_factor(tuple(source.shape), tuple(target.shape))
+        if factor is None:
+            continue
+        source_in = source.shape[1]
+        widened = torch.zeros_like(target)
+        widened[:, (factor // 2) * source_in : (factor // 2 + 1) * source_in] = source
+        weights[key] = widened
+        print(
+            f"Initialising temporal input {key}: 3-channel weights on the centre frame, "
+            "neighbour frames at zero"
+        )
+
+
+def _validate_input_channels(context_frames: int, in_channels: int) -> None:
+    """Reject a model whose input channels do not match the data's temporal context.
+
+    ``context_frames == k`` stacks ``2k+1`` frames, so the model must take ``3*(2k+1)`` channels;
+    with no context it must take the plain three channels.
+
+    Raises
+    ------
+    ValueError
+        If ``in_channels`` is not what ``context_frames`` requires; the message names both the
+        required and the given number of channels.
+    """
+    frames = 2 * context_frames + 1
+    expected = 3 * frames
+    if context_frames > 0:
+        if in_channels != expected:
+            msg = (
+                f"context_frames={context_frames} stacks {frames} frames, so in_channels must be "
+                f"{expected} (3 x {frames}); got {in_channels}"
+            )
+            raise ValueError(msg)
+    elif in_channels != 3:
+        msg = (
+            f"context_frames=0 needs in_channels=3, got {in_channels}: a model with more input "
+            "channels needs context_frames > 0"
+        )
+        raise ValueError(msg)
 
 
 def prepare_training(
@@ -282,6 +366,8 @@ def prepare_training(
     train_data_cfg, val_data_cfg, test_data_cfg, model_cfg, loss_cfg, training_cfg, seed = (
         load_configs(config_path, overrides)
     )
+    # The model's input channels must match the data's temporal context before anything is built.
+    _validate_input_channels(train_data_cfg.context_frames, model_cfg.in_channels)
     if logger is not None:
         # Record the logger actually used, so a logged or printed config tells the truth.
         training_cfg = training_cfg.model_copy(update={"logger": logger})

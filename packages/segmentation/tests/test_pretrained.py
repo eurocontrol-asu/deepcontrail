@@ -263,6 +263,42 @@ def test_predict_rejects_a_composite_that_is_not_three_channels():
         predict(Pretrained(_model(), _config()), np.zeros((16, 16, 10), np.float32))
 
 
+def test_predict_rejects_wrong_channel_count_for_context():
+    """A k=1 bundle expects 9 channels, so a plain 3-channel composite is rejected."""
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    pretrained = Pretrained(_model(), _config(context_frames=1))
+
+    with pytest.raises(ValueError, match="9"):
+        predict(pretrained, _composite())  # (16, 16, 3), needs 9
+
+
+def test_predict_accepts_9_channels_with_context_1():
+    from deepcontrail.segmentation.models import build_model
+    from deepcontrail.segmentation.pretrained import Pretrained, predict
+
+    model_cfg = _config().model.model_copy(update={"in_channels": 9})
+    pretrained = Pretrained(build_model(model_cfg).eval(), _config(context_frames=1))
+    composite = np.random.RandomState(0).uniform(0, 1, (16, 16, 9)).astype(np.float32)
+
+    probs = predict(pretrained, composite, tta=False)
+
+    assert probs.shape == (16, 16), "a 9-channel composite comes back at the composite's resolution"
+    assert probs.dtype == np.float32
+    assert probs.min() >= 0.0
+    assert probs.max() <= 1.0
+
+
+def test_pretrained_config_round_trip_keeps_context_frames(tmp_path: Path):
+    from deepcontrail.segmentation.pretrained import load_pretrained, save_pretrained
+
+    save_pretrained(_model(), _config(context_frames=1), tmp_path)
+
+    loaded = load_pretrained(tmp_path)
+
+    assert loaded.config.context_frames == 1, "context_frames must survive the bundle round trip"
+
+
 def test_predict_scene_smaller_than_native_raises():
     from deepcontrail.segmentation.pretrained import Pretrained, predict
 
