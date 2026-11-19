@@ -1411,6 +1411,153 @@ def test_config_crops_per_scene_without_crop_size_raises():
 
 
 # ---------------------------------------------------------------------------
+# train_tile_stride: fixed overlapping tiles of each scene, like prediction
+# ---------------------------------------------------------------------------
+
+
+def test_dataset_train_tile_stride_gives_every_overlapping_tile(
+    scene_dataset: Callable[..., Path],
+):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset, tile_origins
+
+    scene, crop, stride = 16, 8, 4
+    root = scene_dataset(n_scenes=2, size=scene, split="train")
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE,
+        root=str(root),
+        split="train",
+        image_size=crop,
+        crop_size=crop,
+        train_tile_stride=stride,
+    )
+    ds = SegmentationDataset(cfg)
+
+    origins = tile_origins(scene, crop, stride)
+    assert origins == [0, 4, 8], "16 with crop 8, stride 4 → 3 origins, so 3 x 3 = 9 tiles/scene"
+    assert len(ds) == len(origins) ** 2 * len(ds.stems), (
+        "each scene contributes one item per overlapping tile: 3 x 3 = 9, not random crops"
+    )
+    # The tile origins are the full 3 x 3 grid of row/col offsets, in scene order.
+    assert {(r0, c0) for _, r0, c0 in ds._tiles} == {
+        (r0, c0) for r0 in origins for c0 in origins
+    }, "the training tiles must be every overlapping window of the scene"
+    assert [t[0] for t in ds._tiles] == [i for i in range(len(ds.stems)) for _ in range(9)], (
+        "tiles keep stems in scene order, all 9 tiles of a scene before the next"
+    )
+
+
+def test_dataset_train_tile_stride_items_match_the_scene_windows(
+    scene_dataset: Callable[..., Path],
+):
+    from deepcontrail.core.false_color import false_color_from_spectral
+    from deepcontrail.core.readers import binarize_mask
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    from .conftest import write_mask
+
+    scene, crop, stride = 16, 8, 4
+    root = scene_dataset(n_scenes=2, size=scene, split="train")
+    # Bands encode the (row, col) position so every window of the composite is unique:
+    # the blue channel ramps across columns, the red channel across rows.
+    rr, cc = np.mgrid[0:scene, 0:scene]
+    ir_105 = (243 + 60 * cc / 15).astype(np.float32)
+    ir_123 = (ir_105 - 4 + 6 * rr / 15).astype(np.float32)
+    ir_87 = (ir_105 - 0.5).astype(np.float32)
+    bands = np.stack([ir_87, ir_105, ir_123], axis=-1)  # manifest order: ir_87, ir_105, ir_123
+    full_mask = np.random.RandomState(7).choice([0, 255], size=(scene, scene)).astype(np.uint8)
+
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE,
+        root=str(root),
+        split="train",
+        image_size=crop,
+        crop_size=crop,
+        train_tile_stride=stride,
+        seed=11,
+    )
+    ds = SegmentationDataset(cfg)
+    for stem in ds.stems:
+        np.save(root / "spectral_bands" / "train" / f"{stem}.npy", bands)
+        write_mask(root / "semantic_masks" / "train" / f"{stem}.png", full_mask)
+
+    full_image = false_color_from_spectral(bands, cfg.false_color, ds.manifest)
+    binarized = binarize_mask(full_mask)
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        for i in range(len(ds)):
+            image, mask = ds[i]
+            stem = ds.stems[ds._tiles[i][0]]
+            r0, c0 = ds._tiles[i][1], ds._tiles[i][2]
+            assert np.array_equal(image, full_image[r0 : r0 + crop, c0 : c0 + crop]), (
+                f"item {i} (scene {stem}, tile ({r0}, {c0})) must be that exact scene window"
+            )
+            assert np.array_equal(mask, binarized[r0 : r0 + crop, c0 : c0 + crop]), (
+                f"item {i}'s mask must be the same window of the scene mask"
+            )
+
+
+def test_dataset_train_tile_stride_does_not_change_validation_tiles(
+    scene_dataset: Callable[..., Path],
+):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    scene, crop = 8, 4
+    root = scene_dataset(n_scenes=2, size=scene, split="test")
+    cfg = SegmentationDataConfig(
+        false_color=RECIPE,
+        root=str(root),
+        split="test",
+        image_size=crop,
+        crop_size=crop,
+        train_tile_stride=crop // 2,
+    )
+    ds = SegmentationDataset(cfg)
+
+    assert len(ds) == 4 * 2, (
+        "train_tile_stride must not affect validation tiles: stride stays crop_size on val"
+    )
+    assert len(ds._tiles) == 4 * 2, "the val tile list is unchanged by train_tile_stride"
+
+
+def test_config_train_tile_stride_needs_crop_size():
+    from pydantic import ValidationError
+
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+
+    with pytest.raises(ValidationError, match="train_tile_stride needs crop_size"):
+        SegmentationDataConfig(false_color=RECIPE, root="/tmp/fake", train_tile_stride=4)
+
+
+def test_config_train_tile_stride_rejects_crops_per_scene():
+    from pydantic import ValidationError
+
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+
+    with pytest.raises(ValidationError, match="cannot be combined with crops_per_scene"):
+        SegmentationDataConfig(
+            false_color=RECIPE,
+            root="/tmp/fake",
+            crop_size=8,
+            train_tile_stride=4,
+            crops_per_scene=4,
+        )
+
+
+def test_config_train_tile_stride_larger_than_crop_raises():
+    from pydantic import ValidationError
+
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+
+    with pytest.raises(ValidationError, match="must be <= crop_size"):
+        SegmentationDataConfig(
+            false_color=RECIPE, root="/tmp/fake", crop_size=8, train_tile_stride=16
+        )
+
+
+# ---------------------------------------------------------------------------
 # context_frames: stack the neighbouring frames of a scene in time
 # ---------------------------------------------------------------------------
 

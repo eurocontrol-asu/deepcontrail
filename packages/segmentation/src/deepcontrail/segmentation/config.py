@@ -83,6 +83,12 @@ class SegmentationDataConfig(DatasetConfig):
         random origin, so ``crops_per_scene = 4`` makes an epoch see four times as many steps
         over the same data. Default 1 is today's behaviour. Ignored for validation and test,
         which read tiles. Requires ``crop_size``: a value > 1 without it is an error.
+    train_tile_stride
+        With ``crop_size``, training reads the fixed tiles of each scene at this stride (e.g.
+        ``crop_size // 2`` for windows overlapping by half, as prediction does) instead of random
+        crops; the epoch is every tile of every scene, shuffled by the DataLoader. ``None``
+        (default) keeps random crops. Requires ``crop_size``; cannot be combined with
+        ``crops_per_scene > 1``; must be ``<= crop_size``.
     context_frames
         ``k`` frames before and after each scene are stacked with it, giving
         ``3*(2k+1)`` channels in time order; needs ``metadata/neighbours.json`` (see
@@ -106,6 +112,7 @@ class SegmentationDataConfig(DatasetConfig):
     image_size: Annotated[int, Field(gt=0)] = 256
     crop_size: Annotated[int, Field(gt=0)] | None = None
     crops_per_scene: Annotated[int, Field(ge=1)] = 1
+    train_tile_stride: Annotated[int, Field(gt=0)] | None = None
     context_frames: Annotated[int, Field(ge=0)] = 0
     batch_size: Annotated[int, Field(gt=0)] = 16
     num_workers: Annotated[int, Field(ge=0)] = 4
@@ -117,5 +124,21 @@ class SegmentationDataConfig(DatasetConfig):
         """Reject ``crops_per_scene`` > 1 when no ``crop_size`` is set."""
         if self.crops_per_scene > 1 and self.crop_size is None:
             msg = "crops_per_scene needs crop_size"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _train_tile_stride_needs_crop_size(self) -> Self:
+        """Validate ``train_tile_stride`` against ``crop_size`` and ``crops_per_scene``."""
+        if self.train_tile_stride is None:
+            return self
+        if self.crop_size is None:
+            msg = "train_tile_stride needs crop_size"
+            raise ValueError(msg)
+        if self.crops_per_scene > 1:
+            msg = "train_tile_stride cannot be combined with crops_per_scene > 1"
+            raise ValueError(msg)
+        if self.train_tile_stride > self.crop_size:
+            msg = "train_tile_stride must be <= crop_size"
             raise ValueError(msg)
         return self

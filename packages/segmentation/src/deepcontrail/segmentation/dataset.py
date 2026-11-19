@@ -116,11 +116,19 @@ class SegmentationDataset:
         self._aug_transform, self._resize_transform = self._build_transform()
         # DataLoader worker the augmentation was last reseeded for (None: main process).
         self._augmentation_worker: int | None = None
-        # Non-overlapping tiles covering each scene, for validation/test with crop_size:
-        # (stem index, row0, col0). Empty unless cropping and the split is not "train".
+        # Tiles covering each scene, (stem index, row0, col0). Non-overlapping (stride == crop_size)
+        # for validation/test with crop_size; overlapping at ``train_tile_stride`` for the train
+        # split when that is set (the epoch is every tile of every scene). Empty otherwise.
         self._tiles: list[tuple[int, int, int]] = []
-        if config.crop_size is not None and config.split != "train":
-            origins = tile_origins(self.scene_size, config.crop_size, config.crop_size)
+        if config.crop_size is not None and (
+            config.split != "train" or config.train_tile_stride is not None
+        ):
+            # Non-train splits always tile non-overlapping (stride == crop_size); only the train
+            # split with train_tile_stride overlaps at that stride.
+            stride = config.crop_size
+            if config.split == "train" and config.train_tile_stride is not None:
+                stride = config.train_tile_stride
+            origins = tile_origins(self.scene_size, config.crop_size, stride)
             for stem_index, _stem in enumerate(self.stems):
                 for row0 in origins:
                     for col0 in origins:
@@ -342,10 +350,12 @@ class SegmentationDataset:
         """Return the number of items in this split.
 
         With ``crop_size`` on a non-train split, each scene contributes one item per
-        covering tile, so the count is the number of tiles. With ``crop_size`` on the
-        train split, each scene contributes ``crops_per_scene`` independent random crops,
-        so the count is scenes x crops_per_scene. Otherwise it is the number of stems
-        (training without crop_size, and non-cropped splits, included).
+        covering tile, so the count is the number of tiles. With ``crop_size`` and
+        ``train_tile_stride`` on the train split, each scene contributes one item per
+        overlapping tile, again the number of tiles. With ``crop_size`` on the train split
+        without ``train_tile_stride``, each scene contributes ``crops_per_scene`` independent
+        random crops, so the count is scenes x crops_per_scene. Otherwise it is the number of
+        stems (training without crop_size, and non-cropped splits, included).
         """
         if self._tiles:
             return len(self._tiles)
@@ -366,6 +376,8 @@ class SegmentationDataset:
         """
         if self._tiles:
             # Validation/test with crop_size: the non-overlapping tiles covering each scene.
+            # Train with train_tile_stride: the overlapping tiles of each scene (augmentation
+            # still applies below, as it does for every item).
             stem_index, r0, c0 = self._tiles[index]
             stem = self.stems[stem_index]
             img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
