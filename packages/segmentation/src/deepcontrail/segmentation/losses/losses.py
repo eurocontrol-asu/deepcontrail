@@ -264,7 +264,8 @@ class CLDiceLoss(nn.Module):
         if y_true.dim() == y_pred.dim() - 1:
             y_true = y_true.unsqueeze(1)
         y = y_true.float()
-        # Float32: under bf16 autocast the logits are bfloat16, too coarse for sums over millions of pixels.
+        # Float32: under bf16 autocast the logits are bfloat16, too coarse for sums over
+        # millions of pixels.
         p = torch.sigmoid(y_pred.float()) if self.from_logits else y_pred.float()
         sp = soft_skeleton(p, self.iterations)
         sy = soft_skeleton(y, self.iterations)
