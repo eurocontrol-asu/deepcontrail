@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-COMPOSITE_COMPONENTS = ("dice", "tversky", "bce", "focal")
+COMPOSITE_COMPONENTS = ("dice", "tversky", "bce", "focal", "cldice")
 
 
 class LossConfig(BaseModel):
@@ -33,10 +33,14 @@ class LossConfig(BaseModel):
         Whether the Dice and Tversky losses receive raw logits (sigmoid applied internally). The
         BCE and focal losses always take logits.
     composite_weights
-        Weights of the composite loss components, among ``"dice"``, ``"tversky"``, ``"bce"`` and
-        ``"focal"``: none negative, at least one positive.
-        Keys may be ``"dice"``, ``"tversky"``, ``"bce"``, ``"focal"``.
+        Weights of the composite loss components, among ``"dice"``, ``"tversky"``, ``"bce"``,
+        ``"focal"`` and ``"cldice"``: none negative, at least one positive.
+        Keys may be ``"dice"``, ``"tversky"``, ``"bce"``, ``"focal"``, ``"cldice"``.
         Only used when ``name="composite"``.
+    cldice_iterations
+        Soft-skeleton iterations of the clDice component: about the largest
+        half-width, in pixels, of the structures it follows.
+        Only used when ``"cldice"`` appears in ``composite_weights``.
     pos_weight
         BCE positive-class weight.  Set to ``num_bg / num_fg`` to compensate
         for class imbalance (e.g. ``175.0`` for 0.567 % foreground).
@@ -63,6 +67,7 @@ class LossConfig(BaseModel):
     smooth_factor: float | None = None
     focal_gamma: Annotated[float, Field(ge=0.0)] = 2.0
     focal_alpha: float | None = None
+    cldice_iterations: Annotated[int, Field(ge=1)] = 5
 
     @model_validator(mode="after")
     def _check_composite_weights(self) -> LossConfig:

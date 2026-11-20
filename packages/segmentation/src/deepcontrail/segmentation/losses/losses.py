@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import segmentation_models_pytorch as smp
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import Tensor
 
 if TYPE_CHECKING:
@@ -135,6 +136,143 @@ class FocalLoss(nn.Module):
         return self._loss(y_pred, y_true)  # type: ignore[no-any-return]
 
 
+def _soft_erode(x: Tensor) -> Tensor:
+    """Soft (differentiable) erosion: cross-shaped min-pooling of ``x``.
+
+    Min-pooling is expressed as ``-maxpool(-x)`` over a cross kernel (a 3x1 and
+    a 1x3 pool, taking the element-wise minimum).
+
+    Parameters
+    ----------
+    x
+        Input map, shaped ``(B, 1, H, W)``.
+
+    Returns
+    -------
+    Tensor
+        Eroded map, same shape as ``x``.
+    """
+    p1 = -F.max_pool2d(-x, (3, 1), stride=1, padding=(1, 0))
+    p2 = -F.max_pool2d(-x, (1, 3), stride=1, padding=(0, 1))
+    return torch.min(p1, p2)
+
+
+def _soft_dilate(x: Tensor) -> Tensor:
+    """Soft (differentiable) dilation: 3x3 max-pooling of ``x``.
+
+    Parameters
+    ----------
+    x
+        Input map, shaped ``(B, 1, H, W)``.
+
+    Returns
+    -------
+    Tensor
+        Dilated map, same shape as ``x``.
+    """
+    return F.max_pool2d(x, 3, stride=1, padding=1)
+
+
+def _soft_open(x: Tensor) -> Tensor:
+    """Soft (differentiable) opening: erosion followed by dilation of ``x``.
+
+    Parameters
+    ----------
+    x
+        Input map, shaped ``(B, 1, H, W)``.
+
+    Returns
+    -------
+    Tensor
+        Opened map, same shape as ``x``.
+    """
+    return _soft_dilate(_soft_erode(x))
+
+
+def soft_skeleton(x: Tensor, iterations: int) -> Tensor:
+    """Soft (differentiable) skeleton of a fuzzy binary map.
+
+    Follows Shit et al. ("clDice: A Novel Topology-Preserving Loss Function for
+    Tubular Structure Segmentation", CVPR 2021). The skeleton is obtained by
+    repeated soft opening; it highlights the thin central structure of connected
+    components, so comparing skeletons rewards getting thin lines right.
+
+    Parameters
+    ----------
+    x
+        Fuzzy binary map in ``[0, 1]``, shaped ``(B, 1, H, W)``.
+    iterations
+        Number of erosion iterations, about the largest half-width (in pixels)
+        of the structures the skeleton follows.
+
+    Returns
+    -------
+    Tensor
+        Soft skeleton, same shape as ``x``, values in ``[0, 1]``.
+    """
+    x1 = _soft_open(x)
+    skel = F.relu(x - x1)
+    for _ in range(iterations):
+        x = _soft_erode(x)
+        x1 = _soft_open(x)
+        delta = F.relu(x - x1)
+        skel = skel + F.relu(delta - skel * delta)
+    return skel
+
+
+class CLDiceLoss(nn.Module):
+    """Soft clDice loss for thin, tubular structures (Shit et al., CVPR 2021).
+
+    Compares the soft skeletons of prediction and target rather than the raw
+    maps, which rewards getting thin lines (a few pixels wide) right. Intended
+    as a component of the composite loss, not on its own.
+
+    Parameters
+    ----------
+    iterations
+        Soft-skeleton iterations, about the largest half-width (in pixels) of
+        the structures the loss follows.
+    smooth
+        Smoothing factor added to numerators and denominators.
+    from_logits
+        If ``True``, sigmoid is applied to ``y_pred`` internally.
+    """
+
+    def __init__(self, iterations: int = 5, smooth: float = 1.0, from_logits: bool = True) -> None:
+        super().__init__()
+        self.iterations = iterations
+        self.smooth = smooth
+        self.from_logits = from_logits
+
+    def forward(self, y_pred: Tensor, y_true: Tensor) -> Tensor:
+        """Compute the clDice loss between prediction and target.
+
+        Parameters
+        ----------
+        y_pred
+            Prediction, shaped ``(B, 1, H, W)``: logits if ``from_logits`` else
+            probabilities in ``[0, 1]``.
+        y_true
+            Target, shaped ``(B, 1, H, W)`` or ``(B, H, W)`` (channel axis added
+            when missing), soft probabilities or binary in ``[0, 1]``.
+
+        Returns
+        -------
+        Tensor
+            Scalar clDice loss in ``[0, 1]``, pooled over all pixels.
+        """
+        if y_true.dim() == y_pred.dim() - 1:
+            y_true = y_true.unsqueeze(1)
+        y = y_true.float()
+        # Float32: under bf16 autocast the logits are bfloat16, too coarse for sums over millions of pixels.
+        p = torch.sigmoid(y_pred.float()) if self.from_logits else y_pred.float()
+        sp = soft_skeleton(p, self.iterations)
+        sy = soft_skeleton(y, self.iterations)
+        tprec = (torch.sum(sp * y) + self.smooth) / (torch.sum(sp) + self.smooth)
+        tsens = (torch.sum(sy * p) + self.smooth) / (torch.sum(sy) + self.smooth)
+        return 1 - 2 * tprec * tsens / (tprec + tsens)  # type: ignore[no-any-return]
+
+
 class CompositeLoss(nn.Module):
     """Weighted combination of multiple loss functions.
 
@@ -201,6 +339,16 @@ class CompositeLoss(nn.Module):
                     alpha=config.focal_alpha,
                 ),
                 focal_weight,
+            )
+
+        cldice_weight = config.composite_weights.get("cldice", 0.0)
+        if cldice_weight > 0:
+            components["cldice"] = (
+                CLDiceLoss(
+                    iterations=config.cldice_iterations,
+                    from_logits=config.from_logits,
+                ),
+                cldice_weight,
             )
 
         return cls(components)
