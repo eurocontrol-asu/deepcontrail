@@ -32,13 +32,27 @@ def _load_script() -> ModuleType:
     return module
 
 
-def _checkpoint(tmp_path: Path, root: Path) -> tuple[Path, Path, torch.nn.Module]:
-    """Save a tiny trained-model checkpoint, as Lightning does, and its experiment YAML."""
+def _checkpoint(
+    tmp_path: Path,
+    root: Path,
+    *,
+    model_extra: dict[str, object] | None = None,
+    data_extra: dict[str, object] | None = None,
+) -> tuple[Path, Path, torch.nn.Module]:
+    """Save a tiny trained-model checkpoint, as Lightning does, and its experiment YAML.
+
+    ``model_extra`` and ``data_extra`` are added to the model and data sections (e.g. a temporal model).
+    """
     from deepcontrail.segmentation.losses import LossConfig, build_loss
     from deepcontrail.segmentation.models import ModelConfig, build_model
     from deepcontrail.segmentation.training import SegmentationModule
 
-    model_cfg = {"architecture": "Unet", "encoder_name": "resnet18", "encoder_weights": None}
+    model_cfg = {
+        "architecture": "Unet",
+        "encoder_name": "resnet18",
+        "encoder_weights": None,
+        **(model_extra or {}),
+    }
     torch.manual_seed(0)
     module = SegmentationModule(
         model=build_model(ModelConfig(**model_cfg)),
@@ -55,7 +69,12 @@ def _checkpoint(tmp_path: Path, root: Path) -> tuple[Path, Path, torch.nn.Module
     config.write_text(
         yaml.safe_dump(
             {
-                "data": {"root": str(root), "false_color": RECIPE, "image_size": 32},
+                "data": {
+                    "root": str(root),
+                    "false_color": RECIPE,
+                    "image_size": 32,
+                    **(data_extra or {}),
+                },
                 "model": model_cfg,
             }
         )
@@ -83,6 +102,35 @@ def test_export_writes_a_bundle_with_the_checkpoint_weights(tmp_path: Path, synt
     assert loaded.config.native_size == 16, "native size comes from the checkpoint"
     assert loaded.config.image_size == 32
     assert loaded.config.false_color.channels[2].bands == ("ir_105",)
+
+
+@pytest.mark.parametrize("fusion", ["input", "features"])
+def test_export_checks_a_temporal_model_on_its_own_input_channels(
+    tmp_path: Path, synthetic_root: Path, fusion: str
+):
+    from deepcontrail.segmentation.pretrained import load_pretrained
+
+    ckpt, config, model = _checkpoint(
+        tmp_path,
+        synthetic_root,
+        model_extra={"in_channels": 9, "temporal_fusion": fusion},
+        data_extra={"context_frames": 1},
+    )
+    out = tmp_path / "bundle"
+
+    code = _load_script().main(
+        ["--checkpoint", str(ckpt), "--config", str(config), "--output-dir", str(out)]
+    )
+
+    assert code == 0, "a temporal (3-frame, 9-channel) model must export"
+    assert (out / "README.md").exists(), "the export must run to the end and write the model card"
+    loaded = load_pretrained(out)
+    assert loaded.config.context_frames == 1, "the bundle records the temporal context"
+    x = torch.randn(1, 9, 32, 32, generator=torch.manual_seed(1))
+    with torch.no_grad():
+        assert torch.equal(loaded.model(x), model(x)), (
+            "the bundle must hold the checkpoint's weights"
+        )
 
 
 def test_export_requires_a_config(tmp_path: Path, synthetic_root: Path):

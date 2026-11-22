@@ -256,9 +256,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     save_pretrained(model, config, args.output_dir)
 
-    # The bundle must give exactly the checkpoint's outputs.
+    # The bundle must give exactly the checkpoint's outputs, on the model's own input channels
+    # (3 x (2k+1) for a temporal model).
     loaded = load_pretrained(args.output_dir)
-    x = torch.randn(1, 3, config.image_size, config.image_size, generator=torch.manual_seed(0))
+    x = torch.randn(
+        1,
+        model_cfg.in_channels,
+        config.image_size,
+        config.image_size,
+        generator=torch.manual_seed(0),
+    )
     with torch.no_grad():
         if not torch.equal(loaded.model(x), model(x)):
             msg = "the exported bundle does not reproduce the checkpoint's outputs"
