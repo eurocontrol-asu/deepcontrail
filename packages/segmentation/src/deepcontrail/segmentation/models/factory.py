@@ -18,6 +18,8 @@ def build_model(config: ModelConfig) -> nn.Module:
 
     Returns a plain ``torch.nn.Module``. The training script is responsible
     for wrapping it in a Lightning module, optimizer, and scheduler.
+    With ``temporal_fusion="features"`` the encoder is wrapped in a
+    ``TemporalFusionEncoder``.
 
     Parameters
     ----------
@@ -37,9 +39,17 @@ def build_model(config: ModelConfig) -> nn.Module:
     """
     arch_cls = getattr(smp, config.architecture)
     kwargs = _build_smp_kwargs(config, arch_cls)
+    features_fusion = config.temporal_fusion == "features"
+    if features_fusion:
+        # Late fusion: the encoder sees one 3-channel frame at a time.
+        kwargs["in_channels"] = 3
     model = arch_cls(**kwargs)
     if arch_cls is smp.UnetPlusPlus and model.encoder.out_channels[1] == 0:
         _add_half_scale_stem(model, kwargs)
+    if features_fusion:
+        from deepcontrail.segmentation.models.temporal import TemporalFusionEncoder
+
+        model.encoder = TemporalFusionEncoder(model.encoder, frames=config.in_channels // 3)
     return model  # type: ignore[no-any-return]
 
 

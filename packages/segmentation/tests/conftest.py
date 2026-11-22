@@ -16,7 +16,7 @@ from PIL import Image
 os.environ.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
 # Band keys of the synthetic datasets; the tests' RECIPE builds its composite from them.
@@ -153,3 +153,18 @@ def synthetic_root_missing_mask(tmp_path: Path) -> Path:
     mask_arr = rng.choice([0, 255], size=(16, 16)).astype(np.uint8)
     write_mask(tmp_path / "semantic_masks" / "train" / "train_000001.png", mask_arr)
     return tmp_path
+
+
+@pytest.fixture
+def full_precision_matmul() -> Iterator[None]:
+    """Run a test at full float32 matmul precision, then restore the previous setting.
+
+    ``prepare_training`` lowers the global precision to "medium"; at that precision a CPU
+    convolution can change by ~1e-5 with the batch size, which breaks exact-equivalence checks
+    that compare a batch of frames with a single frame.
+    """
+    torch = pytest.importorskip("torch")
+    previous = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("highest")
+    yield
+    torch.set_float32_matmul_precision(previous)

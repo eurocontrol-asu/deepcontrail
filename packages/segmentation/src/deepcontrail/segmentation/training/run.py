@@ -217,6 +217,8 @@ def load_initial_weights(model: torch.nn.Module, source: str, revision: str | No
     output on the centre frame. Every input convolution whose channel count is an odd multiple
     greater than one of the source's is widened this way (its neighbour blocks zeroed); every other
     weight is copied as-is, and any other shape mismatch still raises (strict load).
+    A ``temporal_fusion="features"`` model starts from a single-frame model the same way: the source
+    encoder runs on every frame and the fusion layers start as the identity on the centre frame.
 
     Parameters
     ----------
@@ -247,6 +249,7 @@ def load_initial_weights(model: torch.nn.Module, source: str, revision: str | No
 
         weights = load_pretrained(source, revision=revision).model.state_dict()
     _widen_temporal_inputs(model, weights)
+    _nest_into_temporal_encoder(model, weights)
     model.load_state_dict(weights, strict=True)
 
 
@@ -297,6 +300,34 @@ def _widen_temporal_inputs(model: torch.nn.Module, weights: dict[str, torch.Tens
             f"Initialising temporal input {key}: 3-channel weights on the centre frame, "
             "neighbour frames at zero"
         )
+
+
+def _nest_into_temporal_encoder(model: torch.nn.Module, weights: dict[str, torch.Tensor]) -> None:
+    """Initialise a feature-fusion temporal model from a single-frame model's weights.
+
+    In a ``temporal_fusion="features"`` model the single-frame encoder is wrapped: its weights are
+    under ``encoder.encoder.`` and the fusion convolutions under ``encoder.fuse.``. When ``model``
+    is such a model and ``weights`` come from a single-frame model (no ``encoder.fuse.`` key), the
+    source's ``encoder.`` weights move under ``encoder.encoder.`` and the fusion convolutions keep
+    their initialisation (the identity on the centre frame): before training, the model gives
+    exactly the source model's output on the centre frame. Anything else is left to the strict
+    load, which rejects a mismatch.
+    """
+    from deepcontrail.segmentation.models.temporal import TemporalFusionEncoder
+
+    if not isinstance(getattr(model, "encoder", None), TemporalFusionEncoder):
+        return
+    if any(key.startswith("encoder.fuse.") for key in weights):
+        return
+    for key in [key for key in weights if key.startswith("encoder.")]:
+        weights["encoder.encoder." + key.removeprefix("encoder.")] = weights.pop(key)
+    for key, value in model.state_dict().items():
+        if key.startswith("encoder.fuse."):
+            weights[key] = value
+    print(
+        "Initialising temporal feature fusion: the source encoder on every frame, "
+        "fusion layers as the identity on the centre frame"
+    )
 
 
 def _validate_input_channels(context_frames: int, in_channels: int) -> None:
