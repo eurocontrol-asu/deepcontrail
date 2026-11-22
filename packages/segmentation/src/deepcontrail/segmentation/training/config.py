@@ -56,6 +56,12 @@ class TrainingConfig(BaseModel):
         Also save the weights (weights only) at the end of every epoch, as
         ``<run dir>/epochs/epoch-NN.ckpt``, for averaging several epochs later. The best and last
         checkpoints are unchanged.
+    gradient_checkpointing
+        Recompute the encoder's activations during the backward pass instead of storing them:
+        the same gradients for much less GPU memory, at about 20% more time (Unet++ CAFormer-B36,
+        batch 32 at 512 px: 89.6 GiB -> 22.3 GiB). Needs a timm encoder (``tu-...``) whose stages
+        support it (CAFormer, ConvNeXt, Swin, ...); with any other encoder the run refuses to start.
+        ``False`` (default) stores the activations, unchanged.
     encoder_lr_scale
         The encoder's learning rate is ``lr * encoder_lr_scale`` (warm-up and cosine apply to
         both groups). ``1.0`` (default) keeps one learning rate for all weights, unchanged.
@@ -90,6 +96,7 @@ class TrainingConfig(BaseModel):
     init_from: str | None = None
     init_revision: str | None = None
     checkpoint_every_epoch: bool = False
+    gradient_checkpointing: bool = False
 
     @model_validator(mode="after")
     def _check_warmup(self) -> TrainingConfig:

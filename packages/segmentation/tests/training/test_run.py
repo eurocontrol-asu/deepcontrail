@@ -397,6 +397,127 @@ def test_prepare_training_rejects_a_non_three_channel_model_without_context(
         prepare_training(path, output_dir=tmp_path / "runs", accelerator="cpu")
 
 
+# --- gradient checkpointing ------------------------------------------------------------
+
+
+def test_enable_gradient_checkpointing_switches_on_every_timm_stage():
+    from deepcontrail.segmentation.models import ModelConfig, build_model
+    from deepcontrail.segmentation.training.run import enable_gradient_checkpointing
+
+    model = build_model(
+        ModelConfig(
+            architecture="Unet",
+            encoder_name="tu-convnext_atto",
+            encoder_weights=None,
+        )
+    )
+
+    count = enable_gradient_checkpointing(model)
+
+    stages = [
+        module
+        for module in model.modules()
+        if hasattr(module, "blocks")
+        and isinstance(getattr(module, "grad_checkpointing", None), bool)
+    ]
+    assert count == len(stages), "the returned count must be the number of stages switched on"
+    assert count > 0, "a timm encoder must have at least one stage that supports checkpointing"
+    for stage in stages:
+        assert stage.grad_checkpointing is True, "every timm stage must be switched on"
+    wrappers = [
+        module
+        for module in model.modules()
+        if not hasattr(module, "blocks")
+        and isinstance(getattr(module, "grad_checkpointing", None), bool)
+    ]
+    assert wrappers, "the timm feature wrapper (a flag but no blocks) should exist here"
+    for wrapper in wrappers:
+        assert wrapper.grad_checkpointing is False, (
+            "the feature wrapper has the flag but no blocks, so it must be left off"
+        )
+
+
+def test_gradient_checkpointing_gives_the_same_gradients():
+    import copy
+
+    import torch
+
+    from deepcontrail.segmentation.models import ModelConfig, build_model
+    from deepcontrail.segmentation.training.run import enable_gradient_checkpointing
+
+    torch.manual_seed(0)
+    model = build_model(
+        ModelConfig(
+            architecture="Unet",
+            encoder_name="tu-convnext_atto",
+            encoder_weights=None,
+        )
+    )
+    checkpointed = copy.deepcopy(model)
+    enable_gradient_checkpointing(checkpointed)
+
+    model.train()
+    checkpointed.train()
+    x = torch.randn(2, 3, 32, 32, generator=torch.Generator().manual_seed(1))
+    model(x).mean().backward()
+    checkpointed(x).mean().backward()
+
+    for name, param in model.named_parameters():
+        plain_grad = param.grad
+        ckpt_grad = dict(checkpointed.named_parameters())[name].grad
+        assert plain_grad is not None, f"the plain model must have a gradient for {name}"
+        assert ckpt_grad is not None, f"the checkpointed model must have a gradient for {name}"
+        assert torch.allclose(plain_grad, ckpt_grad, atol=1e-6), (
+            f"the gradients of {name} must be the same with and without checkpointing"
+        )
+
+
+def test_enable_gradient_checkpointing_without_timm_stages_raises():
+    from deepcontrail.segmentation.models import build_model
+    from deepcontrail.segmentation.training.run import enable_gradient_checkpointing
+
+    model = build_model(_tiny_model_cfg())
+
+    with pytest.raises(ValueError, match="gradient_checkpointing"):
+        enable_gradient_checkpointing(model)
+
+
+def test_prepare_training_with_gradient_checkpointing_switches_it_on(
+    tmp_path: Path, synthetic_root: Path
+):
+    from deepcontrail.segmentation.training import prepare_training
+
+    config = _config(tmp_path, synthetic_root, gradient_checkpointing=True)
+    with config.open() as f:
+        data = yaml.safe_load(f)
+    data["model"]["encoder_name"] = "tu-convnext_atto"
+    with config.open("w") as f:
+        yaml.safe_dump(data, f)
+
+    run = prepare_training(config, output_dir=tmp_path / "runs", run_name="gc", accelerator="cpu")
+
+    stages = [
+        module
+        for module in run.module.model.modules()
+        if hasattr(module, "blocks")
+        and isinstance(getattr(module, "grad_checkpointing", None), bool)
+    ]
+    assert stages, "a timm encoder must have at least one stage that supports checkpointing"
+    for stage in stages:
+        assert stage.grad_checkpointing is True, "prepare_training must switch checkpointing on"
+
+
+def test_prepare_training_gradient_checkpointing_with_resnet_raises(
+    tmp_path: Path, synthetic_root: Path
+):
+    from deepcontrail.segmentation.training import prepare_training
+
+    config = _config(tmp_path, synthetic_root, gradient_checkpointing=True)
+
+    with pytest.raises(ValueError, match="gradient_checkpointing"):
+        prepare_training(config, output_dir=tmp_path / "runs", run_name="gc", accelerator="cpu")
+
+
 # --- loggers ---------------------------------------------------------------------------
 
 

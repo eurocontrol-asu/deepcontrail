@@ -95,6 +95,12 @@ def test_training_config_default_checkpoint_every_epoch_is_false() -> None:
     assert cfg.checkpoint_every_epoch is False, "per-epoch checkpoints are off by default"
 
 
+def test_training_config_gradient_checkpointing_defaults_to_false() -> None:
+    cfg = TrainingConfig()
+
+    assert cfg.gradient_checkpointing is False, "activation recompute is off by default"
+
+
 def test_training_config_init_revision_without_init_from_raises() -> None:
     with pytest.raises(ValidationError, match="init_from"):
         TrainingConfig(init_revision="v0.1.0")  # a revision needs something to revise

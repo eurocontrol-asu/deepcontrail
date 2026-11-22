@@ -328,6 +328,48 @@ def _validate_input_channels(context_frames: int, in_channels: int) -> None:
         raise ValueError(msg)
 
 
+def enable_gradient_checkpointing(model: torch.nn.Module) -> int:
+    """Make the network's timm stages recompute their activations during the backward pass.
+
+    Sets ``grad_checkpointing = True`` on every module that has a ``blocks`` attribute and a
+    boolean ``grad_checkpointing`` flag: timm's stages (CAFormer/MetaFormer, ConvNeXt, Swin, ...)
+    then keep only the inputs of their blocks and recompute the rest in the backward pass. Timm's
+    feature wrapper (``FeatureListNet``) has the flag but no ``blocks`` and is left off: on top of
+    the stages it would only recompute every block a second time.
+
+    Parameters
+    ----------
+    model
+        The network; modified in place.
+
+    Returns
+    -------
+    int
+        The number of stages switched on.
+
+    Raises
+    ------
+    ValueError
+        If the network has no such stage (e.g. a non-timm encoder such as ``resnet18``), since the
+        option would otherwise silently do nothing.
+    """
+    stages = [
+        module
+        for module in model.modules()
+        if hasattr(module, "blocks")
+        and isinstance(getattr(module, "grad_checkpointing", None), bool)
+    ]
+    if not stages:
+        msg = (
+            "gradient_checkpointing: the network has no timm stage that supports it (a module with "
+            "`blocks` and a `grad_checkpointing` flag); use a timm encoder (tu-...) or turn it off"
+        )
+        raise ValueError(msg)
+    for stage in stages:
+        stage.grad_checkpointing = True  # pyright: ignore[reportArgumentType]
+    return len(stages)
+
+
 def prepare_training(
     config_path: str | Path,
     *,
@@ -386,6 +428,10 @@ def prepare_training(
         if training_cfg.init_revision is not None:
             message += f" (revision {training_cfg.init_revision})"
         print(message)
+    if training_cfg.gradient_checkpointing:
+        # Same gradients, far less GPU memory: activations are recomputed in the backward pass.
+        stages = enable_gradient_checkpointing(model)
+        print(f"Gradient checkpointing: on for {stages} encoder stages")
     module = SegmentationModule(
         model=model,
         loss_fn=build_loss(loss_cfg),
