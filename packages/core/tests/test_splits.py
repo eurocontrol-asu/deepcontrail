@@ -210,3 +210,40 @@ def test_read_stem_list_with_duplicate_raises(tmp_path: Path):
 
     with pytest.raises(ValueError, match="0001"):
         read_stem_list(path)
+
+
+# --- explicit training list (train_stems) --------------------------------------------
+
+
+def test_partition_stems_train_stems_restricts_the_train_split():
+    stems = _stems(10)
+
+    train = _partition(stems, "train", train_stems=["0003", "0007", "0001"])
+
+    assert train == ["0001", "0003", "0007"], (
+        "the train split must be exactly the listed train_stems, sorted"
+    )
+
+
+def test_partition_stems_with_unknown_train_stem_raises():
+    stems = _stems(10)
+
+    with pytest.raises(ValueError, match="0099"):
+        _partition(stems, "train", train_stems=["0005", "0099"])
+
+
+def test_partition_stems_with_a_train_stem_that_is_a_val_stem_raises():
+    stems = _stems(10)
+
+    with pytest.raises(ValueError, match="0003"):
+        _partition(stems, "train", val_stems=["0003"], train_stems=["0003", "0007"])
+
+
+def test_partition_stems_train_stems_leaves_val_and_test_unchanged():
+    stems = _stems(10)
+
+    val = _partition(stems, "val", train_stems=["0003", "0007"])
+    test = _partition(stems, "test", train_stems=["0003", "0007"])
+
+    assert val == _partition(stems, "val"), "val must ignore train_stems"
+    assert test == _partition(stems, "test"), "test must ignore train_stems"

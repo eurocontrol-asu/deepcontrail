@@ -1073,6 +1073,26 @@ def test_dataset_val_ids_selects_listed_scenes(synthetic_root: Path):
     )
 
 
+def test_dataset_train_ids_restricts_the_train_split_to_those_scenes(synthetic_root: Path):
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    listed = ["train_000002", "train_000004"]
+    (synthetic_root / "train_scenes.txt").write_text("\n".join(listed) + "\n")
+
+    train_ds = SegmentationDataset(
+        SegmentationDataConfig(
+            false_color=RECIPE,
+            root=str(synthetic_root),
+            split="train",
+            image_size=_SYNTH_SIZE,
+            train_ids="train_scenes.txt",
+        )
+    )
+
+    assert train_ds.stems == listed, "train is exactly the listed scenes, sorted"
+
+
 # crop_size: crops for training, tiles for validation/test
 # ---------------------------------------------------------------------------
 

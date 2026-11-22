@@ -72,6 +72,7 @@ def partition_stems(
     fold: int | None,
     num_folds: int,
     val_stems: Collection[str] | None = None,
+    train_stems: Collection[str] | None = None,
 ) -> list[str]:
     """Return the stems of ``split``, sorted.
 
@@ -90,11 +91,31 @@ def partition_stems(
     ``stems``. ``fold``, ``val_fraction`` and ``seed`` are then ignored — useful
     for a fixed validation set of whole days, which a random frame-level split
     would leak near-duplicates from.
+
+    When ``train_stems`` is set (for ``"train"`` only), it restricts training to
+    exactly those scene ids, in sorted order — useful for a learning curve on a
+    fraction of the data. Every id of ``train_stems`` must be among ``stems`` and
+    must not be a validation stem (``val_stems``), or a ``ValueError`` is raised;
+    ``val``, ``test`` and the validation split are unaffected.
     """
     stems = sorted(stems)
 
     if split == "test":
         return stems
+
+    if train_stems is not None and split == "train":
+        present = set(stems)
+        val = set(val_stems) if val_stems is not None else set()
+        missing = [s for s in train_stems if s not in present]
+        if missing:
+            msg = f"train_stems reference ids not in the dataset: {missing[:5]}"
+            raise ValueError(msg)
+        clashes = [s for s in train_stems if s in val]
+        if clashes:
+            msg = f"train_stems overlap the validation split: {clashes[:5]}"
+            raise ValueError(msg)
+        keep = set(train_stems)
+        return [s for s in stems if s in keep]
 
     if val_stems is not None:
         val = set(val_stems)

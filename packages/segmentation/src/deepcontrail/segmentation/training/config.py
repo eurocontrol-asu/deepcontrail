@@ -52,6 +52,10 @@ class TrainingConfig(BaseModel):
         weights load strictly.
     init_revision
         Hub revision (tag, branch or commit) when ``init_from`` is a repo id.
+    checkpoint_every_epoch
+        Also save the weights (weights only) at the end of every epoch, as
+        ``<run dir>/epochs/epoch-NN.ckpt``, for averaging several epochs later. The best and last
+        checkpoints are unchanged.
     encoder_lr_scale
         The encoder's learning rate is ``lr * encoder_lr_scale`` (warm-up and cosine apply to
         both groups). ``1.0`` (default) keeps one learning rate for all weights, unchanged.
@@ -85,6 +89,7 @@ class TrainingConfig(BaseModel):
     logger: Literal["csv", "mlflow"] = "csv"
     init_from: str | None = None
     init_revision: str | None = None
+    checkpoint_every_epoch: bool = False
 
     @model_validator(mode="after")
     def _check_warmup(self) -> TrainingConfig:

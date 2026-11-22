@@ -49,6 +49,10 @@ class DatasetConfig(BaseModel):
         Path to a list of training scene ids (see ``read_stem_list``) that form the validation
         split; a relative path is resolved against ``root``. When set it replaces ``fold`` and
         ``val_fraction``.
+    train_ids
+        Path to a list of scene ids (see ``read_stem_list``): the training split is restricted to
+        these ids (after removing the validation scenes); a relative path is resolved against
+        ``root``. None (default) trains on every non-validation scene.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -62,6 +66,7 @@ class DatasetConfig(BaseModel):
     fold: int | None = None
     num_folds: Annotated[int, Field(default=4, ge=2)] = 4
     val_ids: str | None = None
+    train_ids: str | None = None
 
     def val_ids_path(self) -> Path | None:
         """Return the resolved path of ``val_ids``, or None.
@@ -71,6 +76,16 @@ class DatasetConfig(BaseModel):
         if self.val_ids is None:
             return None
         path = Path(self.val_ids)
+        return path if path.is_absolute() else Path(self.root) / path
+
+    def train_ids_path(self) -> Path | None:
+        """Return the resolved path of ``train_ids``, or None.
+
+        A relative path is resolved against ``root``; an absolute one is kept as-is.
+        """
+        if self.train_ids is None:
+            return None
+        path = Path(self.train_ids)
         return path if path.is_absolute() else Path(self.root) / path
 
     @model_validator(mode="after")

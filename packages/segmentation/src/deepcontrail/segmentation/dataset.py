@@ -195,6 +195,7 @@ class SegmentationDataset:
                 self._stem_dirs[stem] = (img_dir, mask_dir)
             all_stems.extend(scanned)
         val_ids_path = self.config.val_ids_path()
+        train_ids_path = self.config.train_ids_path()
         return partition_stems(
             all_stems,
             self.config.split,
@@ -203,6 +204,7 @@ class SegmentationDataset:
             fold=self.config.fold,
             num_folds=self.config.num_folds,
             val_stems=read_stem_list(val_ids_path) if val_ids_path is not None else None,
+            train_stems=read_stem_list(train_ids_path) if train_ids_path is not None else None,
         )
 
     def _scan_stems(self, image_dir: Path, mask_dir: Path) -> list[str]:

@@ -543,6 +543,33 @@ def test_prepare_training_monitors_the_learning_rate(tmp_path: Path, synthetic_r
     assert monitors[0].logging_interval == "step", "warmup + cosine changes the LR every step"
 
 
+def test_prepare_training_saves_a_checkpoint_at_the_end_of_every_epoch(
+    tmp_path: Path, synthetic_root: Path
+):
+    from pytorch_lightning.callbacks import ModelCheckpoint
+
+    from deepcontrail.segmentation.training import prepare_training
+
+    run = prepare_training(
+        _config(tmp_path, synthetic_root, checkpoint_every_epoch=True),
+        output_dir=tmp_path / "runs",
+        run_name="ep",
+        accelerator="cpu",
+    )
+
+    checkpoints = [c for c in run.trainer.callbacks if isinstance(c, ModelCheckpoint)]
+    assert len(checkpoints) == 2, "checkpoint_every_epoch adds a second ModelCheckpoint"
+    per_epoch = checkpoints[1]
+    assert per_epoch.dirpath.endswith("epochs"), (
+        f"the per-epoch weights go in a dedicated epochs/ dir, got {per_epoch.dirpath}"
+    )
+    assert per_epoch.save_top_k == -1, "every epoch's weights must be kept, for averaging later"
+    assert per_epoch.save_weights_only is True, "only weights are saved for averaging"
+    assert checkpoints[0].monitor == "val_dice", (
+        "the best/last checkpoint stays first and unchanged"
+    )
+
+
 def test_prepare_training_records_the_exact_train_and_val_records(
     tmp_path: Path, synthetic_root: Path
 ):

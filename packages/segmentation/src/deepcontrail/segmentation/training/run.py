@@ -413,6 +413,23 @@ def prepare_training(
         save_top_k=1,
         save_last=True,
     )
+    callbacks = [
+        checkpoint,
+        LearningRateMonitor(logging_interval="step"),
+        TQDMProgressBar(),
+        ModelSummary(),
+    ]
+    if training_cfg.checkpoint_every_epoch:
+        # Weights of every epoch, for averaging several epochs later; the best/last stay untouched.
+        callbacks.append(
+            ModelCheckpoint(
+                dirpath=str(run_dir / "epochs"),
+                filename="epoch-{epoch:02d}",
+                save_top_k=-1,
+                every_n_epochs=1,
+                save_weights_only=True,
+            )
+        )
     trainer = pl.Trainer(
         accelerator=accelerator,
         devices=1,
@@ -420,12 +437,7 @@ def prepare_training(
         precision=training_cfg.precision,  # type: ignore[arg-type]
         # Plain-text progress bar and summary: Lightning picks its Rich versions whenever
         # `rich` is installed, and those print nothing when output goes to a log file.
-        callbacks=[
-            checkpoint,
-            LearningRateMonitor(logging_interval="step"),
-            TQDMProgressBar(),
-            ModelSummary(),
-        ],
+        callbacks=callbacks,
         default_root_dir=str(output_dir),
         logger=build_logger(
             training_cfg.logger,

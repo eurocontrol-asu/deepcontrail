@@ -99,3 +99,33 @@ def test_dataset_config_val_ids_path_is_none_by_default():
     from deepcontrail.core.config import DatasetConfig
 
     assert DatasetConfig(root="/data", false_color=RECIPE).val_ids_path() is None
+
+
+def test_dataset_config_train_ids_path_resolves_relative_to_root():
+    from pathlib import Path
+
+    from deepcontrail.core.config import DatasetConfig
+
+    cfg = DatasetConfig(root="/data/foo", false_color=RECIPE, train_ids="splits/train.txt")
+
+    assert cfg.train_ids_path() == Path("/data/foo/splits/train.txt"), (
+        "a relative train_ids is resolved against root"
+    )
+
+
+def test_dataset_config_train_ids_path_keeps_absolute_path():
+    from pathlib import Path
+
+    from deepcontrail.core.config import DatasetConfig
+
+    cfg = DatasetConfig(root="/data/foo", false_color=RECIPE, train_ids="/elsewhere/train.txt")
+
+    assert cfg.train_ids_path() == Path("/elsewhere/train.txt"), (
+        "an absolute train_ids is kept as-is"
+    )
+
+
+def test_dataset_config_train_ids_path_is_none_by_default():
+    from deepcontrail.core.config import DatasetConfig
+
+    assert DatasetConfig(root="/data", false_color=RECIPE).train_ids_path() is None
