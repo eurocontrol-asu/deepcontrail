@@ -266,9 +266,9 @@ Tordjman-Levavasseur ([SESAR Innovation Days 2024](https://sesar.eu/sites/defaul
 
 DeepContrail was initiated within the EUROCONTROL Aviation Sustainability Unit, led by Philippe
 Very. We thank Gabriel Jarry, Valentin Tordjman-Levavasseur, Philippe Very and Ana-Maria Pelin for
-their earlier work on contrail segmentation, and Marylin Bastin, Head of the EUROCONTROL Aviation
-Sustainability Unit, Robin Deransy, Senior Team Leader of its Environmental Modelling &
-Assessments Service, and Ramon Dalmau for their support.
+their earlier work on contrail segmentation. We also thank Marylin Bastin (Head of the EUROCONTROL
+Aviation Sustainability Unit), Robin Deransy (Senior Team Leader, Environmental Modelling &
+Assessments Service) and Ramon Dalmau for their support.
 
 ## Contact
 
