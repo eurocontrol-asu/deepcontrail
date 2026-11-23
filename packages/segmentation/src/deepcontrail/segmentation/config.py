@@ -158,6 +158,13 @@ class SegmentationDataConfig(DatasetConfig):
     memory_corruption
         With ``memory_prior: labels``, the training-time corruption of the memory (see
         ``MemoryCorruptionConfig``); ``None`` keeps the clean previous label.
+    memory_maps
+        With ``memory_prior: labels``, a folder of predicted probability maps (``<id>.npy``, one
+        per scene, e.g. a model's predictions on scenes it was not trained on). With probability
+        ``memory_maps_rate`` an item's memory is the previous frame's map instead of its label,
+        used as is (real prediction errors, no corruption); a missing map falls back to the label.
+    memory_maps_rate
+        Share of items whose memory comes from ``memory_maps``; ``0`` (default) never.
     batch_size
         Batch size for the DataLoader (not used by the Dataset itself).
     num_workers
@@ -180,6 +187,8 @@ class SegmentationDataConfig(DatasetConfig):
     context_frames: Annotated[int, Field(ge=0)] = 0
     memory_prior: Literal["none", "labels", "empty"] = "none"
     memory_corruption: MemoryCorruptionConfig | None = None
+    memory_maps: str | None = None
+    memory_maps_rate: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
     batch_size: Annotated[int, Field(gt=0)] = 16
     num_workers: Annotated[int, Field(ge=0)] = 4
     augmentation: AugmentationConfig | None = None
@@ -207,6 +216,15 @@ class SegmentationDataConfig(DatasetConfig):
         if self.train_tile_stride > self.crop_size:
             msg = "train_tile_stride must be <= crop_size"
             raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _memory_maps_need_labels(self) -> Self:
+        """Predicted memory maps replace label memories, so they need ``memory_prior: labels``."""
+        if self.memory_maps is not None and self.memory_prior != "labels":
+            raise ValueError('memory_maps needs memory_prior: "labels"')
+        if self.memory_maps_rate > 0 and self.memory_maps is None:
+            raise ValueError("memory_maps_rate > 0 needs memory_maps")
         return self
 
     @model_validator(mode="after")

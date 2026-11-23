@@ -1898,3 +1898,97 @@ def test_memory_corruption_needs_label_memory():
             memory_prior="empty",  # a non-label memory has nothing to corrupt
             memory_corruption=MemoryCorruptionConfig(),
         )
+
+
+def _map_dir(tmp_path: Path, stem: str, value: float) -> Path:
+    """Write a memory-maps folder holding one predicted map of ``value`` for ``stem``."""
+    maps = tmp_path / "maps"
+    maps.mkdir(exist_ok=True)
+    np.save(maps / f"{stem}.npy", np.full((_SYNTH_SIZE, _SYNTH_SIZE), value, np.float32))
+    return maps
+
+
+def test_memory_maps_replace_the_label_and_are_not_corrupted(tmp_path: Path):
+    from deepcontrail.segmentation.config import MemoryCorruptionConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    root = _build_context_root(tmp_path / "root", stems=["seq_000", "seq_001"], mask_on={"seq_000"})
+    maps = _map_dir(tmp_path, "seq_000", 0.7)
+    corruption = MemoryCorruptionConfig(empty_rate=1.0)  # a corrupted label would be all zeros
+    ds = SegmentationDataset(
+        _context_config(
+            root,
+            memory_prior="labels",
+            memory_corruption=corruption,
+            memory_maps=str(maps),
+            memory_maps_rate=1.0,
+        )
+    )
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, _ = ds[1]
+
+    np.testing.assert_allclose(
+        image[..., 3], 0.7, err_msg="the previous frame's predicted map, as is"
+    )
+
+
+def test_memory_maps_rate_zero_keeps_the_corrupted_label(tmp_path: Path):
+    from deepcontrail.segmentation.config import MemoryCorruptionConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    root = _build_context_root(tmp_path / "root", stems=["seq_000", "seq_001"], mask_on={"seq_000"})
+    maps = _map_dir(tmp_path, "seq_000", 0.7)
+    corruption = MemoryCorruptionConfig(
+        empty_rate=0, drop_rate=0, max_shift=0, max_blur_sigma=0, min_scale=1
+    )
+    ds = SegmentationDataset(
+        _context_config(
+            root,
+            memory_prior="labels",
+            memory_corruption=corruption,
+            memory_maps=str(maps),
+            memory_maps_rate=0.0,
+        )
+    )
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, _ = ds[1]
+
+    np.testing.assert_array_equal(image[..., 3], 1.0, err_msg="rate 0: the label, never the map")
+
+
+def test_memory_maps_missing_map_falls_back_to_the_label(tmp_path: Path):
+    from deepcontrail.segmentation.config import MemoryCorruptionConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    root = _build_context_root(tmp_path / "root", stems=["seq_000", "seq_001"], mask_on={"seq_000"})
+    maps = _map_dir(tmp_path, "other", 0.7)
+    corruption = MemoryCorruptionConfig(
+        empty_rate=0, drop_rate=0, max_shift=0, max_blur_sigma=0, min_scale=1
+    )
+    ds = SegmentationDataset(
+        _context_config(
+            root,
+            memory_prior="labels",
+            memory_corruption=corruption,
+            memory_maps=str(maps),
+            memory_maps_rate=1.0,
+        )
+    )
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, _ = ds[1]
+
+    np.testing.assert_array_equal(image[..., 3], 1.0, err_msg="no map for seq_000: its label")
+
+
+def test_memory_maps_need_a_label_memory_and_a_rate_needs_maps():
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+
+    with pytest.raises(ValueError, match="memory_maps"):
+        SegmentationDataConfig(false_color=RECIPE, root="/x", memory_maps="/m")
+    with pytest.raises(ValueError, match="memory_maps"):
+        SegmentationDataConfig(
+            false_color=RECIPE, root="/x", memory_prior="labels", memory_maps_rate=0.5
+        )

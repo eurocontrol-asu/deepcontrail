@@ -272,6 +272,15 @@ class SegmentationDataset:
             return np.asarray(mask_full[r0 : r0 + size, c0 : c0 + size], dtype=np.float32)
         return binarize_mask(load_mask(mask_dir / f"{stem}.png"))[r0 : r0 + size, c0 : c0 + size]
 
+    def _memory_map_for(self, stem: str, r0: int, c0: int, size: int) -> np.ndarray | None:
+        """Return the previous frame's predicted map from ``memory_maps`` at the window, or None."""
+        prev = self._neighbours.get(stem, (None, None))[0]
+        path = Path(self.config.memory_maps or "") / f"{prev}.npy"
+        if prev is None or not path.exists():
+            return None
+        full = np.load(path, mmap_mode="r")
+        return np.clip(np.asarray(full[r0 : r0 + size, c0 : c0 + size], dtype=np.float32), 0, 1)
+
     def _memory_for(self, stem: str, mask_dir: Path, r0: int, c0: int, size: int) -> np.ndarray:
         """Return the track-memory window of one item: the previous frame's label, or zeros.
 
@@ -434,6 +443,15 @@ class SegmentationDataset:
             if self.config.memory_prior != "none"
             else None
         )
+        # A share of the items take a predicted map of the previous frame as their memory: real
+        # prediction errors instead of corrupted labels. Drawn only when maps are configured.
+        from_map = False
+        if memory is not None and self.config.memory_maps is not None:
+            self._reseed_augmentation_in_worker()
+            if self._memory_rng.random() < self.config.memory_maps_rate:
+                predicted = self._memory_map_for(stem, int(r0), int(c0), size)
+                if predicted is not None:
+                    memory, from_map = predicted, True
 
         assert image.shape[:2] == mask.shape, (
             f"spatial mismatch at native resolution: image {image.shape[:2]} vs mask {mask.shape}"
@@ -459,7 +477,7 @@ class SegmentationDataset:
             if memory is not None:
                 memory = self._resize_transform(image=memory)["image"]
 
-        if memory is not None and self.config.memory_corruption is not None:
+        if memory is not None and not from_map and self.config.memory_corruption is not None:
             # Training only (validation/test carry none): the label looks like a prediction.
             self._reseed_augmentation_in_worker()
             memory = corrupt_memory(memory, self.config.memory_corruption, self._memory_rng)

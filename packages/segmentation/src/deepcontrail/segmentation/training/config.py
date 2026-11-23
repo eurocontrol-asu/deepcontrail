@@ -241,6 +241,8 @@ def load_configs(
         "augmentation": None,
         "memory_prior": memory,
         "memory_corruption": None,
+        "memory_maps": None,
+        "memory_maps_rate": 0.0,
     }
     # Evaluation always uses the strict consensus ground truth ("binary").
     val_data_cfg = SegmentationDataConfig.from_dict(
