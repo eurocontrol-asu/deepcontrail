@@ -138,6 +138,12 @@ def _build_composite(
     return np.concatenate([_composite(cid) for cid in ids], axis=-1)
 
 
+def _shape_memory(previous: np.ndarray, threshold: float, scale: float) -> np.ndarray:
+    """Return the memory fed to the next frame: values below ``threshold`` zeroed, then x ``scale``."""
+    kept = np.where(previous >= threshold, previous, 0.0) if threshold > 0 else previous
+    return np.clip(kept * scale, 0.0, 1.0).astype(np.float32)
+
+
 def _in_time_order(
     stems: list[str], neighbours: dict[str, tuple[str | None, str | None]]
 ) -> list[str]:
@@ -199,6 +205,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--limit", type=int, default=None, help="Only the first N scenes (smoke tests)."
+    )
+    parser.add_argument(
+        "--memory",
+        choices=["feed", "empty"],
+        default="feed",
+        help="Track-memory bundles: feed each map to the next frame (default), or give every "
+        "frame an empty memory (the model without its memory).",
+    )
+    parser.add_argument(
+        "--memory-threshold",
+        type=float,
+        default=0.0,
+        help="Track-memory bundles: values of the fed map below this become 0 (default 0).",
+    )
+    parser.add_argument(
+        "--memory-scale",
+        type=float,
+        default=1.0,
+        help="Track-memory bundles: the fed map is then multiplied by this (default 1).",
     )
     args = parser.parse_args(argv)
 
@@ -269,11 +294,13 @@ def main(argv: list[str] | None = None) -> int:
         memory = None
         if (
             track_memory
+            and args.memory == "feed"
+            and last_map is not None
             and neighbours is not None
             and last_stem is not None
             and neighbours.get(stem, (None, None))[0] == last_stem
         ):
-            memory = last_map
+            memory = _shape_memory(last_map, args.memory_threshold, args.memory_scale)
         probs = predict(
             pretrained,
             composite,
@@ -298,6 +325,9 @@ def main(argv: list[str] | None = None) -> int:
                 "split": args.split,
                 "tta": tta,
                 "track_memory": track_memory,
+                "memory": args.memory,
+                "memory_threshold": args.memory_threshold,
+                "memory_scale": args.memory_scale,
                 "n_scenes": n,
                 "created": datetime.now(UTC).isoformat(),
             },

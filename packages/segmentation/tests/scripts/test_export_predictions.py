@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
@@ -454,3 +454,61 @@ def test_in_time_order_follows_the_links():
     assert script._in_time_order(["a", "c"], neighbours) == ["a", "c"], (
         "a selection that skips the middle frame is two sequences"
     )
+
+
+def _second_frame_with_options(tmp_path: Path, root: Path, *options: str) -> tuple[Any, ...]:
+    """Export the two-frame sequence with ``options``; return (exported second map, helpers)."""
+    from deepcontrail.core.contract import read_band_manifest
+    from deepcontrail.segmentation import load_pretrained
+
+    _write_neighbours(root)
+    bundle = _memory_bundle(tmp_path)
+    out = tmp_path / "preds"
+    args = ["--bundle", str(bundle), "--config", str(_config(tmp_path, root)), "--split", "test"]
+    args += ["--out", str(out), "--no-tta", "--device", "cpu", *options]
+    assert _load_script().main(args) == 0
+
+    script = _load_script()
+    data_cfg = script._select_data_config(_config(tmp_path, root), {"data_root": None}, "test")
+    bands_dir = root / "spectral_bands" / "test"
+    manifest = read_band_manifest(root)
+    composites = [
+        script._build_composite(s, bands_dir, data_cfg, manifest, neighbours=None, context_k=0)
+        for s in ("test_000001", "test_000002")
+    ]
+    pretrained = load_pretrained(bundle, device="cpu")
+    return np.load(out / "test_000002.npy"), pretrained, composites, data_cfg, out
+
+
+def test_export_track_memory_empty_feeds_no_memory(tmp_path: Path, synthetic_root: Path):
+    """--memory empty predicts every frame with an empty memory (the model without its memory)."""
+    from deepcontrail.segmentation import predict
+
+    exported, pretrained, (_, second), data_cfg, _ = _second_frame_with_options(
+        tmp_path, synthetic_root, "--memory", "empty"
+    )
+
+    expected = predict(pretrained, second, tta=False, pixel_shift=data_cfg.pixel_shift)
+    np.testing.assert_allclose(exported, expected, atol=1e-6, err_msg="no memory was fed")
+
+
+def test_export_track_memory_threshold_and_scale_shape_the_fed_map(
+    tmp_path: Path, synthetic_root: Path
+):
+    """The fed map keeps only values >= --memory-threshold, then is multiplied by --memory-scale."""
+    from deepcontrail.segmentation import predict
+
+    exported, pretrained, (first_c, second), data_cfg, out = _second_frame_with_options(
+        tmp_path, synthetic_root, "--memory-threshold", "0.5", "--memory-scale", "0.5"
+    )
+
+    first = predict(pretrained, first_c, tta=False, pixel_shift=data_cfg.pixel_shift)
+    fed = np.where(first >= 0.5, first, 0.0).astype(np.float32) * 0.5
+    expected = predict(pretrained, second, memory=fed, tta=False, pixel_shift=data_cfg.pixel_shift)
+    np.testing.assert_allclose(exported, expected, atol=1e-6, err_msg="thresholded, then scaled")
+    recorded = json.loads((out / "manifest.json").read_text())
+    assert (recorded["memory"], recorded["memory_threshold"], recorded["memory_scale"]) == (
+        "feed",
+        0.5,
+        0.5,
+    ), "the manifest records how the memory was fed"
