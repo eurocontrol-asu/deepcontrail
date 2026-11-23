@@ -448,6 +448,13 @@ def prepare_training(
     )
     # The model's input channels must match the data's temporal context before anything is built.
     _validate_input_channels(train_data_cfg.context_frames, model_cfg.in_channels)
+    if model_cfg.track_memory != (train_data_cfg.memory_prior != "none"):
+        msg = (
+            f"model.track_memory={model_cfg.track_memory} needs a matching data.memory_prior, got "
+            f"{train_data_cfg.memory_prior!r}: a track-memory model takes the memory "
+            "channel the data adds"
+        )
+        raise ValueError(msg)
     if logger is not None:
         # Record the logger actually used, so a logged or printed config tells the truth.
         training_cfg = training_cfg.model_copy(update={"logger": logger})

@@ -32,7 +32,9 @@ import albumentations as A
 from deepcontrail.segmentation.config import AugmentationConfig  # noqa: TC001
 
 
-def build_augmentation(config: AugmentationConfig, seed: int) -> A.Compose:
+def build_augmentation(
+    config: AugmentationConfig, seed: int, extra_masks: tuple[str, ...] = ()
+) -> A.Compose:
     """Build an albumentations augmentation pipeline from config.
 
     The base flips/rotate run on **both** the image and the mask so they stay
@@ -50,6 +52,9 @@ def build_augmentation(config: AugmentationConfig, seed: int) -> A.Compose:
         Probabilities (and transform parameters) for each augmentation.
     seed
         Seed of the random generators the transforms share (see :func:`seed_augmentation`).
+    extra_masks
+        Names of additional arrays transformed like the mask (spatial transforms only, nearest
+        interpolation), e.g. ``("memory",)`` for the track-memory channel.
 
     Returns
     -------
@@ -81,7 +86,10 @@ def build_augmentation(config: AugmentationConfig, seed: int) -> A.Compose:
         transforms.append(A.GaussianBlur(blur_limit=config.blur_limit, p=config.gaussian_blur))
     if config.brightness_contrast > 0:
         transforms.append(A.RandomBrightnessContrast(p=config.brightness_contrast))
-    compose = A.Compose(transforms)  # type: ignore[arg-type]
+    compose = A.Compose(
+        transforms,  # type: ignore[arg-type]
+        additional_targets=dict.fromkeys(extra_masks, "mask"),
+    )
     seed_augmentation(compose, seed)
     return compose
 

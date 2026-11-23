@@ -233,7 +233,15 @@ def load_configs(
         training_raw["scheduler_interval"] = args.scheduler_interval
 
     train_data_cfg = SegmentationDataConfig.from_dict(data_raw)
-    no_aug = {**train_data_cfg.model_dump(), "augmentation": None}
+    # Validation and test never see a label of the previous frame: their track memory is empty, so
+    # no label leaks into selection (the final, sequential eval feeds the model's own maps).
+    memory = "empty" if train_data_cfg.memory_prior != "none" else "none"
+    no_aug = {
+        **train_data_cfg.model_dump(),
+        "augmentation": None,
+        "memory_prior": memory,
+        "memory_corruption": None,
+    }
     # Evaluation always uses the strict consensus ground truth ("binary").
     val_data_cfg = SegmentationDataConfig.from_dict(
         {**no_aug, "split": "val", "mask_type": "binary"}

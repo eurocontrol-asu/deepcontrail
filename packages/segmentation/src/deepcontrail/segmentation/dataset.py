@@ -32,6 +32,7 @@ from deepcontrail.core.readers import (
     validate_binary_mask,
 )
 from deepcontrail.core.splits import context_frames, partition_stems, read_stem_list
+from deepcontrail.segmentation.memory_prior import corrupt_memory
 from deepcontrail.segmentation.tensors import to_tensors, to_tensors_soft
 
 if TYPE_CHECKING:
@@ -80,16 +81,17 @@ class SegmentationDataset:
         check_false_color(config.false_color, self.manifest)
         self._warn_on_pixel_shift_mismatch()
 
-        # Temporal context: stack the composites of the k frames before and after each scene.
-        # Read the neighbours once here; a context_frames > 0 config needs the file to exist.
+        # Temporal context: stack the composites of the k frames before and after each scene, and
+        # the label memory reads the previous frame — both are linked by neighbours.json. Read the
+        # neighbours once here; a context_frames > 0 config or a label memory needs the file.
         self._context_k = config.context_frames
         self._neighbours: dict[str, tuple[str | None, str | None]] = {}
-        if self._context_k > 0:
+        if self._context_k > 0 or config.memory_prior == "labels":
             neighbours = read_neighbours(self._root)
             if neighbours is None:
                 msg = (
-                    f"{self._root / NEIGHBOURS_PATH}: missing; context_frames={self._context_k} "
-                    "needs metadata/neighbours.json"
+                    f"{self._root / NEIGHBOURS_PATH}: missing; context_frames={self._context_k}"
+                    f" and memory_prior={config.memory_prior!r} need metadata/neighbours.json"
                 )
                 raise DatasetContractError(msg)
             self._neighbours = neighbours
@@ -135,6 +137,8 @@ class SegmentationDataset:
                         self._tiles.append((stem_index, row0, col0))
         # Random-crop stream for training with crop_size (reseeded per DataLoader worker).
         self._crop_rng = np.random.default_rng(config.seed)
+        # Random stream of the training-time memory corruption (reseeded per DataLoader worker).
+        self._memory_rng = np.random.default_rng(config.seed + 1)
 
     def _reseed_augmentation_in_worker(self) -> None:
         """Give each DataLoader worker its own augmentation stream.
@@ -159,6 +163,7 @@ class SegmentationDataset:
         if self._aug_transform is not None:
             seed_augmentation(self._aug_transform, info.seed)  # type: ignore[arg-type]
         self._crop_rng = np.random.default_rng(info.seed)
+        self._memory_rng = np.random.default_rng(info.seed + 1)
         self._augmentation_worker = info.id
 
     def _warn_on_pixel_shift_mismatch(self) -> None:
@@ -267,6 +272,22 @@ class SegmentationDataset:
             return np.asarray(mask_full[r0 : r0 + size, c0 : c0 + size], dtype=np.float32)
         return binarize_mask(load_mask(mask_dir / f"{stem}.png"))[r0 : r0 + size, c0 : c0 + size]
 
+    def _memory_for(self, stem: str, mask_dir: Path, r0: int, c0: int, size: int) -> np.ndarray:
+        """Return the track-memory window of one item: the previous frame's label, or zeros.
+
+        With ``memory_prior: labels`` it is the previous frame's (``neighbours.json``) label at the
+        same window, float32 in [0, 1]; a sequence start, or a previous frame without a label file,
+        gives zeros. With ``memory_prior: empty`` it is always zeros.
+        """
+        zeros = np.zeros((size, size), np.float32)
+        if self.config.memory_prior != "labels":
+            return zeros
+        prev = self._neighbours.get(stem, (None, None))[0]
+        ext = ".npy" if self.config.mask_type == "probability" else ".png"
+        if prev is None or not (mask_dir / f"{prev}{ext}").exists():
+            return zeros
+        return self._mask_for(prev, mask_dir, r0, c0, size).astype(np.float32)
+
     def _load_window(
         self, stem: str, img_dir: Path, mask_dir: Path, r0: int, c0: int, size: int
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -341,7 +362,11 @@ class SegmentationDataset:
             raise ImportError(msg) from None
 
         augmentation = (
-            build_augmentation(self.config.augmentation, seed=self.config.seed)  # type: ignore[arg-type]
+            build_augmentation(
+                self.config.augmentation,  # type: ignore[arg-type]
+                seed=self.config.seed,
+                extra_masks=("memory",) if self.config.memory_prior != "none" else (),
+            )
             if has_augmentation
             else None
         )
@@ -375,6 +400,9 @@ class SegmentationDataset:
         Without torch, returns numpy arrays:
         - ``image``: float32 ndarray, shape ``(H, W, C)``, in ``[0, 1]``.
         - ``mask``: uint8 ndarray, shape ``(H, W)``, values in ``{0, 1}``.
+
+        With ``memory_prior`` other than ``none`` the image has one more channel, the track
+        memory, last (not normalised).
         """
         if self._tiles:
             # Validation/test with crop_size: the non-overlapping tiles covering each scene.
@@ -383,7 +411,7 @@ class SegmentationDataset:
             stem_index, r0, c0 = self._tiles[index]
             stem = self.stems[stem_index]
             img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
-            image, mask = self._load_pair(stem, img_dir, mask_dir, r0, c0, self.native_size)
+            size = self.native_size
         elif self.config.crop_size is not None:
             # Training with crop_size: crops_per_scene independent random crops per scene.
             # Index maps to a scene by // crops_per_scene; the remainder is unused — every
@@ -392,37 +420,66 @@ class SegmentationDataset:
             stem = self.stems[index // crops]
             img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
             self._reseed_augmentation_in_worker()
+            size = self.native_size
             r0, c0 = self._crop_rng.integers(0, self.scene_size - self.native_size + 1, size=2)
-            image, mask = self._load_pair(stem, img_dir, mask_dir, r0, c0, self.native_size)
         else:
             # Whole scene (no crop_size): the window is the scene itself.
             stem = self.stems[index]
             img_dir, mask_dir = self._stem_dirs.get(stem, (self._image_dir, self._mask_dir))
-            image, mask = self._load_pair(stem, img_dir, mask_dir, 0, 0, self.scene_size)
+            r0, c0, size = 0, 0, self.scene_size
+
+        image, mask = self._load_pair(stem, img_dir, mask_dir, r0, c0, size)
+        memory = (
+            self._memory_for(stem, mask_dir, int(r0), int(c0), size)
+            if self.config.memory_prior != "none"
+            else None
+        )
 
         assert image.shape[:2] == mask.shape, (
             f"spatial mismatch at native resolution: image {image.shape[:2]} vs mask {mask.shape}"
         )
 
         # Augmentation runs at native resolution on BOTH image and mask so they
-        # stay aligned and the mask is never upscaled by interpolation.
+        # stay aligned and the mask is never upscaled by interpolation. The memory, when present,
+        # is a third array transformed like the mask (spatial only) so all three stay aligned.
         if self._aug_transform is not None:
             self._reseed_augmentation_in_worker()
-            transformed = self._aug_transform(image=image, mask=mask)
+            if memory is None:
+                transformed = self._aug_transform(image=image, mask=mask)
+            else:
+                transformed = self._aug_transform(image=image, mask=mask, memory=memory)
+                memory = transformed["memory"]
             image = transformed["image"]
             mask = transformed["mask"]
 
-        # The image alone is resized to image_size; the mask stays native.
+        # The image alone is resized to image_size; the mask stays native. The memory, when
+        # present, is resized like the image (bilinear) so it stays aligned with both.
         if self._resize_transform is not None:
             image = self._resize_transform(image=image)["image"]
+            if memory is not None:
+                memory = self._resize_transform(image=memory)["image"]
+
+        if memory is not None and self.config.memory_corruption is not None:
+            # Training only (validation/test carry none): the label looks like a prediction.
+            self._reseed_augmentation_in_worker()
+            memory = corrupt_memory(memory, self.config.memory_corruption, self._memory_rng)
 
         if self.config.mask_type != "probability":
             validate_binary_mask(mask)
 
         try:
-            import torch as _  # noqa: F401
+            import torch
         except ImportError:
-            return to_numpy(image, mask)
+            image_np, mask_np = to_numpy(image, mask)
+            if memory is not None:
+                image_np = np.concatenate([image_np, memory[..., None].astype(np.float32)], axis=-1)
+            return image_np, mask_np
         if self.config.mask_type == "probability":
-            return to_tensors_soft(image, mask, self.config.normalize)
-        return to_tensors(image, mask, self.config.normalize)
+            image_t, mask_t = to_tensors_soft(image, mask, self.config.normalize)
+        else:
+            image_t, mask_t = to_tensors(image, mask, self.config.normalize)
+        if memory is not None:
+            # A probability map, appended after the normalisation as the last channel.
+            memory_t = torch.from_numpy(np.ascontiguousarray(memory, dtype=np.float32))
+            image_t = torch.cat([image_t, memory_t[None]], dim=0)
+        return image_t, mask_t

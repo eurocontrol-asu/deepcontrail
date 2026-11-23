@@ -1746,3 +1746,155 @@ def test_context_frames_crops_use_the_same_window_for_all_frames(tmp_path: Path)
                 composite(stem)[0:crop, 0:crop],
                 err_msg=f"frame {stem} uses the same (0,0) window as the centre scene",
             )
+
+
+# ---------------------------------------------------------------------------
+# track memory: the previous frame's label, appended as the last channel
+# ---------------------------------------------------------------------------
+
+
+def test_memory_labels_is_the_previous_frame_label(tmp_path: Path):
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems, mask_on={"seq_000"})
+    ds = SegmentationDataset(_context_config(root, memory_prior="labels"))
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        middle_image, _mask = ds[1]  # centre seq_001, whose prev seq_000 is drawn
+        assert middle_image.shape == (_SYNTH_SIZE, _SYNTH_SIZE, 4), (
+            "one extra channel, the memory, after the 3 image channels"
+        )
+        assert (middle_image[..., 3] == 1.0).all(), (
+            "the memory is the previous frame's label (seq_000 is drawn → all ones)"
+        )
+
+        start_image, _ = ds[0]  # sequence start: no previous frame
+        assert (start_image[..., 3] == 0.0).all(), "a sequence start gets an empty memory"
+
+        end_image, _ = ds[2]  # centre seq_002, whose prev seq_001 is not drawn
+        assert (end_image[..., 3] == 0.0).all(), (
+            "the previous frame seq_001 has no drawn pixels, so the memory is zero"
+        )
+
+
+def test_memory_empty_gives_a_zero_channel(tmp_path: Path):
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems, mask_on={"seq_000"})
+    ds = SegmentationDataset(_context_config(root, memory_prior="empty"))
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, _mask = ds[1]
+        assert image.shape == (_SYNTH_SIZE, _SYNTH_SIZE, 4), "the empty memory is still a channel"
+        assert (image[..., 3] == 0.0).all(), "memory_prior=empty is zeros even when a label exists"
+
+
+def test_memory_none_keeps_the_image_channels(tmp_path: Path):
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems, mask_on={"seq_000"})
+    ds = SegmentationDataset(_context_config(root))  # memory_prior defaults to "none"
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, _mask = ds[1]
+        assert image.shape == (_SYNTH_SIZE, _SYNTH_SIZE, 3), (
+            "memory_prior=none adds no channel, today's behaviour"
+        )
+
+
+def test_memory_comes_after_the_temporal_stack(tmp_path: Path):
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems, mask_on={"seq_000"})
+    ds_mem = SegmentationDataset(_context_config(root, context_frames=1, memory_prior="labels"))
+    ds_nomem = SegmentationDataset(_context_config(root, context_frames=1))
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        mem_image, _ = ds_mem[1]
+        nomem_image, _ = ds_nomem[1]
+        assert mem_image.shape == (_SYNTH_SIZE, _SYNTH_SIZE, 10), (
+            "the memory is appended AFTER the 3*(2*1+1)=9 temporal channels"
+        )
+        assert (mem_image[..., 9] == 1.0).all(), "the last channel is the previous frame's label"
+        np.testing.assert_array_equal(
+            mem_image[..., 0:9], nomem_image, err_msg="the image channels are unchanged by memory"
+        )
+
+
+def test_memory_labels_without_neighbours_raises(tmp_path: Path):
+    from deepcontrail.core.contract import DatasetContractError
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems)
+    (root / "metadata" / "neighbours.json").unlink()
+
+    with pytest.raises(DatasetContractError, match="neighbours"):
+        SegmentationDataset(_context_config(root, memory_prior="labels"))
+
+
+def test_memory_follows_the_spatial_augmentation(tmp_path: Path):
+    from deepcontrail.segmentation.config import AugmentationConfig
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    from .conftest import write_mask
+
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems, mask_on={"seq_000"})
+    # seq_000's mask: the LEFT half drawn. Its flip (applied to image, mask AND memory alike)
+    # puts the drawn half on the RIGHT, which is what the memory channel of seq_001 must show.
+    left_drawn = np.zeros((_SYNTH_SIZE, _SYNTH_SIZE), np.uint8)
+    left_drawn[:, 0 : _SYNTH_SIZE // 2] = 255
+    write_mask(root / "semantic_masks" / "test" / "seq_000.png", left_drawn)
+
+    ds = SegmentationDataset(
+        _context_config(
+            root,
+            memory_prior="labels",
+            augmentation=AugmentationConfig(
+                horizontal_flip=1.0, vertical_flip=0.0, random_rotate_90=0.0
+            ),
+        )
+    )
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, _mask = ds[1]  # centre seq_001, memory = flipped seq_000
+        right_half = image[..., 3][:, _SYNTH_SIZE // 2 :]
+        left_half = image[..., 3][:, 0 : _SYNTH_SIZE // 2]
+        assert (right_half == 1.0).all(), "the memory follows the horizontal flip (right half)"
+        assert (left_half == 0.0).all(), "the memory follows the horizontal flip (left half)"
+
+
+def test_memory_is_appended_unnormalised_with_torch(tmp_path: Path):
+    import torch
+
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems, mask_on={"seq_000"})
+    ds = SegmentationDataset(_context_config(root, memory_prior="labels"))
+
+    image, _mask = ds[1]  # with torch: (C, H, W)
+    assert image.shape == (4, _SYNTH_SIZE, _SYNTH_SIZE), (
+        "with torch the memory is the last channel, CHW"
+    )
+    assert torch.is_tensor(image)
+    assert torch.all(image[3] == 1.0), "the memory is appended unnormalised, exactly 1.0"
+
+
+def test_memory_corruption_needs_label_memory():
+    from pydantic import ValidationError
+
+    from deepcontrail.segmentation.config import MemoryCorruptionConfig, SegmentationDataConfig
+
+    with pytest.raises(ValidationError, match="memory_corruption"):
+        SegmentationDataConfig(
+            false_color=RECIPE,
+            root="/tmp/fake",
+            memory_prior="empty",  # a non-label memory has nothing to corrupt
+            memory_corruption=MemoryCorruptionConfig(),
+        )

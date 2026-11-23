@@ -55,6 +55,38 @@ class AugmentationConfig(BaseModel):
     brightness_contrast: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
 
 
+class MemoryCorruptionConfig(BaseModel):
+    """Training-time corruption of the memory, so the previous label looks like a prediction.
+
+    At inference the memory is the model's own prediction for the previous frame: incomplete,
+    shifted and soft. Each training item draws, in order: an empty memory (``empty_rate``); else
+    contrails removed one by one (``drop_rate``), a random shift (``max_shift``), a Gaussian blur
+    (``max_blur_sigma``) and a scaling of the values (``min_scale``).
+
+    Parameters
+    ----------
+    empty_rate
+        Probability that the whole memory is zeros (a sequence start, or a lost memory).
+    drop_rate
+        Probability that each contrail (connected region of the memory above zero) is removed.
+    max_shift
+        The memory moves by a random whole number of pixels in ``[-max_shift, max_shift]`` along
+        each axis (contrails drift between frames); zeros enter at the edges.
+    max_blur_sigma
+        Gaussian blur with a sigma drawn uniformly in ``[0, max_blur_sigma]`` pixels.
+    min_scale
+        The values are multiplied by a factor drawn uniformly in ``[min_scale, 1]``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    empty_rate: Annotated[float, Field(ge=0.0, le=1.0)] = 0.25
+    drop_rate: Annotated[float, Field(ge=0.0, le=1.0)] = 0.2
+    max_shift: Annotated[int, Field(ge=0)] = 8
+    max_blur_sigma: Annotated[float, Field(ge=0.0)] = 1.5
+    min_scale: Annotated[float, Field(gt=0.0, le=1.0)] = 0.6
+
+
 class SegmentationDataConfig(DatasetConfig):
     """Complete segmentation data pipeline configuration.
 
@@ -94,6 +126,16 @@ class SegmentationDataConfig(DatasetConfig):
         ``3*(2k+1)`` channels in time order; needs ``metadata/neighbours.json`` (see
         :func:`deepcontrail.core.contract.read_neighbours`), and missing neighbours repeat the
         nearest frame. Default 0 keeps the plain 3-channel image.
+    memory_prior
+        The track-memory channel appended after the image channels (for a model with
+        ``track_memory``). ``"none"`` (default): no extra channel. ``"labels"``: the previous
+        frame's label at the same window (the soft label with ``mask_type: probability``, the
+        consensus mask otherwise), zeros at a sequence start; needs ``metadata/neighbours.json``.
+        ``"empty"``: zeros; validation and test use it during training, so no label of the
+        previous frame leaks into model selection.
+    memory_corruption
+        With ``memory_prior: labels``, the training-time corruption of the memory (see
+        ``MemoryCorruptionConfig``); ``None`` keeps the clean previous label.
     batch_size
         Batch size for the DataLoader (not used by the Dataset itself).
     num_workers
@@ -114,6 +156,8 @@ class SegmentationDataConfig(DatasetConfig):
     crops_per_scene: Annotated[int, Field(ge=1)] = 1
     train_tile_stride: Annotated[int, Field(gt=0)] | None = None
     context_frames: Annotated[int, Field(ge=0)] = 0
+    memory_prior: Literal["none", "labels", "empty"] = "none"
+    memory_corruption: MemoryCorruptionConfig | None = None
     batch_size: Annotated[int, Field(gt=0)] = 16
     num_workers: Annotated[int, Field(ge=0)] = 4
     augmentation: AugmentationConfig | None = None
@@ -140,5 +184,13 @@ class SegmentationDataConfig(DatasetConfig):
             raise ValueError(msg)
         if self.train_tile_stride > self.crop_size:
             msg = "train_tile_stride must be <= crop_size"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _memory_corruption_needs_labels(self) -> Self:
+        """Reject a memory corruption without a label memory to corrupt."""
+        if self.memory_corruption is not None and self.memory_prior != "labels":
+            msg = 'memory_corruption needs memory_prior: "labels"'
             raise ValueError(msg)
         return self
