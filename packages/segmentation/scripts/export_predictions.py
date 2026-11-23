@@ -5,7 +5,8 @@ reporting must come from whole frames predicted the way users will: the library'
 ``predict`` cuts a scene larger than the model's native size into overlapping
 native-size tiles and blends them with tent weights (the pixel scale never changes).
 This script writes one float32 probability map per scene of a split; ``evaluate_scenes.py``
-then scores those maps against the dataset labels.
+then scores those maps against the dataset labels. A track-memory bundle is exported in time
+order, sequence by sequence, feeding each frame the map of its previous frame as its memory.
 
 The false-colour recipe comes from the training ``--config`` (its ``data`` section), not
 from the bundle: the bundle may have been trained on another sensor's band keys.
@@ -137,6 +138,31 @@ def _build_composite(
     return np.concatenate([_composite(cid) for cid in ids], axis=-1)
 
 
+def _in_time_order(
+    stems: list[str], neighbours: dict[str, tuple[str | None, str | None]]
+) -> list[str]:
+    """Order ``stems`` sequence by sequence, each in time order (``neighbours.json`` links).
+
+    A sequence starts at a scene whose previous frame is not among ``stems`` and follows the next
+    links while they stay among ``stems``. Sequences come in the order of their first scene in
+    ``stems``; a scene that no sequence reaches (a broken link) keeps its order at the end.
+    """
+    selected = set(stems)
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for stem in stems:
+        prev = neighbours.get(stem, (None, None))[0]
+        if stem in seen or (prev is not None and prev in selected):
+            continue
+        current: str | None = stem
+        while current is not None and current in selected and current not in seen:
+            ordered.append(current)
+            seen.add(current)
+            current = neighbours.get(current, (None, None))[1]
+    ordered += [stem for stem in stems if stem not in seen]
+    return ordered
+
+
 def main(argv: list[str] | None = None) -> int:
     """Export one float32 probability map per scene of a split; return 0."""
     parser = argparse.ArgumentParser(
@@ -200,16 +226,37 @@ def main(argv: list[str] | None = None) -> int:
             )
             raise DatasetContractError(msg)
 
+    # A track-memory bundle feeds each scene the map of its previous frame: the scenes go in time
+    # order, sequence by sequence, and each map becomes the next frame's memory.
+    track_memory = pretrained.config.model.track_memory
+    if track_memory:
+        if neighbours is None:
+            neighbours = read_neighbours(root)
+        if neighbours is None:
+            msg = (
+                f"{root / NEIGHBOURS_PATH}: missing; a track-memory bundle needs "
+                "metadata/neighbours.json"
+            )
+            raise DatasetContractError(msg)
+        stems = _in_time_order(stems, neighbours)
+        logger.info(
+            "Track-memory bundle: scenes in time order, each map is the next frame's memory"
+        )
+
     args.out.mkdir(parents=True, exist_ok=True)
     n = len(stems)
     tta = args.tta if args.tta is not None else pretrained.config.tta
     logger.info("Exporting %d scene(s) of the %s split of %s", n, args.split, root)
 
     done = 0
+    last_stem: str | None = None
+    last_map: np.ndarray | None = None
     for i, stem in enumerate(stems):
         out_path = args.out / f"{stem}.npy"
         if out_path.exists():  # resumable: keep the map already written
             done += 1
+            if track_memory:
+                last_stem, last_map = stem, np.load(out_path)
             continue
         composite = _build_composite(
             stem,
@@ -219,14 +266,25 @@ def main(argv: list[str] | None = None) -> int:
             neighbours=neighbours,
             context_k=context_k,
         )
+        memory = None
+        if (
+            track_memory
+            and neighbours is not None
+            and last_stem is not None
+            and neighbours.get(stem, (None, None))[0] == last_stem
+        ):
+            memory = last_map
         probs = predict(
             pretrained,
             composite,
+            memory=memory,
             tta=tta,
             pixel_shift=data_cfg.pixel_shift,
             batch_size=args.batch_size,
         )
         _atomic_save_npy(out_path, np.ascontiguousarray(probs, dtype=np.float32))
+        if track_memory:
+            last_stem, last_map = stem, probs
         done += 1
         if i % 50 == 0:
             print(f"[{i + 1}/{n}] {stem} -> {out_path.name}")
@@ -239,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:
                 "config": str(args.config),
                 "split": args.split,
                 "tta": tta,
+                "track_memory": track_memory,
                 "n_scenes": n,
                 "created": datetime.now(UTC).isoformat(),
             },

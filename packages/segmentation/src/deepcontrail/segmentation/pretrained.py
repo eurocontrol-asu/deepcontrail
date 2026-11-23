@@ -210,11 +210,31 @@ def _prepare(composite: np.ndarray, config: PretrainedConfig, pixel_shift: float
     return _normalized(image_t, config.normalize)
 
 
+def _prepare_item(
+    composite: np.ndarray, memory: np.ndarray | None, config: PretrainedConfig, pixel_shift: float
+) -> torch.Tensor:
+    """``_prepare`` the composite, then append the memory map (if any) as the last channel.
+
+    The memory is a probability map on the label grid: neither shifted nor normalised, only resized
+    (bilinear) like the image when ``image_size`` differs from its size.
+    """
+    image_t = _prepare(composite, config, pixel_shift)
+    if memory is None:
+        return image_t
+    memory_t = torch.from_numpy(np.ascontiguousarray(memory, dtype=np.float32))[None]
+    if tuple(memory_t.shape[-2:]) != tuple(image_t.shape[-2:]):
+        memory_t = F.interpolate(
+            memory_t[None], size=tuple(image_t.shape[-2:]), mode="bilinear", align_corners=False
+        )[0]
+    return torch.cat([image_t, memory_t], dim=0)
+
+
 @torch.no_grad()
 def predict(
     pretrained: Pretrained,
     composite: np.ndarray,
     *,
+    memory: np.ndarray | None = None,
     tta: bool | None = None,
     pixel_shift: float = 0.0,
     batch_size: int = 8,
@@ -233,6 +253,11 @@ def predict(
         size of the scenes the model was trained on. A scene exactly that size is predicted as-is;
         a larger one is predicted in ``native_size`` tiles overlapping by half and blended with tent
         weights (centres weigh most), so the pixel scale never changes.
+    memory
+        For a model with ``track_memory``: the contrail probability map of the previous frame,
+        ``(H, W)`` or ``(N, H, W)`` like ``composite``, in [0, 1] (usually this function's output
+        for the previous frame). ``None`` (default) is an empty memory (zeros), as at the start of
+        a sequence. Must be ``None`` for a model without track memory.
     tta
         Average the 8 D4 transforms. ``None`` (default) follows ``pretrained.config.tta``,
         the setting the model was evaluated with; ``True`` or ``False`` overrides it.
@@ -256,7 +281,9 @@ def predict(
         change the pixel scale the model was trained on. Also if the batch is empty, ``batch_size``
         is below one, the composite is not a float array (the model expects ``[0, 1]`` floats, as
         built by ``false_color_from_spectral``), or it holds a NaN, an infinite or an out-of-range
-        value: any of these turns every output NaN or gives meaningless probabilities.
+        value: any of these turns every output NaN or gives meaningless probabilities. Also if
+        ``memory`` is given for a model without track memory, does not match the composite's batch
+        and size, or holds values that are not finite or outside [0, 1].
     """
     single = composite.ndim == 3
     batch = composite[None] if single else composite
@@ -291,6 +318,25 @@ def predict(
     if low < 0.0 or high > 1.0:
         raise ValueError(f"composite values must be in [0, 1], got [{low:g}, {high:g}]")
 
+    track_memory = pretrained.config.model.track_memory
+    if memory is not None and not track_memory:
+        raise ValueError("memory is given, but the model has no track memory (model.track_memory)")
+    memories: np.ndarray | None = None
+    if track_memory:
+        if memory is None:
+            memories = np.zeros(batch.shape[:3], np.float32)
+        else:
+            memories = memory[None] if memory.ndim == 2 else memory
+            if memories.shape != batch.shape[:3]:
+                msg = (
+                    f"memory shape {memory.shape} does not match the composite's "
+                    f"{composite.shape[:-1]}"
+                )
+                raise ValueError(msg)
+            if not np.isfinite(memories).all() or memories.min() < 0.0 or memories.max() > 1.0:
+                raise ValueError("memory values must be finite and in [0, 1]")
+            memories = memories.astype(np.float32)
+
     if tta is None:
         tta = pretrained.config.tta
     if height == size and width == size:
@@ -299,9 +345,17 @@ def predict(
         outputs: list[np.ndarray] = []
         for start in range(0, len(batch), batch_size):
             window = batch[start : start + batch_size]
-            images = torch.stack([_prepare(c, pretrained.config, pixel_shift) for c in window]).to(
-                pretrained.device
-            )
+            images = torch.stack(
+                [
+                    _prepare_item(
+                        c,
+                        None if memories is None else memories[start + j],
+                        pretrained.config,
+                        pixel_shift,
+                    )
+                    for j, c in enumerate(window)
+                ]
+            ).to(pretrained.device)
             if tta:
                 probs = tta_predict(network, images)
             else:
@@ -318,11 +372,24 @@ def predict(
     col_origins = tile_origins(width, size, size // 2)
     offsets = [(r0, c0) for r0 in row_origins for c0 in col_origins]
     tiles = [scene[r0 : r0 + size, c0 : c0 + size] for scene in batch for (r0, c0) in offsets]
+    memory_tiles = (
+        None
+        if memories is None
+        else [m[r0 : r0 + size, c0 : c0 + size] for m in memories for (r0, c0) in offsets]
+    )
     network = _AtInputSize(pretrained.model, (size, size)).eval()
     tile_probs: list[np.ndarray] = []
     for start in range(0, len(tiles), batch_size):
         images = torch.stack(
-            [_prepare(t, pretrained.config, pixel_shift) for t in tiles[start : start + batch_size]]
+            [
+                _prepare_item(
+                    t,
+                    None if memory_tiles is None else memory_tiles[start + j],
+                    pretrained.config,
+                    pixel_shift,
+                )
+                for j, t in enumerate(tiles[start : start + batch_size])
+            ]
         ).to(pretrained.device)
         probs = tta_predict(network, images) if tta else torch.sigmoid(network(images)).squeeze(1)
         tile_probs.append(probs.float().cpu().numpy())
