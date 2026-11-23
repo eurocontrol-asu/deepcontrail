@@ -36,6 +36,11 @@ class ModelConfig(BaseModel):
         of one image and the first convolution is widened. ``"features"``: every frame goes through
         the same 3-channel encoder and the frames' features are merged at every scale (late fusion,
         ``models/temporal.py``); ``in_channels`` must then be ``3 x F`` with ``F`` odd and >= 3.
+    track_memory
+        The network also takes the contrail probability map of the previous frame as one extra
+        input channel, after the ``in_channels`` image channels (``models/memory.py``): at
+        inference, the model's own prediction for the previous frame, so it can keep following
+        contrails as they age. ``False`` (default): no extra channel, unchanged.
     classes
         Number of output classes (1 for binary segmentation).
     decoder_attention_type
@@ -57,6 +62,7 @@ class ModelConfig(BaseModel):
     encoder_weights: str | None = "imagenet"
     in_channels: Annotated[int, Field(gt=0)] = 3
     temporal_fusion: Literal["input", "features"] = "input"
+    track_memory: bool = False
     classes: Annotated[int, Field(gt=0)] = 1
     decoder_attention_type: str | None = None
     decoder_use_norm: bool | str = "batchnorm"

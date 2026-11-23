@@ -19,7 +19,8 @@ def build_model(config: ModelConfig) -> nn.Module:
     Returns a plain ``torch.nn.Module``. The training script is responsible
     for wrapping it in a Lightning module, optimizer, and scheduler.
     With ``temporal_fusion="features"`` the encoder is wrapped in a
-    ``TemporalFusionEncoder``.
+    ``TemporalFusionEncoder``. With ``track_memory`` the (possibly wrapped) encoder is wrapped
+    once more in a ``TrackMemoryEncoder``.
 
     Parameters
     ----------
@@ -50,6 +51,11 @@ def build_model(config: ModelConfig) -> nn.Module:
         from deepcontrail.segmentation.models.temporal import TemporalFusionEncoder
 
         model.encoder = TemporalFusionEncoder(model.encoder, frames=config.in_channels // 3)
+    if config.track_memory:
+        from deepcontrail.segmentation.models.memory import TrackMemoryEncoder
+
+        # Outermost wrapper: the memory channel is the last input channel, after the image.
+        model.encoder = TrackMemoryEncoder(model.encoder, image_channels=config.in_channels)
     return model  # type: ignore[no-any-return]
 
 

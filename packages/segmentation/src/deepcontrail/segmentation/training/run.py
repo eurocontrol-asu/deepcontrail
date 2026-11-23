@@ -217,8 +217,10 @@ def load_initial_weights(model: torch.nn.Module, source: str, revision: str | No
     output on the centre frame. Every input convolution whose channel count is an odd multiple
     greater than one of the source's is widened this way (its neighbour blocks zeroed); every other
     weight is copied as-is, and any other shape mismatch still raises (strict load).
-    A ``temporal_fusion="features"`` model starts from a single-frame model the same way: the source
-    encoder runs on every frame and the fusion layers start as the identity on the centre frame.
+    A model with encoder wrappers the source lacks (``temporal_fusion="features"`` or
+    ``track_memory``) starts from it the same way: the source encoder goes inside the wrappers,
+    whose own layers keep their initialisation (fusion as the identity on the centre frame, memory
+    projections at zero).
 
     Parameters
     ----------
@@ -249,7 +251,7 @@ def load_initial_weights(model: torch.nn.Module, source: str, revision: str | No
 
         weights = load_pretrained(source, revision=revision).model.state_dict()
     _widen_temporal_inputs(model, weights)
-    _nest_into_temporal_encoder(model, weights)
+    _nest_into_wrappers(model, weights)
     model.load_state_dict(weights, strict=True)
 
 
@@ -302,32 +304,37 @@ def _widen_temporal_inputs(model: torch.nn.Module, weights: dict[str, torch.Tens
         )
 
 
-def _nest_into_temporal_encoder(model: torch.nn.Module, weights: dict[str, torch.Tensor]) -> None:
-    """Initialise a feature-fusion temporal model from a single-frame model's weights.
+def _nest_into_wrappers(model: torch.nn.Module, weights: dict[str, torch.Tensor]) -> None:
+    """Initialise a model whose encoder has wrappers that the source model does not have.
 
-    In a ``temporal_fusion="features"`` model the single-frame encoder is wrapped: its weights are
-    under ``encoder.encoder.`` and the fusion convolutions under ``encoder.fuse.``. When ``model``
-    is such a model and ``weights`` come from a single-frame model (no ``encoder.fuse.`` key), the
-    source's ``encoder.`` weights move under ``encoder.encoder.`` and the fusion convolutions keep
-    their initialisation (the identity on the centre frame): before training, the model gives
-    exactly the source model's output on the centre frame. Anything else is left to the strict
-    load, which rejects a mismatch.
+    The wrappers, outermost first: ``TrackMemoryEncoder`` (own layers ``inject``) and
+    ``TemporalFusionEncoder`` (own layers ``fuse``); each keeps the encoder it wraps under
+    ``encoder``. For each wrapper the source lacks (none of its keys has that wrapper's own layer
+    prefix), every source key at that level moves one ``encoder.`` deeper and the wrapper's own
+    layers keep the model's initialisation: zero memory projections, fusion as the identity on the
+    centre frame. Before training, the model therefore gives exactly the source model's output (on
+    the centre frame, with any memory map). Wrappers the source has are left as they are, and any
+    other mismatch is left to the strict load, which rejects it.
     """
+    from deepcontrail.segmentation.models.memory import TrackMemoryEncoder
     from deepcontrail.segmentation.models.temporal import TemporalFusionEncoder
 
-    if not isinstance(getattr(model, "encoder", None), TemporalFusionEncoder):
-        return
-    if any(key.startswith("encoder.fuse.") for key in weights):
-        return
-    for key in [key for key in weights if key.startswith("encoder.")]:
-        weights["encoder.encoder." + key.removeprefix("encoder.")] = weights.pop(key)
-    for key, value in model.state_dict().items():
-        if key.startswith("encoder.fuse."):
-            weights[key] = value
-    print(
-        "Initialising temporal feature fusion: the source encoder on every frame, "
-        "fusion layers as the identity on the centre frame"
-    )
+    own_layers = {TrackMemoryEncoder: "inject.", TemporalFusionEncoder: "fuse."}
+    prefix = "encoder."
+    module = getattr(model, "encoder", None)
+    while type(module) in own_layers:
+        own = prefix + own_layers[type(module)]
+        if not any(key.startswith(own) for key in weights):
+            for key in [key for key in weights if key.startswith(prefix)]:
+                weights[prefix + "encoder." + key.removeprefix(prefix)] = weights.pop(key)
+            for key, value in model.state_dict().items():
+                if key.startswith(own):
+                    weights[key] = value
+            print(
+                f"Initialising {type(module).__name__}: source weights nested, own layers as built"
+            )
+        prefix += "encoder."
+        module = module.encoder  # type: ignore[union-attr]
 
 
 def _validate_input_channels(context_frames: int, in_channels: int) -> None:
