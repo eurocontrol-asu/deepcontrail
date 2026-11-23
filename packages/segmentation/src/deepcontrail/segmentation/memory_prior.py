@@ -16,7 +16,9 @@ def corrupt_memory(
     """Return a corrupted copy of a ``(H, W)`` memory in [0, 1] (see ``MemoryCorruptionConfig``).
 
     In order: the whole map is zeroed with probability ``empty_rate`` (and returned); each
-    connected region above zero is removed with probability ``drop_rate``; the map moves by a
+    connected region above zero is removed with probability ``drop_rate``; a false copy shifted by
+    ``ghost_shift`` pixels is added with probability ``ghost_rate``; the contrails are widened by a
+    radius drawn in ``[0, max_dilation]``; the map moves by a
     random whole offset in ``[-max_shift, max_shift]`` per axis (zeros enter); it is blurred with a
     sigma drawn in ``[0, max_blur_sigma]`` and multiplied by a factor drawn in ``[min_scale, 1]``.
     The result is float32 clipped to [0, 1]; the input is not modified.
@@ -32,6 +34,18 @@ def corrupt_memory(
         if count:
             dropped = np.flatnonzero(rng.random(count) < config.drop_rate) + 1
             out[np.isin(regions, dropped)] = 0.0
+    if config.ghost_rate > 0 and rng.random() < config.ghost_rate:
+        # A false copy where the image shows no contrail: the memory must be checked, not copied.
+        angle = rng.uniform(0.0, 2.0 * np.pi)
+        distance = int(rng.integers(config.ghost_shift[0], config.ghost_shift[1] + 1))
+        gy, gx = round(distance * np.sin(angle)), round(distance * np.cos(angle))
+        out = np.maximum(out, _shift(out, int(gy), int(gx)))
+    if config.max_dilation > 0:
+        radius = int(rng.integers(0, config.max_dilation + 1))
+        if radius:
+            from scipy.ndimage import maximum_filter
+
+            out = maximum_filter(out, size=2 * radius + 1)
     if config.max_shift > 0:
         dy, dx = (int(v) for v in rng.integers(-config.max_shift, config.max_shift + 1, size=2))
         out = _shift(out, dy, dx)

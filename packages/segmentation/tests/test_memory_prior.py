@@ -131,3 +131,68 @@ def test_corrupt_memory_is_reproducible_with_the_same_seed():
     b = corrupt_memory(memory, config, np.random.default_rng(7))
 
     np.testing.assert_array_equal(a, b, err_msg="the same seed gives the same corruption")
+
+
+def _line() -> np.ndarray:
+    """Return a (64, 64) memory with one contrail, 1 px wide, at row 32, columns 20-43."""
+    memory = np.zeros((64, 64), np.float32)
+    memory[32, 20:44] = 1.0
+    return memory
+
+
+def test_corrupt_memory_ghost_adds_a_shifted_copy_and_keeps_the_original():
+    memory = _line()
+    config = _none().model_copy(update={"ghost_rate": 1.0, "ghost_shift": (12, 12)})
+
+    out = corrupt_memory(memory, config, np.random.default_rng(0))
+
+    assert (out[memory > 0] == 1.0).all(), "the true contrail stays in the memory"
+    assert (out > 0).sum() > (memory > 0).sum(), "a false copy is added where the image has none"
+
+    def shifted(image: np.ndarray, dy: int, dx: int) -> np.ndarray:
+        moved = np.zeros_like(image)
+        h, w = image.shape
+        moved[max(dy, 0) : h + min(dy, 0), max(dx, 0) : w + min(dx, 0)] = image[
+            max(-dy, 0) : h + min(-dy, 0), max(-dx, 0) : w + min(-dx, 0)
+        ]
+        return moved
+
+    matches = [
+        (dy, dx)
+        for dy in range(-13, 14)
+        for dx in range(-13, 14)
+        if 11 <= np.hypot(dy, dx) <= 13
+        and np.array_equal(out, np.maximum(memory, shifted(memory, dy, dx)))
+    ]
+    assert matches, "the output is the contrail plus one copy of it shifted by about 12 px"
+
+
+def test_corrupt_memory_ghost_rate_zero_leaves_the_random_stream_unchanged():
+    memory = np.random.default_rng(3).uniform(0, 1, (32, 32)).astype(np.float32)
+    plain = MemoryCorruptionConfig()
+    explicit = MemoryCorruptionConfig(ghost_rate=0.0, max_dilation=0)
+
+    a = corrupt_memory(memory, plain, np.random.default_rng(7))
+    b = corrupt_memory(memory, explicit, np.random.default_rng(7))
+
+    np.testing.assert_array_equal(
+        a, b, err_msg="ghost and dilation off draw nothing (TM1 unchanged)"
+    )
+
+
+def test_corrupt_memory_dilation_widens_the_contrails():
+    memory = _line()
+    config = _none().model_copy(update={"max_dilation": 2})
+
+    widened = [corrupt_memory(memory, config, np.random.default_rng(s)) for s in range(10)]
+
+    assert all((w[memory > 0] == 1.0).all() for w in widened), "the contrail itself stays"
+    assert any((w > 0).sum() > (memory > 0).sum() for w in widened), "some draws widen it"
+    assert all(np.nonzero(w)[0].min() >= 30 for w in widened), "by at most 2 px"
+
+
+def test_memory_corruption_rejects_a_ghost_shift_range_upside_down():
+    import pytest
+
+    with pytest.raises(ValueError, match="ghost_shift"):
+        MemoryCorruptionConfig(ghost_shift=(40, 10))

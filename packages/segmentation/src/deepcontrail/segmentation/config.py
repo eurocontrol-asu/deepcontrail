@@ -60,7 +60,8 @@ class MemoryCorruptionConfig(BaseModel):
 
     At inference the memory is the model's own prediction for the previous frame: incomplete,
     shifted and soft. Each training item draws, in order: an empty memory (``empty_rate``); else
-    contrails removed one by one (``drop_rate``), a random shift (``max_shift``), a Gaussian blur
+    contrails removed one by one (``drop_rate``), a false shifted copy added (``ghost_rate``), the
+    contrails widened (``max_dilation``), a random shift (``max_shift``), a Gaussian blur
     (``max_blur_sigma``) and a scaling of the values (``min_scale``).
 
     Parameters
@@ -76,6 +77,16 @@ class MemoryCorruptionConfig(BaseModel):
         Gaussian blur with a sigma drawn uniformly in ``[0, max_blur_sigma]`` pixels.
     min_scale
         The values are multiplied by a factor drawn uniformly in ``[min_scale, 1]``.
+    ghost_rate
+        Probability of adding a false copy of the memory, shifted by ``ghost_shift`` pixels in a
+        random direction: contrails the image does not show, so the model learns to check the
+        memory against the image instead of copying it. ``0`` (default) adds none.
+    ghost_shift
+        ``(min, max)`` distance of the false copy, in pixels.
+    max_dilation
+        The contrails are widened by a radius drawn in ``[0, max_dilation]`` pixels (maximum
+        filter), so the model learns to bring a spread memory back to the contrail. ``0``
+        (default) never widens.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -85,6 +96,17 @@ class MemoryCorruptionConfig(BaseModel):
     max_shift: Annotated[int, Field(ge=0)] = 8
     max_blur_sigma: Annotated[float, Field(ge=0.0)] = 1.5
     min_scale: Annotated[float, Field(gt=0.0, le=1.0)] = 0.6
+    ghost_rate: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
+    ghost_shift: tuple[Annotated[int, Field(ge=1)], Annotated[int, Field(ge=1)]] = (16, 64)
+    max_dilation: Annotated[int, Field(ge=0)] = 0
+
+    @model_validator(mode="after")
+    def _ghost_shift_is_a_range(self) -> Self:
+        """Reject a ``ghost_shift`` whose minimum exceeds its maximum."""
+        if self.ghost_shift[0] > self.ghost_shift[1]:
+            msg = f"ghost_shift must be (min, max) with min <= max, got {self.ghost_shift}"
+            raise ValueError(msg)
+        return self
 
 
 class SegmentationDataConfig(DatasetConfig):
