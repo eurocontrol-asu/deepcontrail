@@ -257,11 +257,11 @@ def main(argv: list[str] | None = None) -> int:
     save_pretrained(model, config, args.output_dir)
 
     # The bundle must give exactly the checkpoint's outputs, on the model's own input channels
-    # (3 x (2k+1) for a temporal model).
+    # (3 x (2k+1) for a temporal model, plus the memory channel of a track-memory model).
     loaded = load_pretrained(args.output_dir)
     x = torch.randn(
         1,
-        model_cfg.in_channels,
+        model_cfg.in_channels + (1 if model_cfg.track_memory else 0),
         config.image_size,
         config.image_size,
         generator=torch.manual_seed(0),

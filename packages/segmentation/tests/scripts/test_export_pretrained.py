@@ -133,6 +133,28 @@ def test_export_checks_a_temporal_model_on_its_own_input_channels(
         )
 
 
+def test_export_checks_a_track_memory_model_with_its_memory_channel(
+    tmp_path: Path, synthetic_root: Path
+):
+    from deepcontrail.segmentation.pretrained import load_pretrained
+
+    ckpt, config, model = _checkpoint(tmp_path, synthetic_root, model_extra={"track_memory": True})
+    out = tmp_path / "bundle"
+
+    code = _load_script().main(
+        ["--checkpoint", str(ckpt), "--config", str(config), "--output-dir", str(out)]
+    )
+
+    assert code == 0, "a track-memory model (image channels + 1 memory channel) must export"
+    assert (out / "README.md").exists(), "the export must run to the end and write the model card"
+    loaded = load_pretrained(out)
+    x = torch.randn(1, 4, 32, 32, generator=torch.manual_seed(1))
+    with torch.no_grad():
+        assert torch.equal(loaded.model(x), model(x)), (
+            "the bundle must hold the checkpoint's weights, memory layers included"
+        )
+
+
 def test_export_requires_a_config(tmp_path: Path, synthetic_root: Path):
     """A config is required: exporting without it silently used a reference recipe."""
     ckpt, _, _ = _checkpoint(tmp_path, synthetic_root)
