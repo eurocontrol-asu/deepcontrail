@@ -6,6 +6,16 @@ All notable changes to DeepContrail are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-23
+
+Documentation and metadata only: the code and the pretrained model are unchanged.
+
+### Changed
+
+- The README, `CITATION.cff` and the Zenodo record credit the people behind the project: the
+  Zenodo record lists its contributors, and the README thanks them. The spelling of
+  Valentin Tordjman-Levavasseur is corrected.
+
 ## [0.3.0] - 2026-11-16
 
 Instance segmentation leaves preview, and the PyPI package `deepcontrail` installs the whole
@@ -122,6 +132,8 @@ instance segmentation.
   revision `v0.1.0`: Unet++ with a CAFormer-B36 encoder, test Dice 0.6974 with test-time
   augmentation, plus the instance step tuned for it.
 
-[Unreleased]: https://github.com/eurocontrol-asu/deepcontrail/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/eurocontrol-asu/deepcontrail/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/eurocontrol-asu/deepcontrail/releases/tag/v0.3.1
+[0.3.0]: https://github.com/eurocontrol-asu/deepcontrail/releases/tag/v0.3.0
 [0.2.0]: https://github.com/eurocontrol-asu/deepcontrail/releases/tag/v0.2.0
 [0.1.0]: https://github.com/eurocontrol-asu/deepcontrail/releases/tag/v0.1.0

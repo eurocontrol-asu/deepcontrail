@@ -1,6 +1,6 @@
 [project]
 name = "deepcontrail-segmentation"
-version = "0.3.0"
+version = "0.3.1"
 description = "DeepContrail — semantic segmentation of contrails in satellite imagery."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -5,6 +5,14 @@
   "creators": [
     {"name": "Heffar, Amine", "affiliation": "EUROCONTROL Aviation Sustainability Unit"}
   ],
+  "contributors": [
+    {"name": "Very, Philippe", "type": "ProjectLeader", "affiliation": "EUROCONTROL Aviation Sustainability Unit"},
+    {"name": "Jarry, Gabriel", "type": "Researcher", "affiliation": "EUROCONTROL Aviation Sustainability Unit"},
+    {"name": "Tordjman-Levavasseur, Valentin", "type": "Researcher", "affiliation": "EUROCONTROL Aviation Sustainability Unit"},
+    {"name": "Pelin, Ana-Maria", "type": "Researcher", "affiliation": "EUROCONTROL Aviation Sustainability Unit"},
+    {"name": "Dalmau, Ramon", "type": "Researcher", "affiliation": "EUROCONTROL Aviation Sustainability Unit"},
+    {"name": "EUROCONTROL", "type": "HostingInstitution"}
+  ],
   "license": "EUPL-1.2",
   "keywords": ["contrails", "semantic segmentation", "instance segmentation", "satellite imagery", "remote sensing", "GOES-16", "deep learning", "aviation", "climate"],
   "related_identifiers": [
