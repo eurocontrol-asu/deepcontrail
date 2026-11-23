@@ -6,8 +6,8 @@ authors:
   - family-names: Heffar
     given-names: Amine
     affiliation: EUROCONTROL Aviation Sustainability Unit
-version: 0.3.0
-date-released: 2026-11-16
+version: 0.3.1
+date-released: 2026-11-23
 doi: 10.5281/zenodo.24130966
 license: EUPL-1.2
 repository-code: "https://github.com/eurocontrol-asu/deepcontrail"
@@ -54,7 +54,7 @@ references:
         given-names: Philippe
       - family-names: Heffar
         given-names: Amine
-      - family-names: Torjman-Levavasseur
+      - family-names: Tordjman-Levavasseur
         given-names: Valentin
     collection-title: "Proceedings of the SESAR Innovation Days"
     year: 2024

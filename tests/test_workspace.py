@@ -262,6 +262,33 @@ def test_citation_metadata_matches_the_packages():
     ], "Zenodo and CITATION.cff give the same affiliations"
 
 
+# Contributor types Zenodo accepts in `.zenodo.json` (legacy deposit metadata).
+ZENODO_CONTRIBUTOR_TYPES = {
+    "ContactPerson", "DataCollector", "DataCurator", "DataManager", "Distributor", "Editor",
+    "HostingInstitution", "Producer", "ProjectLeader", "ProjectManager", "ProjectMember",
+    "RegistrationAgency", "RegistrationAuthority", "RelatedPerson", "Researcher", "ResearchGroup",
+    "RightsHolder", "Supervisor", "Sponsor", "WorkPackageLeader", "Other",
+}  # fmt: skip
+
+
+def test_zenodo_contributors_are_valid():
+    zenodo = json.loads((ROOT / ".zenodo.json").read_text(encoding="utf-8"))
+    creators = {c["name"] for c in zenodo["creators"]}
+
+    contributors = zenodo.get("contributors", [])
+
+    assert contributors, "Zenodo credits the people and the institution behind the project"
+    bad_types = [c for c in contributors if c.get("type") not in ZENODO_CONTRIBUTOR_TYPES]
+    assert not bad_types, f"Zenodo rejects a deposit with an unknown contributor type: {bad_types}"
+    people = [c["name"] for c in contributors if c["type"] != "HostingInstitution"]
+    assert all(re.fullmatch(r"[^,]+, [^,]+", n) for n in people), (
+        f"Zenodo names people as 'Family, Given': {people}"
+    )
+    assert not creators & {c["name"] for c in contributors}, (
+        "a creator is not listed again as a contributor"
+    )
+
+
 def test_readme_doi_badge_cites_the_citation_doi():
     citation = yaml.safe_load((ROOT / "CITATION.cff").read_text(encoding="utf-8"))
     readme = (ROOT / "README.md").read_text(encoding="utf-8")

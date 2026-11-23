@@ -245,7 +245,7 @@ DeepContrail continues an earlier study of contrail segmentation on GOES-16 by t
 
 ```bibtex
 @inproceedings{jarry2024deep,
-  author    = {Jarry, Gabriel and Very, Philippe and Heffar, Amine and Torjman-Levavasseur, Valentin},
+  author    = {Jarry, Gabriel and Very, Philippe and Heffar, Amine and Tordjman-Levavasseur, Valentin},
   title     = {Deep Semantic Contrails Segmentation of {GOES-16} Satellite Images: A Hyperparameter Exploration},
   booktitle = {Proceedings of the SESAR Innovation Days},
   year      = {2024},
@@ -262,7 +262,13 @@ dataset by Google Research. GOES-16 imagery is courtesy of NOAA. The segmentatio
 [PyTorch Lightning](https://github.com/Lightning-AI/pytorch-lightning). The instance package's
 references are listed in [`packages/instance`](packages/instance#references-and-acknowledgements).
 DeepContrail continues the contrail segmentation study of Jarry, Very, Heffar and
-Torjman-Levavasseur ([SESAR Innovation Days 2024](https://sesar.eu/sites/default/files/documents/sid/2024/papers/SIDs_2024_paper_028%20final.pdf); see [Citing](#citing)).
+Tordjman-Levavasseur ([SESAR Innovation Days 2024](https://sesar.eu/sites/default/files/documents/sid/2024/papers/SIDs_2024_paper_028%20final.pdf); see [Citing](#citing)).
+
+DeepContrail was initiated within the EUROCONTROL Aviation Sustainability Unit, led by Philippe
+Very. We thank Gabriel Jarry, Valentin Tordjman-Levavasseur, Philippe Very and Ana-Maria Pelin for
+their earlier work on contrail segmentation, and Marylin Bastin, Head of the EUROCONTROL Aviation
+Sustainability Unit, Robin Deransy, Senior Team Leader of its Environmental Modelling &
+Assessments Service, and Ramon Dalmau for their support.
 
 ## Contact
 
