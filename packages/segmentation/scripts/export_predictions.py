@@ -139,7 +139,7 @@ def _build_composite(
 
 
 def _shape_memory(previous: np.ndarray, threshold: float, scale: float) -> np.ndarray:
-    """Return the memory fed to the next frame: values below ``threshold`` zeroed, then x ``scale``."""
+    """Return the next frame's memory: values below ``threshold`` zeroed, then times ``scale``."""
     kept = np.where(previous >= threshold, previous, 0.0) if threshold > 0 else previous
     return np.clip(kept * scale, 0.0, 1.0).astype(np.float32)
 
