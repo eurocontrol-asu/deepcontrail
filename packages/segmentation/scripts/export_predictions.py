@@ -144,6 +144,16 @@ def _shape_memory(previous: np.ndarray, threshold: float, scale: float) -> np.nd
     return np.clip(kept * scale, 0.0, 1.0).astype(np.float32)
 
 
+def _warp(image: np.ndarray, flow: np.ndarray) -> np.ndarray:
+    """Return ``image`` warped by ``flow`` (H, W, 2; x, y): out(y) = image(y + flow(y))."""
+    from scipy.ndimage import map_coordinates
+
+    rows, cols = np.mgrid[0 : image.shape[0], 0 : image.shape[1]].astype(np.float32)
+    flow = flow.astype(np.float32)
+    coords = [rows + flow[..., 1], cols + flow[..., 0]]
+    return map_coordinates(image, coords, order=1, mode="constant", cval=0.0).astype(np.float32)
+
+
 def _in_time_order(
     stems: list[str], neighbours: dict[str, tuple[str | None, str | None]]
 ) -> list[str]:
@@ -225,6 +235,20 @@ def main(argv: list[str] | None = None) -> int:
         default=1.0,
         help="Track-memory bundles: the fed map is then multiplied by this (default 1).",
     )
+    parser.add_argument(
+        "--reverse",
+        action="store_true",
+        help="Run time backwards: previous and next frames swap everywhere (scene order, context "
+        "frames, memory), e.g. for a backward pass to combine with a forward one.",
+    )
+    parser.add_argument(
+        "--memory-flows",
+        type=Path,
+        default=None,
+        help="Track-memory bundles: folder of optical flows <stem>_prev.npy (<stem>_next.npy with "
+        "--reverse), (H, W, 2) with frame(y) ~ previous(y + flow(y)); the fed map is warped onto "
+        "the current frame with it (no file: fed unwarped).",
+    )
     args = parser.parse_args(argv)
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -251,12 +275,18 @@ def main(argv: list[str] | None = None) -> int:
             )
             raise DatasetContractError(msg)
 
+    # Backward in time: every "previous" becomes "next" (context stacking, order, memory).
+    if args.reverse and neighbours is not None:
+        neighbours = {stem: (nxt, prev) for stem, (prev, nxt) in neighbours.items()}
+
     # A track-memory bundle feeds each scene the map of its previous frame: the scenes go in time
     # order, sequence by sequence, and each map becomes the next frame's memory.
     track_memory = pretrained.config.model.track_memory
     if track_memory:
         if neighbours is None:
             neighbours = read_neighbours(root)
+            if neighbours is not None and args.reverse:
+                neighbours = {stem: (nxt, prev) for stem, (prev, nxt) in neighbours.items()}
         if neighbours is None:
             msg = (
                 f"{root / NEIGHBOURS_PATH}: missing; a track-memory bundle needs "
@@ -301,6 +331,11 @@ def main(argv: list[str] | None = None) -> int:
             and neighbours.get(stem, (None, None))[0] == last_stem
         ):
             memory = _shape_memory(last_map, args.memory_threshold, args.memory_scale)
+            if args.memory_flows is not None:
+                side = "next" if args.reverse else "prev"
+                flow_path = args.memory_flows / f"{stem}_{side}.npy"
+                if flow_path.exists():
+                    memory = _warp(memory, np.load(flow_path))
         probs = predict(
             pretrained,
             composite,
@@ -328,6 +363,8 @@ def main(argv: list[str] | None = None) -> int:
                 "memory": args.memory,
                 "memory_threshold": args.memory_threshold,
                 "memory_scale": args.memory_scale,
+                "reverse": args.reverse,
+                "memory_flows": None if args.memory_flows is None else str(args.memory_flows),
                 "n_scenes": n,
                 "created": datetime.now(UTC).isoformat(),
             },

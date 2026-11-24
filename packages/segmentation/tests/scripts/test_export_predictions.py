@@ -512,3 +512,43 @@ def test_export_track_memory_threshold_and_scale_shape_the_fed_map(
         0.5,
         0.5,
     ), "the manifest records how the memory was fed"
+
+
+def test_export_reverse_runs_each_sequence_backward_in_time(tmp_path: Path, synthetic_root: Path):
+    """--reverse: the last frame starts with an empty memory and feeds the frame before it."""
+    from deepcontrail.segmentation import predict
+
+    exported_second, pretrained, (first_c, second_c), data_cfg, out = _second_frame_with_options(
+        tmp_path, synthetic_root, "--reverse"
+    )
+
+    second = predict(pretrained, second_c, tta=False, pixel_shift=data_cfg.pixel_shift)
+    first = predict(pretrained, first_c, memory=second, tta=False, pixel_shift=data_cfg.pixel_shift)
+    np.testing.assert_allclose(exported_second, second, atol=1e-6, err_msg="last frame: empty")
+    np.testing.assert_allclose(
+        np.load(out / "test_000001.npy"), first, atol=1e-6, err_msg="fed the later frame's map"
+    )
+    assert json.loads((out / "manifest.json").read_text())["reverse"] is True
+
+
+def test_export_memory_flows_warp_the_fed_map_onto_the_frame(tmp_path: Path, synthetic_root: Path):
+    """--memory-flows: the fed map is warped by <stem>_prev.npy (a(y) ~ prev(y + f(y)))."""
+    from deepcontrail.segmentation import predict
+
+    flows = tmp_path / "flows"
+    flows.mkdir()
+    shift = np.zeros((16, 16, 2), np.float16)
+    shift[..., 1] = 1.0  # every pixel of frame 2 comes from one row below in frame 1
+    np.save(flows / "test_000002_prev.npy", shift)
+
+    exported, pretrained, (first_c, second_c), data_cfg, _ = _second_frame_with_options(
+        tmp_path, synthetic_root, "--memory-flows", str(flows)
+    )
+
+    first = predict(pretrained, first_c, tta=False, pixel_shift=data_cfg.pixel_shift)
+    warped = np.zeros_like(first)
+    warped[:-1] = first[1:]  # row r takes row r + 1; the last row has no source (0)
+    expected = predict(
+        pretrained, second_c, memory=warped, tta=False, pixel_shift=data_cfg.pixel_shift
+    )
+    np.testing.assert_allclose(exported, expected, atol=1e-5, err_msg="the memory was warped")
