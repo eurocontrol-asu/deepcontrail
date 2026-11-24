@@ -154,7 +154,10 @@ class SegmentationDataConfig(DatasetConfig):
         frame's label at the same window (the soft label with ``mask_type: probability``, the
         consensus mask otherwise), zeros at a sequence start; needs ``metadata/neighbours.json``.
         ``"empty"``: zeros; validation and test use it during training, so no label of the
-        previous frame leaks into model selection.
+        previous frame leaks into model selection. ``"feed"``: zeros in the data, which the
+        training module replaces by its own prediction for the same window of the previous frame
+        (validation in time order, as at inference); each item also returns its index and its
+        previous frame's index (``-1`` at a sequence start), and ``feed_batches`` orders them.
     memory_corruption
         With ``memory_prior: labels``, the training-time corruption of the memory (see
         ``MemoryCorruptionConfig``); ``None`` keeps the clean previous label.
@@ -165,6 +168,11 @@ class SegmentationDataConfig(DatasetConfig):
         used as is (real prediction errors, no corruption); a missing map falls back to the label.
     memory_maps_rate
         Share of items whose memory comes from ``memory_maps``; ``0`` (default) never.
+    memory_validation
+        For a training config with a memory: what validation feeds the model during training.
+        ``"empty"`` (default): an empty memory. ``"feed"``: the model's own prediction for the
+        previous frame, items in time order, as at inference, so the checkpoint is chosen on the
+        way the model is used. The test loader always keeps an empty memory.
     batch_size
         Batch size for the DataLoader (not used by the Dataset itself).
     num_workers
@@ -185,10 +193,11 @@ class SegmentationDataConfig(DatasetConfig):
     crops_per_scene: Annotated[int, Field(ge=1)] = 1
     train_tile_stride: Annotated[int, Field(gt=0)] | None = None
     context_frames: Annotated[int, Field(ge=0)] = 0
-    memory_prior: Literal["none", "labels", "empty"] = "none"
+    memory_prior: Literal["none", "labels", "empty", "feed"] = "none"
     memory_corruption: MemoryCorruptionConfig | None = None
     memory_maps: str | None = None
     memory_maps_rate: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
+    memory_validation: Literal["empty", "feed"] = "empty"
     batch_size: Annotated[int, Field(gt=0)] = 16
     num_workers: Annotated[int, Field(ge=0)] = 4
     augmentation: AugmentationConfig | None = None
@@ -216,6 +225,15 @@ class SegmentationDataConfig(DatasetConfig):
         if self.train_tile_stride > self.crop_size:
             msg = "train_tile_stride must be <= crop_size"
             raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _memory_validation_needs_a_memory(self) -> Self:
+        """Reject a fed validation memory for a model without a memory."""
+        if self.memory_validation == "feed" and self.memory_prior == "none":
+            raise ValueError(
+                'memory_validation: "feed" needs a memory (memory_prior other than "none")'
+            )
         return self
 
     @model_validator(mode="after")

@@ -1992,3 +1992,91 @@ def test_memory_maps_need_a_label_memory_and_a_rate_needs_maps():
         SegmentationDataConfig(
             false_color=RECIPE, root="/x", memory_prior="labels", memory_maps_rate=0.5
         )
+
+
+# --- validation with a fed memory (memory_prior "feed") ---------------------------------
+
+
+def test_memory_feed_returns_the_item_and_its_previous_frame_item(tmp_path: Path):
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems, mask_on={"seq_000"})
+    ds = SegmentationDataset(_context_config(root, memory_prior="feed"))
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        image, _, index, prev = ds[1]
+        _, _, _, start_prev = ds[0]
+
+    assert image.shape[-1] == 4, "the image keeps its memory channel"
+    assert (image[..., 3] == 0).all(), "the data gives zeros; the module feeds its own prediction"
+    assert (index, prev) == (1, 0), "seq_001's previous frame is item 0 (seq_000)"
+    assert start_prev == -1, "a sequence start has no previous item"
+
+
+def test_memory_feed_links_the_same_tile_of_the_previous_frame(tmp_path: Path):
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    stems = ["seq_000", "seq_001", "seq_002"]
+    root = _build_context_root(tmp_path, stems=stems)
+    ds = SegmentationDataset(
+        _context_config(
+            root, memory_prior="feed", crop_size=_SYNTH_SIZE // 2, image_size=_SYNTH_SIZE // 2
+        )
+    )
+
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        links = [ds[k][2:] for k in range(len(ds))]
+
+    assert len(links) == 12, "3 scenes x 4 tiles"
+    for k, (index, prev) in enumerate(links):
+        assert index == k
+        assert prev == (k - 4 if k >= 4 else -1), "the same tile of the previous scene, or none"
+
+
+def test_memory_feed_batches_put_every_item_after_its_previous_frame(tmp_path: Path):
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    stems = [f"seq_{i:03d}" for i in range(5)]
+    root = _build_context_root(tmp_path, stems=stems)
+    ds = SegmentationDataset(_context_config(root, memory_prior="feed"))
+
+    batches = ds.feed_batches(2)
+
+    batch_of = {k: b for b, items in enumerate(batches) for k in items}
+    assert sorted(batch_of) == list(range(len(ds))), "every item exactly once"
+    with mock.patch.dict("sys.modules", {"torch": None}):
+        for k in range(len(ds)):
+            prev = ds[k][3]
+            if prev >= 0:
+                assert batch_of[prev] < batch_of[k], (
+                    "a previous frame is predicted in an earlier batch"
+                )
+
+
+def test_memory_feed_batches_need_the_feed_mode(tmp_path: Path):
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+
+    root = _build_context_root(tmp_path, stems=["seq_000", "seq_001"])
+    ds = SegmentationDataset(_context_config(root, memory_prior="empty"))
+
+    with pytest.raises(ValueError, match="feed"):
+        ds.feed_batches(2)
+
+
+def test_build_dataloaders_orders_a_fed_validation_in_time(tmp_path: Path):
+    from deepcontrail.segmentation.dataset import SegmentationDataset
+    from deepcontrail.segmentation.training.run import build_dataloaders
+
+    stems = [f"seq_{i:03d}" for i in range(6)]
+    root = _build_context_root(tmp_path, stems=stems, split="train")
+    (root / "val_ids.txt").write_text("seq_003\nseq_004\nseq_005\n")
+    common = {"split": "train", "val_ids": "val_ids.txt", "batch_size": 2, "num_workers": 0}
+    train_cfg = _context_config(root, memory_prior="labels", **common)
+    val_cfg = _context_config(root, memory_prior="feed", **{**common, "split": "val"})
+
+    _, val_loader = build_dataloaders(train_cfg, val_cfg)
+
+    assert list(val_loader.batch_sampler) == SegmentationDataset(val_cfg).feed_batches(2), (
+        "a fed validation goes through its items in time order"
+    )

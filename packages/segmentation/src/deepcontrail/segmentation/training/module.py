@@ -111,6 +111,8 @@ class SegmentationModule(pl.LightningModule):
 
         self._val_preds: list[torch.Tensor] = []
         self._val_targets: list[torch.Tensor] = []
+        # Fed validation memory: this epoch's predictions, by item index, until their next frame.
+        self._fed: dict[int, torch.Tensor] = {}
         # Running (overlap, predicted, target) pixel counts of the training epoch: global
         # train Dice/IoU at constant memory. A plain attribute, not a buffer, so the
         # state_dict (and loading existing checkpoints) is unchanged.
@@ -257,17 +259,51 @@ class SegmentationModule(pl.LightningModule):
         self.log("train_iou", (overlap + smooth) / (predicted + target - overlap + smooth))
         self._train_counts = None
 
-    def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
-        """Accumulate predictions and targets for global Dice at epoch end."""
-        images, masks = batch
+    def on_validation_epoch_start(self) -> None:
+        """Start every validation with no fed memory."""
+        self._fed = {}
+
+    def validation_step(self, batch: tuple[torch.Tensor, ...], batch_idx: int) -> None:
+        """Accumulate predictions and targets for global Dice at epoch end.
+
+        A batch of four, ``(images, masks, index, prev)``, comes from a fed-memory validation
+        (``memory_prior: feed``): the last input channel is replaced by the model's own prediction
+        for each item's previous frame (zeros where there is none), as at inference, and this
+        batch's predictions are kept for the items of the next frames.
+        """
+        index = None
+        if len(batch) == 4:
+            images, masks, index, prev = batch
+            images = self._with_fed_memory(images, prev)
+        else:
+            images, masks = batch
         logits = self(images)
         loss = self.loss_fn(logits, masks.float())
+        if index is not None:
+            probs = torch.sigmoid(logits.detach()).squeeze(1)
+            for i, k in enumerate(index.tolist()):
+                self._fed[int(k)] = probs[i]
 
         preds_binary = (torch.sigmoid(logits).squeeze(1) > 0.5).long()
         self._val_preds.append(preds_binary.cpu())
         self._val_targets.append(masks.cpu())
 
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+
+    def _with_fed_memory(self, images: torch.Tensor, prev: torch.Tensor) -> torch.Tensor:
+        """Return ``images`` with the last channel set to each previous frame's prediction."""
+        memory = torch.zeros_like(images[:, -1:])
+        for i, p in enumerate(prev.tolist()):
+            fed = self._fed.pop(int(p), None) if p >= 0 else None
+            if fed is None:
+                continue
+            fed = fed.to(images.dtype)[None, None]
+            if fed.shape[-2:] != images.shape[-2:]:
+                fed = F.interpolate(
+                    fed, size=images.shape[-2:], mode="bilinear", align_corners=False
+                )
+            memory[i] = fed[0]
+        return torch.cat([images[:, :-1], memory], dim=1)
 
     def on_validation_epoch_end(self) -> None:
         """Compute global Dice and IoU across the full validation set."""
@@ -282,6 +318,7 @@ class SegmentationModule(pl.LightningModule):
 
         self._val_preds.clear()
         self._val_targets.clear()
+        self._fed = {}
 
     def configure_optimizers(self) -> dict[str, Any]:
         """Build optimizer and learning rate scheduler."""

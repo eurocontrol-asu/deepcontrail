@@ -118,3 +118,24 @@ def test_prepare_training_rejects_memory_data_for_a_model_without_memory(
 
     with pytest.raises(ValueError, match="track_memory"):
         prepare_training(path, output_dir=tmp_path / "runs", accelerator="cpu")
+
+
+def test_load_configs_feed_validation_feeds_validation_only(tmp_path: Path, synthetic_root: Path):
+    from deepcontrail.segmentation.training.config import load_configs
+
+    path = _config(
+        tmp_path, synthetic_root, data={"memory_prior": "labels", "memory_validation": "feed"}
+    )
+
+    train, val, test, *_ = load_configs(path)  # type: ignore[arg-type]
+
+    assert train.memory_prior == "labels"
+    assert val.memory_prior == "feed", "validation feeds the model its own previous prediction"
+    assert test.memory_prior == "empty", "the test loader keeps an empty memory"
+
+
+def test_memory_validation_feed_needs_a_memory():
+    from deepcontrail.segmentation.config import SegmentationDataConfig
+
+    with pytest.raises(ValueError, match="memory_validation"):
+        SegmentationDataConfig(false_color=RECIPE, root="/x", memory_validation="feed")

@@ -235,7 +235,10 @@ def load_configs(
     train_data_cfg = SegmentationDataConfig.from_dict(data_raw)
     # Validation and test never see a label of the previous frame: their track memory is empty, so
     # no label leaks into selection (the final, sequential eval feeds the model's own maps).
-    memory = "empty" if train_data_cfg.memory_prior != "none" else "none"
+    has_memory = train_data_cfg.memory_prior != "none"
+    memory = "empty" if has_memory else "none"
+    # Validation can instead feed the model its own previous prediction (memory_validation: feed).
+    val_memory = train_data_cfg.memory_validation if has_memory else "none"
     no_aug = {
         **train_data_cfg.model_dump(),
         "augmentation": None,
@@ -246,7 +249,7 @@ def load_configs(
     }
     # Evaluation always uses the strict consensus ground truth ("binary").
     val_data_cfg = SegmentationDataConfig.from_dict(
-        {**no_aug, "split": "val", "mask_type": "binary"}
+        {**no_aug, "memory_prior": val_memory, "split": "val", "mask_type": "binary"}
     )
     test_data_cfg = SegmentationDataConfig.from_dict(
         {**no_aug, "split": "test", "fold": None, "mask_type": "binary"}

@@ -86,7 +86,7 @@ class SegmentationDataset:
         # neighbours once here; a context_frames > 0 config or a label memory needs the file.
         self._context_k = config.context_frames
         self._neighbours: dict[str, tuple[str | None, str | None]] = {}
-        if self._context_k > 0 or config.memory_prior == "labels":
+        if self._context_k > 0 or config.memory_prior in ("labels", "feed"):
             neighbours = read_neighbours(self._root)
             if neighbours is None:
                 msg = (
@@ -139,6 +139,11 @@ class SegmentationDataset:
         self._crop_rng = np.random.default_rng(config.seed)
         # Random stream of the training-time memory corruption (reseeded per DataLoader worker).
         self._memory_rng = np.random.default_rng(config.seed + 1)
+        # Fed validation memory: each item's previous-frame item and its position in its sequence.
+        self._feed_prev: list[int] = []
+        self._feed_position: list[int] = []
+        if config.memory_prior == "feed":
+            self._link_items_in_time()
 
     def _reseed_augmentation_in_worker(self) -> None:
         """Give each DataLoader worker its own augmentation stream.
@@ -271,6 +276,58 @@ class SegmentationDataset:
             mask_full = np.load(mask_dir / f"{stem}.npy", mmap_mode="r")
             return np.asarray(mask_full[r0 : r0 + size, c0 : c0 + size], dtype=np.float32)
         return binarize_mask(load_mask(mask_dir / f"{stem}.png"))[r0 : r0 + size, c0 : c0 + size]
+
+    def _link_items_in_time(self) -> None:
+        """Link every item to the same window of its previous frame, and give its time position.
+
+        The items are the tiles of validation/test, or whole scenes; a random training crop has no
+        fixed window to link. An item without a previous frame among the items gets ``-1``; its
+        position is the number of earlier frames of its sequence among the items.
+        """
+        if not self._tiles and self.config.crop_size is not None and self.config.split == "train":
+            msg = 'memory_prior "feed" needs fixed windows: whole scenes, or validation/test tiles'
+            raise ValueError(msg)
+        items = self._tiles or [(i, 0, 0) for i in range(len(self.stems))]
+        index = {(self.stems[s], r0, c0): k for k, (s, r0, c0) in enumerate(items)}
+        stems = set(self.stems)
+        position: dict[str, int] = {}
+        for stem in self.stems:
+            count, current, seen = 0, stem, {stem}
+            while True:
+                prev = self._neighbours.get(current, (None, None))[0]
+                if prev is None or prev not in stems or prev in seen:
+                    break
+                seen.add(prev)
+                current, count = prev, count + 1
+            position[stem] = count
+        for s, r0, c0 in items:
+            stem = self.stems[s]
+            prev = self._neighbours.get(stem, (None, None))[0]
+            self._feed_prev.append(-1 if prev is None else index.get((prev, r0, c0), -1))
+            self._feed_position.append(position[stem])
+
+    def feed_batches(self, batch_size: int) -> list[list[int]]:
+        """Return validation batches in time order for a fed memory (``memory_prior: feed``).
+
+        Items are grouped by their position in their sequence and each group is cut into batches
+        of at most ``batch_size``: every item's previous frame is predicted in an earlier batch.
+
+        Raises
+        ------
+        ValueError
+            If the dataset is not in ``memory_prior: feed`` mode.
+        """
+        if self.config.memory_prior != "feed":
+            raise ValueError('feed_batches needs memory_prior: "feed"')
+        by_position: dict[int, list[int]] = {}
+        for k, p in enumerate(self._feed_position):
+            by_position.setdefault(p, []).append(k)
+        return [
+            group[i : i + batch_size]
+            for p in sorted(by_position)
+            for group in [by_position[p]]
+            for i in range(0, len(group), batch_size)
+        ]
 
     def _memory_map_for(self, stem: str, r0: int, c0: int, size: int) -> np.ndarray | None:
         """Return the previous frame's predicted map from ``memory_maps`` at the window, or None."""
@@ -491,6 +548,8 @@ class SegmentationDataset:
             image_np, mask_np = to_numpy(image, mask)
             if memory is not None:
                 image_np = np.concatenate([image_np, memory[..., None].astype(np.float32)], axis=-1)
+            if self.config.memory_prior == "feed":
+                return image_np, mask_np, index, self._feed_prev[index]  # type: ignore[return-value]
             return image_np, mask_np
         if self.config.mask_type == "probability":
             image_t, mask_t = to_tensors_soft(image, mask, self.config.normalize)
@@ -500,4 +559,6 @@ class SegmentationDataset:
             # A probability map, appended after the normalisation as the last channel.
             memory_t = torch.from_numpy(np.ascontiguousarray(memory, dtype=np.float32))
             image_t = torch.cat([image_t, memory_t[None]], dim=0)
+        if self.config.memory_prior == "feed":
+            return image_t, mask_t, index, self._feed_prev[index]  # type: ignore[return-value]
         return image_t, mask_t

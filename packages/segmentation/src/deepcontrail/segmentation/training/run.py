@@ -136,7 +136,17 @@ def build_dataloaders(
         persistent_workers=persistent,
         drop_last=True,
     )
-    val_loader: DataLoader[Any] = DataLoader(
+    if val_cfg.memory_prior == "feed":
+        # A fed memory: every item's previous frame must be predicted in an earlier batch.
+        val_loader: DataLoader[Any] = DataLoader(
+            val_ds,  # type: ignore[arg-type]
+            batch_sampler=val_ds.feed_batches(val_cfg.batch_size),
+            num_workers=val_cfg.num_workers,
+            pin_memory=True,
+            persistent_workers=persistent,
+        )
+        return train_loader, val_loader
+    val_loader = DataLoader(
         val_ds,  # type: ignore[arg-type]
         batch_size=val_cfg.batch_size,
         shuffle=False,
